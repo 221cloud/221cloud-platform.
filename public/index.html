@@ -349,11 +349,24 @@ async function api(path, options = {}) {
   });
 
   let data = {};
-  try { data = await response.json(); } catch(e) {}
+  try {
+    data = await response.json();
+  } catch(e) {}
 
   if (!response.ok) {
-    throw new Error(data.error || data.message || "Une erreur est survenue.");
+    let errorMessage = data.error || data.message || "Une erreur est survenue.";
+
+    if (data.storage_status) {
+      errorMessage += " (Statut : " + data.storage_status + ")";
+    }
+
+    if (data.diagnostic) {
+      errorMessage += " — Détail : " + data.diagnostic;
+    }
+
+    throw new Error(errorMessage);
   }
+
   return data;
 }
 
