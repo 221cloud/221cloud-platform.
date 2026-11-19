@@ -3,6 +3,9 @@ const ITERATIONS = 100000;
 const SESSION_DAYS = 7;
 const DATABASE_NAME_MAX = 80;
 
+const STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;
+const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
+
 function json(data, status = 200, extraHeaders = {}) {
   const headers = new Headers(extraHeaders);
   headers.set("Content-Type", "application/json; charset=utf-8");
@@ -158,6 +161,165 @@ function validDatabaseName(value) {
   return typeof value === "string" &&
     value.trim().length >= 1 &&
     value.trim().length <= DATABASE_NAME_MAX;
+}
+
+// OUTILS DE SIGNATURE AWS S3 / BACKBLAZE B2
+
+function toHex(buffer) {
+  return Array.from(new Uint8Array(buffer), b =>
+    b.toString(16).padStart(2, "0")
+  ).join("");
+}
+
+async function sha256(value) {
+  return toHex(await crypto.subtle.digest(
+    "SHA-256",
+    typeof value === "string"
+      ? new TextEncoder().encode(value)
+      : value
+  ));
+}
+
+async function hmac(key, value) {
+  const imported = await crypto.subtle.importKey(
+    "raw",
+    key,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+
+  return new Uint8Array(await crypto.subtle.sign(
+    "HMAC",
+    imported,
+    new TextEncoder().encode(value)
+  ));
+}
+
+function awsEncode(value) {
+  return encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    c => "%" + c.charCodeAt(0).toString(16).toUpperCase()
+  );
+}
+
+function encodeObjectPath(bucket, key) {
+  return "/" + [bucket, ...key.split("/")].map(awsEncode).join("/");
+}
+
+async function getSigningKey(secret, date, region) {
+  const initialKey = new TextEncoder().encode("AWS4" + secret);
+
+  const dateKey = await hmac(initialKey, date);
+  const regionKey = await hmac(dateKey, region);
+  const serviceKey = await hmac(regionKey, "s3");
+
+  return hmac(serviceKey, "aws4_request");
+}
+
+async function b2Request(env, method, objectKey, body = null, contentType = null) {
+  if (
+    !env.B2_KEY_ID ||
+    !env.B2_APPLICATION_KEY ||
+    !env.B2_ENDPOINT ||
+    !env.B2_BUCKET_NAME
+  ) {
+    throw new Error("STORAGE_CONFIGURATION_MISSING");
+  }
+
+  const endpoint = new URL(env.B2_ENDPOINT);
+  const regionMatch = endpoint.hostname.match(/^s3[.-]([a-z0-9-]+)\.backblazeb2\.com$/);
+
+  if (!regionMatch) {
+    throw new Error("STORAGE_ENDPOINT_INVALID");
+  }
+
+  const region = regionMatch[1];
+  const now = new Date();
+
+  const amzDate = now.toISOString()
+    .replace(/[:-]|\.\d{3}/g, "");
+
+  const dateStamp = amzDate.slice(0, 8);
+  const payloadHash = await sha256(body || new Uint8Array());
+
+  const canonicalUri = encodeObjectPath(
+    env.B2_BUCKET_NAME,
+    objectKey
+  );
+
+  const canonicalHeaders =
+    `host:${endpoint.host}\n` +
+    `x-amz-content-sha256:${payloadHash}\n` +
+    `x-amz-date:${amzDate}\n`;
+
+  const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
+
+  const canonicalRequest = [
+    method,
+    canonicalUri,
+    "",
+    canonicalHeaders,
+    signedHeaders,
+    payloadHash
+  ].join("\n");
+
+  const scope = `${dateStamp}/${region}/s3/aws4_request`;
+
+  const stringToSign = [
+    "AWS4-HMAC-SHA256",
+    amzDate,
+    scope,
+    await sha256(canonicalRequest)
+  ].join("\n");
+
+  const signingKey = await getSigningKey(
+    env.B2_APPLICATION_KEY,
+    dateStamp,
+    region
+  );
+
+  const signature = toHex(
+    await hmac(signingKey, stringToSign)
+  );
+
+  const authorization =
+    `AWS4-HMAC-SHA256 Credential=${env.B2_KEY_ID}/${scope}, ` +
+    `SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+  const targetUrl = new URL(endpoint.origin);
+  targetUrl.pathname = canonicalUri;
+
+  const headers = new Headers({
+    "x-amz-content-sha256": payloadHash,
+    "x-amz-date": amzDate,
+    "Authorization": authorization
+  });
+
+  if (contentType) {
+    headers.set("Content-Type", contentType);
+  }
+
+  return fetch(targetUrl.toString(), {
+    method,
+    headers,
+    body: method === "PUT" ? body : undefined
+  });
+}
+
+function storageConfigurationAvailable(env) {
+  return Boolean(
+    env.B2_KEY_ID &&
+    env.B2_APPLICATION_KEY &&
+    env.B2_ENDPOINT &&
+    env.B2_BUCKET_NAME
+  );
+}
+
+function safeFileName(value) {
+  return String(value || "fichier")
+    .replace(/[\r\n"]/g, "_")
+    .slice(0, 255);
 }
 
 export default {
@@ -627,6 +789,311 @@ export default {
         console.error("ERREUR SUPPRESSION BASE:", error);
         return json({
           error: "Impossible de supprimer la base de données."
+        }, 500);
+      }
+    }
+
+    // STOCKAGE : LISTE DES FICHIERS ET QUOTA
+    if (path === "/api/storage" && request.method === "GET") {
+      try {
+        const user = await currentUser(request, env);
+
+        if (!user) {
+          return json({ error: "Vous devez être connecté." }, 401);
+        }
+
+        const result = await env.DB.prepare(
+          `SELECT id, file_name, file_size, mime_type, created_at
+           FROM cloud_files
+           WHERE user_id = ?
+           ORDER BY created_at DESC`
+        ).bind(user.id).all();
+
+        const files = result.results || [];
+        const used = files.reduce(
+          (total, file) => total + Number(file.file_size || 0),
+          0
+        );
+
+        return json({
+          files,
+          used,
+          limit: STORAGE_LIMIT_BYTES,
+          maxFileSize: MAX_FILE_SIZE_BYTES
+        });
+
+      } catch (error) {
+        console.error("ERREUR LISTE STOCKAGE:", error);
+        return json({
+          error: "Impossible de charger le stockage."
+        }, 500);
+      }
+    }
+
+    // STOCKAGE : ENVOI D'UN FICHIER
+    if (path === "/api/storage/upload" && request.method === "POST") {
+      try {
+        const user = await currentUser(request, env);
+
+        if (!user) {
+          return json({ error: "Vous devez être connecté." }, 401);
+        }
+
+        if (!storageConfigurationAvailable(env)) {
+          return json({
+            error: "Le stockage cloud n'est pas encore configuré."
+          }, 503);
+        }
+
+        const contentType = request.headers.get("Content-Type") || "";
+
+        if (!contentType.toLowerCase().includes("multipart/form-data")) {
+          return json({
+            error: "Format d'envoi invalide."
+          }, 400);
+        }
+
+        const form = await request.formData();
+        const file = form.get("file");
+
+        if (!file || typeof file.arrayBuffer !== "function") {
+          return json({
+            error: "Aucun fichier reçu."
+          }, 400);
+        }
+
+        if (file.size <= 0) {
+          return json({
+            error: "Le fichier est vide."
+          }, 400);
+        }
+
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+          return json({
+            error: "La taille maximale autorisée est de 20 Mo."
+          }, 413);
+        }
+
+        const usage = await env.DB.prepare(
+          "SELECT COALESCE(SUM(file_size), 0) AS used FROM cloud_files WHERE user_id = ?"
+        ).bind(user.id).first();
+
+        const used = Number(usage?.used || 0);
+
+        if (used + file.size > STORAGE_LIMIT_BYTES) {
+          return json({
+            error: "Votre quota de stockage de 1 Go est atteint."
+          }, 413);
+        }
+
+        const buffer = new Uint8Array(await file.arrayBuffer());
+        const id = crypto.randomUUID();
+        const objectKey = `${user.id}/${id}`;
+
+        const mimeType = file.type || "application/octet-stream";
+        const fileName = safeFileName(file.name);
+
+        const uploadResponse = await b2Request(
+          env,
+          "PUT",
+          objectKey,
+          buffer,
+          mimeType
+        );
+
+        if (!uploadResponse.ok) {
+          console.error(
+            "ERREUR ENVOI BACKBLAZE:",
+            uploadResponse.status
+          );
+
+          return json({
+            error: "Le transfert vers le stockage cloud a échoué."
+          }, 502);
+        }
+
+        try {
+          await env.DB.prepare(
+            `INSERT INTO cloud_files
+             (id, user_id, file_name, file_size, mime_type, storage_key)
+             VALUES (?, ?, ?, ?, ?, ?)`
+          ).bind(
+            id,
+            user.id,
+            fileName,
+            file.size,
+            mimeType,
+            objectKey
+          ).run();
+        } catch (databaseError) {
+          console.error("ERREUR ENREGISTREMENT FICHIER:", databaseError);
+
+          try {
+            await b2Request(env, "DELETE", objectKey);
+          } catch (cleanupError) {
+            console.error("ERREUR NETTOYAGE FICHIER:", cleanupError);
+          }
+
+          return json({
+            error: "Le fichier a été transféré mais son enregistrement a échoué."
+          }, 500);
+        }
+
+        return json({
+          message: "Fichier envoyé avec succès.",
+          file: {
+            id,
+            file_name: fileName,
+            file_size: file.size,
+            mime_type: mimeType
+          }
+        }, 201);
+
+      } catch (error) {
+        console.error("ERREUR ENVOI STOCKAGE:", error);
+        return json({
+          error: "Impossible d'envoyer le fichier."
+        }, 500);
+      }
+    }
+
+    // STOCKAGE : TÉLÉCHARGEMENT D'UN FICHIER
+    const downloadMatch = path.match(
+      /^\/api\/storage\/([^/]+)\/download$/
+    );
+
+    if (downloadMatch && request.method === "GET") {
+      try {
+        const user = await currentUser(request, env);
+
+        if (!user) {
+          return json({ error: "Vous devez être connecté." }, 401);
+        }
+
+        if (!storageConfigurationAvailable(env)) {
+          return json({
+            error: "Le stockage cloud n'est pas configuré."
+          }, 503);
+        }
+
+        const fileId = decodeURIComponent(downloadMatch[1]);
+
+        const file = await env.DB.prepare(
+          `SELECT id, file_name, mime_type, storage_key
+           FROM cloud_files
+           WHERE id = ? AND user_id = ?`
+        ).bind(fileId, user.id).first();
+
+        if (!file) {
+          return json({ error: "Fichier introuvable." }, 404);
+        }
+
+        const downloadResponse = await b2Request(
+          env,
+          "GET",
+          file.storage_key
+        );
+
+        if (!downloadResponse.ok) {
+          console.error(
+            "ERREUR TELECHARGEMENT BACKBLAZE:",
+            downloadResponse.status
+          );
+
+          return json({
+            error: "Impossible de récupérer le fichier."
+          }, downloadResponse.status === 404 ? 404 : 502);
+        }
+
+        const headers = new Headers();
+
+        headers.set(
+          "Content-Type",
+          file.mime_type || "application/octet-stream"
+        );
+
+        headers.set(
+          "Content-Disposition",
+          `attachment; filename*=UTF-8''${encodeURIComponent(file.file_name)}`
+        );
+
+        headers.set("Cache-Control", "private, no-store");
+
+        return new Response(downloadResponse.body, {
+          status: 200,
+          headers
+        });
+
+      } catch (error) {
+        console.error("ERREUR TELECHARGEMENT:", error);
+        return json({
+          error: "Impossible de télécharger le fichier."
+        }, 500);
+      }
+    }
+
+    // STOCKAGE : SUPPRESSION D'UN FICHIER
+    const storageMatch = path.match(/^\/api\/storage\/([^/]+)$/);
+
+    if (storageMatch) {
+      if (request.method !== "DELETE") {
+        return json({ error: "Méthode non autorisée." }, 405);
+      }
+
+      try {
+        const user = await currentUser(request, env);
+
+        if (!user) {
+          return json({ error: "Vous devez être connecté." }, 401);
+        }
+
+        if (!storageConfigurationAvailable(env)) {
+          return json({
+            error: "Le stockage cloud n'est pas configuré."
+          }, 503);
+        }
+
+        const fileId = decodeURIComponent(storageMatch[1]);
+
+        const file = await env.DB.prepare(
+          `SELECT id, storage_key
+           FROM cloud_files
+           WHERE id = ? AND user_id = ?`
+        ).bind(fileId, user.id).first();
+
+        if (!file) {
+          return json({ error: "Fichier introuvable." }, 404);
+        }
+
+        const deleteResponse = await b2Request(
+          env,
+          "DELETE",
+          file.storage_key
+        );
+
+        if (!deleteResponse.ok && deleteResponse.status !== 404) {
+          console.error(
+            "ERREUR SUPPRESSION BACKBLAZE:",
+            deleteResponse.status
+          );
+
+          return json({
+            error: "Impossible de supprimer le fichier du stockage."
+          }, 502);
+        }
+
+        await env.DB.prepare(
+          "DELETE FROM cloud_files WHERE id = ? AND user_id = ?"
+        ).bind(fileId, user.id).run();
+
+        return json({
+          message: "Fichier supprimé avec succès."
+        });
+
+      } catch (error) {
+        console.error("ERREUR SUPPRESSION STOCKAGE:", error);
+        return json({
+          error: "Impossible de supprimer le fichier."
         }, 500);
       }
     }
