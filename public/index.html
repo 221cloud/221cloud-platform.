@@ -2,161 +2,644 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#080d19">
-  <title>221Cloud — Votre espace cloud</title>
-  <style>
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      font-family: Arial, sans-serif;
-      background: #080d19;
-      color: #fff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-    }
-    .container {
-      width: 100%;
-      max-width: 430px;
-      background: #111b2e;
-      padding: 32px 25px;
-      border: 1px solid #263751;
-      border-radius: 18px;
-    }
-    .logo { font-size: 29px; font-weight: bold; color: #55aaff; }
-    .subtitle { color: #aab8cc; line-height: 1.5; margin-bottom: 28px; }
-    h1 { font-size: 24px; margin-bottom: 8px; }
-    label { display: block; margin: 16px 0 8px; font-size: 14px; }
-    input {
-      width: 100%;
-      padding: 14px;
-      border-radius: 9px;
-      border: 1px solid #34465f;
-      background: #091322;
-      color: white;
-      font-size: 16px;
-    }
-    button {
-      width: 100%;
-      padding: 15px;
-      margin-top: 22px;
-      border: 0;
-      border-radius: 9px;
-      background: #2589ed;
-      color: white;
-      font-size: 16px;
-      font-weight: bold;
-    }
-    button:disabled { opacity: .6; }
-    .switch { text-align: center; color: #aab8cc; margin-top: 22px; font-size: 14px; }
-    .switch a { color: #55aaff; cursor: pointer; }
-    #message { margin-top: 16px; font-size: 14px; line-height: 1.5; }
-    .hidden { display: none; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#080d19">
+<title>221Cloud — Votre espace numérique</title>
+
+<style>
+:root {
+  --bg:#080d19;
+  --panel:#111a2b;
+  --panel2:#172238;
+  --border:#26344c;
+  --text:#f4f7ff;
+  --muted:#8d9bb2;
+  --blue:#3978ff;
+  --cyan:#36c5e8;
+  --green:#32c98b;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family:Arial,sans-serif;
+}
+button,input{font:inherit}
+button{cursor:pointer}
+.hidden{display:none!important}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.brand{
+  font-size:25px;
+  font-weight:800;
+  letter-spacing:-1px;
+}
+.brand span{color:var(--cyan)}
+.auth{
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:25px;
+  background:
+    radial-gradient(circle at 15% 15%,#17315b 0,transparent 35%),
+    radial-gradient(circle at 85% 85%,#102c40 0,transparent 35%),
+    var(--bg);
+}
+.auth-card{
+  width:100%;
+  max-width:430px;
+  padding:32px;
+  background:rgba(17,26,43,.96);
+  border:1px solid var(--border);
+  border-radius:20px;
+}
+.auth-card .brand{margin-bottom:12px}
+.auth-card h1{font-size:25px;margin:25px 0 8px}
+.auth-card p{line-height:1.6}
+.field{margin:17px 0}
+.field label{
+  display:block;
+  margin-bottom:8px;
+  font-size:13px;
+  color:#c3cde0;
+}
+.field input{
+  width:100%;
+  padding:14px;
+  color:white;
+  background:#0b1322;
+  border:1px solid var(--border);
+  border-radius:10px;
+  outline:none;
+}
+.field input:focus{border-color:var(--blue)}
+.primary{
+  width:100%;
+  padding:14px;
+  color:white;
+  font-weight:700;
+  background:linear-gradient(100deg,#2865e9,#279fc9);
+  border:0;
+  border-radius:10px;
+}
+.primary:disabled{opacity:.6;cursor:wait}
+.switch{
+  margin-top:20px;
+  text-align:center;
+  font-size:14px;
+}
+.switch button{
+  background:none;
+  border:0;
+  color:#60baff;
+}
+.message{
+  margin-top:14px;
+  padding:12px;
+  border-radius:9px;
+  font-size:13px;
+  line-height:1.5;
+  display:none;
+}
+.message.error{display:block;background:#401c29;color:#ffb7c4}
+.message.success{display:block;background:#123b30;color:#9bf0ca}
+
+/* Dashboard */
+#dashboard{min-height:100vh}
+.topbar{
+  height:68px;
+  padding:0 25px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  border-bottom:1px solid var(--border);
+  background:#0d1524;
+}
+.user-chip{
+  padding:9px 13px;
+  background:var(--panel2);
+  border-radius:20px;
+  font-size:13px;
+}
+.layout{display:flex;min-height:calc(100vh - 68px)}
+.sidebar{
+  width:235px;
+  flex-shrink:0;
+  padding:24px 15px;
+  border-right:1px solid var(--border);
+  background:#0c1422;
+}
+.nav-label{
+  margin:12px 10px;
+  color:var(--muted);
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:1px;
+}
+.nav-btn{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  width:100%;
+  padding:13px 12px;
+  margin:5px 0;
+  color:#bdc9dc;
+  background:transparent;
+  border:0;
+  border-radius:9px;
+  text-align:left;
+}
+.nav-btn:hover,.nav-btn.active{
+  color:white;
+  background:#1b2c49;
+}
+.nav-btn.active{border-left:3px solid var(--blue)}
+.logout{
+  width:100%;
+  margin-top:30px;
+  padding:12px;
+  color:#ff9ba9;
+  background:#351b29;
+  border:0;
+  border-radius:9px;
+}
+main{flex:1;min-width:0;padding:30px}
+.page-title{font-size:25px;margin:0 0 8px}
+.welcome{margin-bottom:28px}
+.stats{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:16px;
+  margin:25px 0;
+}
+.stat,.content-card{
+  padding:20px;
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:14px;
+}
+.stat-label{font-size:13px;color:var(--muted)}
+.stat-value{font-size:25px;font-weight:700;margin-top:13px}
+.section-heading{margin:30px 0 15px;font-size:17px}
+.quick-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:15px;
+}
+.quick{
+  padding:20px;
+  text-align:left;
+  color:white;
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:13px;
+}
+.quick:hover{border-color:var(--blue)}
+.quick-icon{font-size:25px;margin-bottom:12px}
+.quick strong{display:block;margin-bottom:7px}
+.status{
+  display:inline-block;
+  padding:6px 10px;
+  color:#8ce8c0;
+  background:#123b30;
+  border-radius:20px;
+  font-size:12px;
+}
+.profile-line{
+  padding:14px 0;
+  border-bottom:1px solid var(--border);
+  font-size:14px;
+}
+.notice{
+  margin-top:18px;
+  padding:15px;
+  color:#b8d9ff;
+  background:#132a49;
+  border-radius:10px;
+  font-size:13px;
+  line-height:1.6;
+}
+.mobile-menu{display:none}
+
+@media(max-width:750px){
+  .topbar{padding:0 16px}
+  .layout{display:block}
+  .sidebar{
+    width:100%;
+    padding:10px;
+    display:flex;
+    gap:5px;
+    overflow-x:auto;
+    border-right:0;
+    border-bottom:1px solid var(--border);
+  }
+  .nav-label,.logout{display:none}
+  .nav-btn{
+    width:auto;
+    flex-shrink:0;
+    font-size:12px;
+    padding:11px;
+  }
+  main{padding:22px 16px}
+  .stats{grid-template-columns:1fr}
+  .quick-grid{grid-template-columns:1fr}
+  .auth-card{padding:25px 20px}
+}
+</style>
 </head>
+
 <body>
-  <main class="container">
-    <div class="logo">221Cloud</div>
-    <p class="subtitle">Votre espace numérique. Vos projets, vos fichiers, votre cloud.</p>
 
-    <section id="register">
+<!-- AUTHENTIFICATION -->
+<section id="auth" class="auth">
+  <div class="auth-card">
+    <div class="brand">221<span>Cloud</span></div>
+    <p class="muted small">Votre espace numérique. Vos projets, vos fichiers, votre cloud.</p>
+
+    <div id="registerBox">
       <h1>Créer un compte</h1>
-      <p class="subtitle">Rejoignez votre espace 221Cloud.</p>
+      <p class="muted small">Rejoignez votre espace numérique.</p>
+
       <form id="registerForm">
-        <label for="full_name">Nom complet</label>
-        <input id="full_name" name="full_name" type="text" autocomplete="name" required>
-
-        <label for="register_email">Adresse e-mail</label>
-        <input id="register_email" name="email" type="email" autocomplete="email" required>
-
-        <label for="register_password">Mot de passe (12 caractères minimum)</label>
-        <input id="register_password" name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
-
-        <button type="submit">Créer mon compte</button>
+        <div class="field">
+          <label for="name">Nom complet</label>
+          <input id="name" name="name" required autocomplete="name" placeholder="Votre nom complet">
+        </div>
+        <div class="field">
+          <label for="regEmail">Adresse e-mail</label>
+          <input id="regEmail" name="email" type="email" required autocomplete="email" placeholder="nom@exemple.com">
+        </div>
+        <div class="field">
+          <label for="regPassword">Mot de passe</label>
+          <input id="regPassword" name="password" type="password" minlength="12" required autocomplete="new-password" placeholder="12 caractères minimum">
+        </div>
+        <button class="primary" type="submit">Créer mon compte</button>
       </form>
-      <p class="switch">Déjà inscrit ? <a id="showLogin">Se connecter</a></p>
-    </section>
+      <div class="switch">Déjà inscrit ?
+        <button type="button" id="showLogin">Se connecter</button>
+      </div>
+    </div>
 
-    <section id="login" class="hidden">
-      <h1>Connexion</h1>
-      <p class="subtitle">Retrouvez votre espace personnel.</p>
+    <div id="loginBox" class="hidden">
+      <h1>Bienvenue !</h1>
+      <p class="muted small">Connectez-vous à votre espace 221Cloud.</p>
+
       <form id="loginForm">
-        <label for="login_email">Adresse e-mail</label>
-        <input id="login_email" name="email" type="email" autocomplete="email" required>
-
-        <label for="login_password">Mot de passe</label>
-        <input id="login_password" name="password" type="password" autocomplete="current-password" required>
-
-        <button type="submit">Se connecter</button>
+        <div class="field">
+          <label for="loginEmail">Adresse e-mail</label>
+          <input id="loginEmail" type="email" required autocomplete="email" placeholder="nom@exemple.com">
+        </div>
+        <div class="field">
+          <label for="loginPassword">Mot de passe</label>
+          <input id="loginPassword" type="password" required autocomplete="current-password" placeholder="Votre mot de passe">
+        </div>
+        <button class="primary" type="submit">Se connecter</button>
       </form>
-      <p class="switch">Pas encore de compte ? <a id="showRegister">Créer un compte</a></p>
-    </section>
+      <div class="switch">Pas encore de compte ?
+        <button type="button" id="showRegister">Créer un compte</button>
+      </div>
+    </div>
 
-    <p id="message" role="status"></p>
-  </main>
+    <div id="authMessage" class="message"></div>
+  </div>
+</section>
 
-  <script>
-    const registerSection = document.getElementById("register");
-    const loginSection = document.getElementById("login");
-    const message = document.getElementById("message");
+<!-- TABLEAU DE BORD -->
+<section id="dashboard" class="hidden">
+  <header class="topbar">
+    <div class="brand">221<span>Cloud</span></div>
+    <div class="user-chip" id="topUser">Mon compte</div>
+  </header>
 
-    document.getElementById("showLogin").onclick = () => {
-      registerSection.classList.add("hidden");
-      loginSection.classList.remove("hidden");
-      message.textContent = "";
-    };
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="nav-label">Espace personnel</div>
+      <button class="nav-btn active" data-page="overview">🏠 Vue d'ensemble</button>
+      <button class="nav-btn" data-page="projects">📁 Mes projets</button>
+      <button class="nav-btn" data-page="storage">☁️ Stockage cloud</button>
+      <button class="nav-btn" data-page="databases">🗄️ Bases de données</button>
+      <button class="nav-btn" data-page="hosting">🌐 Hébergement</button>
+      <button class="nav-btn" data-page="subscription">💳 Abonnement</button>
+      <button class="nav-btn" data-page="profile">👤 Mon profil</button>
+      <button class="logout" id="logoutBtn">↪ Déconnexion</button>
+    </aside>
 
-    document.getElementById("showRegister").onclick = () => {
-      loginSection.classList.add("hidden");
-      registerSection.classList.remove("hidden");
-      message.textContent = "";
-    };
+    <main>
+      <div id="pageContent"></div>
+    </main>
+  </div>
+</section>
 
-    async function sendForm(path, data, button) {
-      button.disabled = true;
-      message.textContent = "Chargement...";
-      try {
-        const response = await fetch(path, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify(data)
-        });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || "Une erreur est survenue.");
-        message.textContent = result.message || "Opération réussie.";
-        if (path === "/api/register" || path === "/api/login") {
-          message.textContent += " Bienvenue sur 221Cloud !";
-        }
-      } catch (error) {
-        message.textContent = error.message || "Impossible de contacter le serveur.";
-      } finally {
-        button.disabled = false;
-      }
+<script>
+const auth = document.getElementById("auth");
+const dashboard = document.getElementById("dashboard");
+const authMessage = document.getElementById("authMessage");
+const registerBox = document.getElementById("registerBox");
+const loginBox = document.getElementById("loginBox");
+const pageContent = document.getElementById("pageContent");
+
+let currentUser = null;
+
+function showMessage(message, type="error") {
+  authMessage.textContent = message;
+  authMessage.className = "message " + type;
+}
+
+function clearMessage() {
+  authMessage.textContent = "";
+  authMessage.className = "message";
+}
+
+async function api(url, options={}) {
+  const response = await fetch(url, {
+    credentials:"same-origin",
+    ...options,
+    headers:{
+      "Content-Type":"application/json",
+      ...(options.headers || {})
     }
+  });
 
-    document.getElementById("registerForm").onsubmit = event => {
-      event.preventDefault();
-      const form = new FormData(event.target);
-      sendForm("/api/register", {
-        full_name: form.get("full_name"),
-        email: form.get("email"),
-        password: form.get("password")
-      }, event.target.querySelector("button"));
-    };
+  const data = await response.json().catch(() => ({}));
 
-    document.getElementById("loginForm").onsubmit = event => {
-      event.preventDefault();
-      const form = new FormData(event.target);
-      sendForm("/api/login", {
-        email: form.get("email"),
-        password: form.get("password")
-      }, event.target.querySelector("button"));
-    };
-  </script>
+  if (!response.ok) {
+    throw new Error(data.error || data.message || "Une erreur est survenue.");
+  }
+  return data;
+}
+
+function getUser(data) {
+  return data.user || data.account || data;
+}
+
+function openDashboard(user) {
+  currentUser = user;
+  auth.classList.add("hidden");
+  dashboard.classList.remove("hidden");
+
+  const name = user.full_name || user.name || user.email || "Utilisateur";
+  document.getElementById("topUser").textContent = name;
+
+  showPage("overview");
+}
+
+function showAuth() {
+  dashboard.classList.add("hidden");
+  auth.classList.remove("hidden");
+}
+
+document.getElementById("showLogin").onclick = () => {
+  clearMessage();
+  registerBox.classList.add("hidden");
+  loginBox.classList.remove("hidden");
+};
+
+document.getElementById("showRegister").onclick = () => {
+  clearMessage();
+  loginBox.classList.add("hidden");
+  registerBox.classList.remove("hidden");
+};
+
+document.getElementById("registerForm").onsubmit = async (event) => {
+  event.preventDefault();
+  clearMessage();
+
+  const button = event.target.querySelector("button[type=submit]");
+  button.disabled = true;
+  button.textContent = "Création en cours...";
+
+  try {
+    const result = await api("/api/register", {
+      method:"POST",
+      body:JSON.stringify({
+        name:document.getElementById("name").value.trim(),
+        email:document.getElementById("regEmail").value.trim(),
+        password:document.getElementById("regPassword").value
+      })
+    });
+
+    let user = result.user;
+    if (!user) {
+      const session = await api("/api/me");
+      user = getUser(session);
+    }
+    openDashboard(user);
+  } catch(error) {
+    showMessage(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Créer mon compte";
+  }
+};
+
+document.getElementById("loginForm").onsubmit = async (event) => {
+  event.preventDefault();
+  clearMessage();
+
+  const button = event.target.querySelector("button[type=submit]");
+  button.disabled = true;
+  button.textContent = "Connexion...";
+
+  try {
+    const result = await api("/api/login", {
+      method:"POST",
+      body:JSON.stringify({
+        email:document.getElementById("loginEmail").value.trim(),
+        password:document.getElementById("loginPassword").value
+      })
+    });
+
+    let user = result.user;
+    if (!user) {
+      const session = await api("/api/me");
+      user = getUser(session);
+    }
+    openDashboard(user);
+  } catch(error) {
+    showMessage(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Se connecter";
+  }
+};
+
+document.getElementById("logoutBtn").onclick = async () => {
+  try {
+    await api("/api/logout", {method:"POST"});
+  } catch(error) {
+    console.error("Déconnexion :", error);
+  }
+  currentUser = null;
+  showAuth();
+  loginBox.classList.remove("hidden");
+  registerBox.classList.add("hidden");
+  clearMessage();
+};
+
+const pages = {
+  overview: {
+    title:"Vue d'ensemble",
+    description:"Bienvenue dans votre espace numérique."
+  },
+  projects: {
+    title:"Mes projets",
+    description:"Retrouvez et gérez vos projets numériques.",
+    icon:"📁"
+  },
+  storage: {
+    title:"Stockage cloud",
+    description:"Votre espace pour conserver et organiser vos fichiers.",
+    icon:"☁️"
+  },
+  databases: {
+    title:"Bases de données",
+    description:"Créez et gérez les bases de données de vos projets.",
+    icon:"🗄️"
+  },
+  hosting: {
+    title:"Hébergement",
+    description:"Publiez et gérez vos sites et applications.",
+    icon:"🌐"
+  },
+  subscription: {
+    title:"Abonnement",
+    description:"Consultez votre offre et vos informations de facturation.",
+    icon:"💳"
+  },
+  profile: {
+    title:"Mon profil",
+    description:"Vos informations personnelles."
+  }
+};
+
+function showPage(page) {
+  document.querySelectorAll(".nav-btn").forEach(button => {
+    button.classList.toggle("active", button.dataset.page === page);
+  });
+
+  const info = pages[page];
+  if (!info) return;
+
+  if (page === "overview") {
+    pageContent.innerHTML = `
+      <div class="welcome">
+        <h1 class="page-title">Bienvenue sur 221Cloud 👋</h1>
+        <p class="muted">Votre espace numérique est prêt.</p>
+        <span class="status">● Compte connecté</span>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-label">Mes projets</div>
+          <div class="stat-value">0</div>
+          <p class="muted small">Projets créés</p>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Stockage utilisé</div>
+          <div class="stat-value">0 Mo</div>
+          <p class="muted small">Fichiers enregistrés</p>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Mon abonnement</div>
+          <div class="stat-value">Gratuit</div>
+          <p class="muted small">Offre de démarrage</p>
+        </div>
+      </div>
+
+      <h2 class="section-heading">Accès rapides</h2>
+      <div class="quick-grid">
+        <button class="quick" data-go="projects">
+          <div class="quick-icon">📁</div>
+          <strong>Mes projets</strong>
+          <span class="muted small">Gérer mes projets</span>
+        </button>
+        <button class="quick" data-go="storage">
+          <div class="quick-icon">☁️</div>
+          <strong>Stockage cloud</strong>
+          <span class="muted small">Organiser mes fichiers</span>
+        </button>
+        <button class="quick" data-go="databases">
+          <div class="quick-icon">🗄️</div>
+          <strong>Bases de données</strong>
+          <span class="muted small">Gérer mes données</span>
+        </button>
+        <button class="quick" data-go="hosting">
+          <div class="quick-icon">🌐</div>
+          <strong>Hébergement</strong>
+          <span class="muted small">Publier mes sites</span>
+        </button>
+      </div>
+      <div class="notice">
+        Bienvenue dans la première version de 221Cloud.
+        Les différents services seront activés progressivement.
+      </div>
+    `;
+  } else if (page === "profile") {
+    const name = currentUser?.full_name || currentUser?.name || "Non renseigné";
+    const email = currentUser?.email || "Non renseigné";
+    const role = currentUser?.role || "client";
+
+    pageContent.innerHTML = `
+      <h1 class="page-title">Mon profil</h1>
+      <p class="muted">${info.description}</p>
+      <div class="content-card" style="margin-top:22px">
+        <div class="profile-line"><strong>Nom :</strong> ${escapeHTML(name)}</div>
+        <div class="profile-line"><strong>E-mail :</strong> ${escapeHTML(email)}</div>
+        <div class="profile-line"><strong>Rôle :</strong> ${escapeHTML(role)}</div>
+        <div class="profile-line"><strong>Plateforme :</strong> 221Cloud</div>
+      </div>
+    `;
+  } else {
+    pageContent.innerHTML = `
+      <h1 class="page-title">${info.icon} ${info.title}</h1>
+      <p class="muted">${info.description}</p>
+      <div class="content-card" style="margin-top:25px">
+        <h3>Service en préparation</h3>
+        <p class="muted">Cette rubrique fait partie de 221Cloud.
+        Nous allons développer ses fonctionnalités progressivement.</p>
+        <span class="status">Bientôt disponible</span>
+      </div>
+    `;
+  }
+
+  document.querySelectorAll("[data-go]").forEach(button => {
+    button.onclick = () => showPage(button.dataset.go);
+  });
+}
+
+function escapeHTML(value) {
+  return String(value).replace(/[&<>"']/g, char => ({
+    "&":"&amp;",
+    "<":"&lt;",
+    ">":"&gt;",
+    '"':"&quot;",
+    "'":"&#39;"
+  })[char]);
+}
+
+document.querySelectorAll(".nav-btn").forEach(button => {
+  button.onclick = () => showPage(button.dataset.page);
+});
+
+async function checkSession() {
+  try {
+    const result = await api("/api/me");
+    const user = getUser(result);
+
+    if (user && (user.id || user.email || user.full_name)) {
+      openDashboard(user);
+    } else {
+      showAuth();
+    }
+  } catch(error) {
+    showAuth();
+  }
+}
+
+checkSession();
+</script>
 </body>
 </html>
