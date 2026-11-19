@@ -120,7 +120,7 @@ main{flex:1;min-width:0;padding:30px}
   border-radius:10px;font-size:13px;line-height:1.6
 }
 
-/* Gestion des projets */
+/* Projets et bases de données */
 .project-toolbar{
   display:flex;justify-content:space-between;align-items:center;
   gap:12px;margin:25px 0 18px;flex-wrap:wrap
@@ -169,6 +169,11 @@ main{flex:1;min-width:0;padding:30px}
 }
 .project-feedback.error{color:#ffb7c4;background:#401c29}
 .project-feedback.success{color:#9bf0ca;background:#123b30}
+.database-note{
+  margin:18px 0;padding:14px;color:#b8d9ff;
+  background:#132a49;border-radius:10px;
+  font-size:13px;line-height:1.6
+}
 .mobile-menu{display:none}
 
 @media(max-width:750px){
@@ -274,12 +279,14 @@ const pageContent = document.getElementById("pageContent");
 
 let currentUser = null;
 let projectsCache = [];
+let databasesCache = [];
 let editingProjectId = null;
 
 function showMessage(message,type="error"){
   authMessage.textContent=message;
   authMessage.className="message "+type;
 }
+
 function clearMessage(){
   authMessage.textContent="";
   authMessage.className="message";
@@ -322,6 +329,7 @@ document.getElementById("showLogin").onclick=()=>{
   registerBox.classList.add("hidden");
   loginBox.classList.remove("hidden");
 };
+
 document.getElementById("showRegister").onclick=()=>{
   clearMessage();
   loginBox.classList.add("hidden");
@@ -390,6 +398,7 @@ document.getElementById("logoutBtn").onclick=async()=>{
   catch(error){console.error("Déconnexion :",error);}
   currentUser=null;
   projectsCache=[];
+  databasesCache=[];
   showAuth();
   loginBox.classList.remove("hidden");
   registerBox.classList.add("hidden");
@@ -499,6 +508,7 @@ function showPage(page){
       </div>
     `;
     loadProjectCount();
+
   }else if(page==="projects"){
     editingProjectId=null;
     pageContent.innerHTML=`
@@ -540,6 +550,7 @@ function showPage(page){
         <div class="content-card">Chargement...</div>
       </div>
     `;
+
     document.getElementById("newProjectBtn").onclick=()=>{
       editingProjectId=null;
       document.getElementById("projectForm").reset();
@@ -548,11 +559,70 @@ function showPage(page){
       document.getElementById("projectFormBox").classList.remove("hidden");
       document.getElementById("projectName").focus();
     };
-    document.getElementById("cancelProjectBtn").onclick=()=>{
-      closeProjectForm();
-    };
+
+    document.getElementById("cancelProjectBtn").onclick=closeProjectForm;
     document.getElementById("projectForm").onsubmit=saveProject;
     loadProjects();
+
+  }else if(page==="databases"){
+    pageContent.innerHTML=`
+      <h1 class="page-title">🗄️ Bases de données</h1>
+      <p class="muted">${info.description}</p>
+
+      <div class="database-note">
+        Gérez vos espaces de bases de données depuis votre compte 221Cloud.
+        Dans cette première version, il s'agit de bases logiques enregistrées
+        dans notre infrastructure D1 partagée, et non d'instances D1 indépendantes.
+      </div>
+
+      <div class="project-toolbar">
+        <span class="muted small" id="databaseCount">Chargement des bases...</span>
+        <button class="action-btn" id="newDatabaseBtn">＋ Nouvelle base</button>
+      </div>
+
+      <div id="databaseFeedback"></div>
+
+      <div class="project-form hidden" id="databaseFormBox">
+        <h3>Créer une base de données</h3>
+        <p class="muted small">Donnez un nom à votre base et choisissez éventuellement un projet.</p>
+
+        <form id="databaseForm">
+          <div class="field">
+            <label for="databaseName">Nom de la base de données</label>
+            <input id="databaseName" maxlength="80" required
+              placeholder="Exemple : Boutique en ligne">
+          </div>
+
+          <div class="field">
+            <label for="databaseProject">Projet associé (facultatif)</label>
+            <select id="databaseProject">
+              <option value="">Aucun projet associé</option>
+            </select>
+          </div>
+
+          <div class="form-actions">
+            <button class="primary" id="saveDatabaseBtn" type="submit">Créer la base</button>
+            <button class="secondary-btn" id="cancelDatabaseBtn" type="button">Annuler</button>
+          </div>
+        </form>
+      </div>
+
+      <div id="databaseList" class="project-list">
+        <div class="content-card">Chargement...</div>
+      </div>
+    `;
+
+    document.getElementById("newDatabaseBtn").onclick=()=>{
+      document.getElementById("databaseForm").reset();
+      populateDatabaseProjects();
+      document.getElementById("databaseFormBox").classList.remove("hidden");
+      document.getElementById("databaseName").focus();
+    };
+
+    document.getElementById("cancelDatabaseBtn").onclick=closeDatabaseForm;
+    document.getElementById("databaseForm").onsubmit=createDatabase;
+    loadDatabases();
+
   }else if(page==="profile"){
     const name=currentUser?.full_name||currentUser?.name||"Non renseigné";
     const email=currentUser?.email||"Non renseigné";
@@ -584,6 +654,8 @@ function showPage(page){
     button.onclick=()=>showPage(button.dataset.go);
   });
 }
+
+/* GESTION DES PROJETS */
 
 function closeProjectForm(){
   editingProjectId=null;
@@ -665,6 +737,7 @@ function renderProjects(){
   list.querySelectorAll("[data-edit-project]").forEach(button=>{
     button.onclick=()=>editProject(button.dataset.editProject);
   });
+
   list.querySelectorAll("[data-delete-project]").forEach(button=>{
     button.onclick=()=>deleteProject(button.dataset.deleteProject);
   });
@@ -690,6 +763,7 @@ async function saveProject(event){
   const name=document.getElementById("projectName").value.trim();
   const type=document.getElementById("projectType").value;
   const button=document.getElementById("saveProjectBtn");
+  const wasEditing=Boolean(editingProjectId);
 
   if(!name){
     showProjectFeedback("Veuillez saisir un nom pour le projet.");
@@ -700,7 +774,7 @@ async function saveProject(event){
   button.textContent="Enregistrement...";
 
   try{
-    if(editingProjectId){
+    if(wasEditing){
       await api("/api/projects/"+encodeURIComponent(editingProjectId),{
         method:"PATCH",
         body:JSON.stringify({name,type})
@@ -720,7 +794,7 @@ async function saveProject(event){
     showProjectFeedback(error.message);
   }finally{
     button.disabled=false;
-    button.textContent=editingProjectId?"Enregistrer les modifications":"Créer le projet";
+    button.textContent=wasEditing?"Enregistrer les modifications":"Créer le projet";
   }
 }
 
@@ -752,6 +826,178 @@ async function loadProjectCount(){
   }
 }
 
+/* GESTION DES BASES DE DONNÉES */
+
+function showDatabaseFeedback(message,type="error"){
+  const box=document.getElementById("databaseFeedback");
+  if(!box)return;
+  box.innerHTML=`<div class="project-feedback ${type}">${escapeHTML(message)}</div>`;
+}
+
+function closeDatabaseForm(){
+  const box=document.getElementById("databaseFormBox");
+  if(box)box.classList.add("hidden");
+  const form=document.getElementById("databaseForm");
+  if(form)form.reset();
+}
+
+function populateDatabaseProjects(){
+  const select=document.getElementById("databaseProject");
+  if(!select)return;
+
+  select.innerHTML='<option value="">Aucun projet associé</option>';
+
+  projectsCache.forEach(project=>{
+    const option=document.createElement("option");
+    option.value=project.id;
+    option.textContent=project.name;
+    select.appendChild(option);
+  });
+}
+
+async function loadDatabases(){
+  const list=document.getElementById("databaseList");
+  if(!list)return;
+
+  list.innerHTML='<div class="content-card">Chargement des bases de données...</div>';
+
+  try{
+    const results=await Promise.all([
+      api("/api/databases"),
+      api("/api/projects")
+    ]);
+
+    databasesCache=Array.isArray(results[0])
+      ?results[0]
+      :(results[0].databases||[]);
+
+    projectsCache=Array.isArray(results[1])
+      ?results[1]
+      :(results[1].projects||[]);
+
+    populateDatabaseProjects();
+    renderDatabases();
+
+  }catch(error){
+    list.innerHTML=`
+      <div class="empty-state">
+        <div class="empty-icon">⚠️</div>
+        <strong>Impossible de charger les bases de données</strong>
+        <p class="muted small">${escapeHTML(error.message)}</p>
+        <button class="secondary-btn" id="retryDatabasesBtn">Réessayer</button>
+      </div>
+    `;
+
+    const retry=document.getElementById("retryDatabasesBtn");
+    if(retry)retry.onclick=loadDatabases;
+  }
+}
+
+function renderDatabases(){
+  const list=document.getElementById("databaseList");
+  if(!list)return;
+
+  const count=document.getElementById("databaseCount");
+  if(count)count.textContent=databasesCache.length+" base(s) de données";
+
+  if(databasesCache.length===0){
+    list.innerHTML=`
+      <div class="empty-state" style="grid-column:1/-1">
+        <div class="empty-icon">🗄️</div>
+        <strong>Aucune base de données pour le moment</strong>
+        <p class="muted small">Créez votre première base logique pour commencer.</p>
+      </div>
+    `;
+    return;
+  }
+
+  list.innerHTML=databasesCache.map(database=>{
+    const id=escapeHTML(database.id);
+    const name=escapeHTML(database.name);
+    const project=escapeHTML(database.project_name||"Aucun projet associé");
+    const date=escapeHTML(formatDate(database.created_at));
+
+    return `
+      <article class="project-card">
+        <span class="project-type">Base logique</span>
+        <h3>${name}</h3>
+        <div class="project-meta">
+          <div>Projet : <strong>${project}</strong></div>
+          <div>Créée le : ${date}</div>
+          <div>État : <strong>Enregistrée</strong></div>
+        </div>
+        <div class="project-actions">
+          <button class="danger-btn" data-delete-database="${id}">Supprimer</button>
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  list.querySelectorAll("[data-delete-database]").forEach(button=>{
+    button.onclick=()=>deleteDatabase(button.dataset.deleteDatabase);
+  });
+}
+
+async function createDatabase(event){
+  event.preventDefault();
+
+  const name=document.getElementById("databaseName").value.trim();
+  const projectId=document.getElementById("databaseProject").value;
+  const button=document.getElementById("saveDatabaseBtn");
+
+  if(!name){
+    showDatabaseFeedback("Veuillez saisir un nom pour la base de données.");
+    return;
+  }
+
+  button.disabled=true;
+  button.textContent="Création en cours...";
+
+  try{
+    const body={name};
+
+    if(projectId){
+      body.project_id=projectId;
+    }
+
+    await api("/api/databases",{
+      method:"POST",
+      body:JSON.stringify(body)
+    });
+
+    closeDatabaseForm();
+    showDatabaseFeedback("Base de données créée avec succès.","success");
+    await loadDatabases();
+
+  }catch(error){
+    showDatabaseFeedback(error.message);
+  }finally{
+    button.disabled=false;
+    button.textContent="Créer la base";
+  }
+}
+
+async function deleteDatabase(id){
+  const database=databasesCache.find(item=>String(item.id)===String(id));
+  if(!database)return;
+
+  if(!confirm('Voulez-vous vraiment supprimer la base "'+database.name+'" ?'))return;
+
+  try{
+    await api("/api/databases/"+encodeURIComponent(id),{
+      method:"DELETE"
+    });
+
+    showDatabaseFeedback("Base de données supprimée avec succès.","success");
+    await loadDatabases();
+
+  }catch(error){
+    showDatabaseFeedback(error.message);
+  }
+}
+
+/* NAVIGATION */
+
 document.querySelectorAll(".nav-btn").forEach(button=>{
   button.onclick=()=>showPage(button.dataset.page);
 });
@@ -760,6 +1006,7 @@ async function checkSession(){
   try{
     const result=await api("/api/me");
     const user=getUser(result);
+
     if(user&&(user.id||user.email||user.full_name)){
       openDashboard(user);
     }else{
