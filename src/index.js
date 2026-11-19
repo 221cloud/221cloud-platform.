@@ -1,6 +1,7 @@
 
 const ITERATIONS = 100000;
 const SESSION_DAYS = 7;
+const DATABASE_NAME_MAX = 80;
 
 function json(data, status = 200, extraHeaders = {}) {
   const headers = new Headers(extraHeaders);
@@ -151,6 +152,12 @@ function validProjectName(value) {
   return typeof value === "string" &&
     value.trim().length >= 1 &&
     value.trim().length <= 100;
+}
+
+function validDatabaseName(value) {
+  return typeof value === "string" &&
+    value.trim().length >= 1 &&
+    value.trim().length <= DATABASE_NAME_MAX;
 }
 
 export default {
@@ -412,7 +419,6 @@ export default {
           return json({ error: "Projet introuvable." }, 404);
         }
 
-        // MODIFIER
         if (request.method === "PATCH") {
           const body = await request.json();
 
@@ -454,7 +460,6 @@ export default {
           });
         }
 
-        // SUPPRIMER
         if (request.method === "DELETE") {
           await env.DB.prepare(
             "DELETE FROM projects WHERE id = ? AND user_id = ?"
@@ -471,6 +476,157 @@ export default {
         console.error("ERREUR GESTION PROJET:", error);
         return json({
           error: "Impossible de traiter cette opération."
+        }, 500);
+      }
+    }
+
+    // LISTE DES BASES DE DONNÉES DU CLIENT
+    if (path === "/api/databases" && request.method === "GET") {
+      try {
+        const user = await currentUser(request, env);
+
+        if (!user) {
+          return json({ error: "Vous devez être connecté." }, 401);
+        }
+
+        const result = await env.DB.prepare(
+          `SELECT
+             customer_databases.id,
+             customer_databases.name,
+             customer_databases.project_id,
+             projects.name AS project_name,
+             customer_databases.created_at
+           FROM customer_databases
+           LEFT JOIN projects
+             ON projects.id = customer_databases.project_id
+             AND projects.user_id = customer_databases.user_id
+           WHERE customer_databases.user_id = ?
+           ORDER BY customer_databases.created_at DESC`
+        ).bind(user.id).all();
+
+        return json({
+          databases: result.results
+        });
+
+      } catch (error) {
+        console.error("ERREUR LISTE BASES:", error);
+        return json({
+          error: "Impossible de charger les bases de données."
+        }, 500);
+      }
+    }
+
+    // CRÉATION D'UNE BASE LOGIQUE
+    if (path === "/api/databases" && request.method === "POST") {
+      try {
+        const user = await currentUser(request, env);
+
+        if (!user) {
+          return json({ error: "Vous devez être connecté." }, 401);
+        }
+
+        const body = await request.json();
+        const name = String(body.name || "").trim();
+
+        const projectId = body.project_id
+          ? String(body.project_id).trim()
+          : null;
+
+        if (!validDatabaseName(name)) {
+          return json({
+            error: "Le nom doit contenir entre 1 et 80 caractères."
+          }, 400);
+        }
+
+        if (projectId) {
+          const project = await env.DB.prepare(
+            "SELECT id FROM projects WHERE id = ? AND user_id = ?"
+          ).bind(projectId, user.id).first();
+
+          if (!project) {
+            return json({
+              error: "Le projet associé est introuvable."
+            }, 404);
+          }
+        }
+
+        const existing = await env.DB.prepare(
+          "SELECT id FROM customer_databases WHERE user_id = ? AND name = ?"
+        ).bind(user.id, name).first();
+
+        if (existing) {
+          return json({
+            error: "Une base de données porte déjà ce nom."
+          }, 409);
+        }
+
+        const id = crypto.randomUUID();
+
+        await env.DB.prepare(
+          `INSERT INTO customer_databases
+           (id, user_id, project_id, name)
+           VALUES (?, ?, ?, ?)`
+        ).bind(id, user.id, projectId, name).run();
+
+        const database = await env.DB.prepare(
+          `SELECT id, name, project_id, created_at
+           FROM customer_databases
+           WHERE id = ? AND user_id = ?`
+        ).bind(id, user.id).first();
+
+        return json({
+          message: "Base de données créée avec succès.",
+          database
+        }, 201);
+
+      } catch (error) {
+        console.error("ERREUR CREATION BASE:", error);
+        return json({
+          error: "Impossible de créer la base de données."
+        }, 500);
+      }
+    }
+
+    // SUPPRESSION D'UNE BASE LOGIQUE
+    const databaseMatch = path.match(/^\/api\/databases\/([^/]+)$/);
+
+    if (databaseMatch) {
+      if (request.method !== "DELETE") {
+        return json({ error: "Méthode non autorisée." }, 405);
+      }
+
+      try {
+        const user = await currentUser(request, env);
+
+        if (!user) {
+          return json({ error: "Vous devez être connecté." }, 401);
+        }
+
+        const databaseId = decodeURIComponent(databaseMatch[1]);
+
+        const existing = await env.DB.prepare(
+          `SELECT id FROM customer_databases
+           WHERE id = ? AND user_id = ?`
+        ).bind(databaseId, user.id).first();
+
+        if (!existing) {
+          return json({
+            error: "Base de données introuvable."
+          }, 404);
+        }
+
+        await env.DB.prepare(
+          "DELETE FROM customer_databases WHERE id = ? AND user_id = ?"
+        ).bind(databaseId, user.id).run();
+
+        return json({
+          message: "Base de données supprimée avec succès."
+        });
+
+      } catch (error) {
+        console.error("ERREUR SUPPRESSION BASE:", error);
+        return json({
+          error: "Impossible de supprimer la base de données."
         }, 500);
       }
     }
