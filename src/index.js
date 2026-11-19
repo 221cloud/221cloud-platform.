@@ -833,6 +833,7 @@ export default {
       }
     }
 
+    
     // STOCKAGE : ENVOI D'UN FICHIER
     if (path === "/api/storage/upload" && request.method === "POST") {
       try {
@@ -851,24 +852,18 @@ export default {
         const contentType = request.headers.get("Content-Type") || "";
 
         if (!contentType.toLowerCase().includes("multipart/form-data")) {
-          return json({
-            error: "Format d'envoi invalide."
-          }, 400);
+          return json({ error: "Format d'envoi invalide." }, 400);
         }
 
         const form = await request.formData();
         const file = form.get("file");
 
         if (!file || typeof file.arrayBuffer !== "function") {
-          return json({
-            error: "Aucun fichier reçu."
-          }, 400);
+          return json({ error: "Aucun fichier reçu." }, 400);
         }
 
         if (file.size <= 0) {
-          return json({
-            error: "Le fichier est vide."
-          }, 400);
+          return json({ error: "Le fichier est vide." }, 400);
         }
 
         if (file.size > MAX_FILE_SIZE_BYTES) {
@@ -892,7 +887,6 @@ export default {
         const buffer = new Uint8Array(await file.arrayBuffer());
         const id = crypto.randomUUID();
         const objectKey = `${user.id}/${id}`;
-
         const mimeType = file.type || "application/octet-stream";
         const fileName = safeFileName(file.name);
 
@@ -914,7 +908,9 @@ export default {
           );
 
           return json({
-            error: "Le transfert vers le stockage cloud a échoué."
+            error: "Le transfert vers le stockage cloud a échoué.",
+            diagnostic: errorDetails.slice(0, 1000),
+            storage_status: uploadResponse.status
           }, 502);
         }
 
@@ -962,6 +958,7 @@ export default {
         }, 500);
       }
     }
+
 
     // STOCKAGE : TÉLÉCHARGEMENT D'UN FICHIER
     const downloadMatch = path.match(
