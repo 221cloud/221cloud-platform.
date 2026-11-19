@@ -228,7 +228,10 @@ async function b2Request(env, method, objectKey, body = null, contentType = null
   }
 
   const endpoint = new URL(env.B2_ENDPOINT);
-  const regionMatch = endpoint.hostname.match(/^s3[.-]([a-z0-9-]+)\.backblazeb2\.com$/);
+
+  const regionMatch = endpoint.hostname.match(
+    /^s3[.-]([a-z0-9-]+)\.backblazeb2\.com$/
+  );
 
   if (!regionMatch) {
     throw new Error("STORAGE_ENDPOINT_INVALID");
@@ -251,7 +254,7 @@ async function b2Request(env, method, objectKey, body = null, contentType = null
   const canonicalHeaders =
     `host:${endpoint.host}\n` +
     `x-amz-content-sha256:${payloadHash}\n` +
-    `x-amz-date:${amzDate}\n`;
+    `x-amz-date:${amzDate}`;
 
   const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
 
@@ -902,9 +905,12 @@ export default {
         );
 
         if (!uploadResponse.ok) {
+          const errorDetails = await uploadResponse.text();
+
           console.error(
             "ERREUR ENVOI BACKBLAZE:",
-            uploadResponse.status
+            uploadResponse.status,
+            errorDetails.slice(0, 1500)
           );
 
           return json({
@@ -995,9 +1001,12 @@ export default {
         );
 
         if (!downloadResponse.ok) {
+          const errorDetails = await downloadResponse.text();
+
           console.error(
             "ERREUR TELECHARGEMENT BACKBLAZE:",
-            downloadResponse.status
+            downloadResponse.status,
+            errorDetails.slice(0, 1500)
           );
 
           return json({
@@ -1072,9 +1081,12 @@ export default {
         );
 
         if (!deleteResponse.ok && deleteResponse.status !== 404) {
+          const errorDetails = await deleteResponse.text();
+
           console.error(
             "ERREUR SUPPRESSION BACKBLAZE:",
-            deleteResponse.status
+            deleteResponse.status,
+            errorDetails.slice(0, 1500)
           );
 
           return json({
