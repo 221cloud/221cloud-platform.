@@ -145,6 +145,14 @@ async function currentUser(request, env) {
   return result || null;
 }
 
+const PROJECT_TYPES = ["website", "application", "database", "other"];
+
+function validProjectName(value) {
+  return typeof value === "string" &&
+    value.trim().length >= 1 &&
+    value.trim().length <= 100;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -170,7 +178,6 @@ export default {
         });
       } catch (error) {
         console.error("ERREUR DATABASE:", error);
-
         return json({
           platform: "221Cloud",
           database: "error"
@@ -178,13 +185,14 @@ export default {
       }
     }
 
+    // INSCRIPTION
     if (path === "/api/register" && request.method === "POST") {
       try {
         const body = await request.json();
 
         const email = String(body.email || "").trim().toLowerCase();
         const password = String(body.password || "");
-        const fullName = String(body.full_name || "").trim();
+        const fullName = String(body.full_name || body.name || "").trim();
 
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
           return json({ error: "Adresse e-mail invalide." }, 400);
@@ -234,13 +242,13 @@ export default {
 
       } catch (error) {
         console.error("ERREUR INSCRIPTION 221CLOUD:", error);
-
         return json({
           error: "Impossible de créer le compte."
         }, 500);
       }
     }
 
+    // CONNEXION
     if (path === "/api/login" && request.method === "POST") {
       try {
         const body = await request.json();
@@ -278,13 +286,13 @@ export default {
 
       } catch (error) {
         console.error("ERREUR CONNEXION 221CLOUD:", error);
-
         return json({
           error: "Impossible de se connecter."
         }, 500);
       }
     }
 
+    // UTILISATEUR CONNECTÉ
     if (path === "/api/me" && request.method === "GET") {
       try {
         const user = await currentUser(request, env);
@@ -297,13 +305,177 @@ export default {
 
       } catch (error) {
         console.error("ERREUR SESSION 221CLOUD:", error);
-
         return json({
           error: "Impossible de vérifier la session."
         }, 500);
       }
     }
 
+    // LISTE DES PROJETS
+    if (path === "/api/projects" && request.method === "GET") {
+      try {
+        const user = await currentUser(request, env);
+
+        if (!user) {
+          return json({ error: "Vous devez être connecté." }, 401);
+        }
+
+        const result = await env.DB.prepare(
+          `SELECT id, name, type, status, created_at
+           FROM projects
+           WHERE user_id = ?
+           ORDER BY created_at DESC`
+        ).bind(user.id).all();
+
+        return json({
+          projects: result.results
+        });
+
+      } catch (error) {
+        console.error("ERREUR LISTE PROJETS:", error);
+        return json({
+          error: "Impossible de charger les projets."
+        }, 500);
+      }
+    }
+
+    // CRÉATION D'UN PROJET
+    if (path === "/api/projects" && request.method === "POST") {
+      try {
+        const user = await currentUser(request, env);
+
+        if (!user) {
+          return json({ error: "Vous devez être connecté." }, 401);
+        }
+
+        const body = await request.json();
+        const name = String(body.name || "").trim();
+        const type = String(body.type || "website");
+
+        if (!validProjectName(name)) {
+          return json({
+            error: "Le nom du projet doit contenir entre 1 et 100 caractères."
+          }, 400);
+        }
+
+        if (!PROJECT_TYPES.includes(type)) {
+          return json({
+            error: "Type de projet invalide."
+          }, 400);
+        }
+
+        const id = crypto.randomUUID();
+
+        await env.DB.prepare(
+          `INSERT INTO projects (id, user_id, name, type, status)
+           VALUES (?, ?, ?, ?, 'pending')`
+        ).bind(id, user.id, name, type).run();
+
+        const project = await env.DB.prepare(
+          `SELECT id, name, type, status, created_at
+           FROM projects WHERE id = ? AND user_id = ?`
+        ).bind(id, user.id).first();
+
+        return json({
+          message: "Projet créé avec succès.",
+          project
+        }, 201);
+
+      } catch (error) {
+        console.error("ERREUR CREATION PROJET:", error);
+        return json({
+          error: "Impossible de créer le projet."
+        }, 500);
+      }
+    }
+
+    // MODIFICATION ET SUPPRESSION D'UN PROJET
+    const projectMatch = path.match(/^\/api\/projects\/([^/]+)$/);
+
+    if (projectMatch) {
+      try {
+        const user = await currentUser(request, env);
+
+        if (!user) {
+          return json({ error: "Vous devez être connecté." }, 401);
+        }
+
+        const projectId = decodeURIComponent(projectMatch[1]);
+
+        const existing = await env.DB.prepare(
+          `SELECT id, name, type, status, created_at
+           FROM projects
+           WHERE id = ? AND user_id = ?`
+        ).bind(projectId, user.id).first();
+
+        if (!existing) {
+          return json({ error: "Projet introuvable." }, 404);
+        }
+
+        // MODIFIER
+        if (request.method === "PATCH") {
+          const body = await request.json();
+
+          const name = body.name === undefined
+            ? existing.name
+            : String(body.name).trim();
+
+          const type = body.type === undefined
+            ? existing.type
+            : String(body.type);
+
+          if (!validProjectName(name)) {
+            return json({
+              error: "Le nom du projet doit contenir entre 1 et 100 caractères."
+            }, 400);
+          }
+
+          if (!PROJECT_TYPES.includes(type)) {
+            return json({
+              error: "Type de projet invalide."
+            }, 400);
+          }
+
+          await env.DB.prepare(
+            `UPDATE projects
+             SET name = ?, type = ?
+             WHERE id = ? AND user_id = ?`
+          ).bind(name, type, projectId, user.id).run();
+
+          const updated = await env.DB.prepare(
+            `SELECT id, name, type, status, created_at
+             FROM projects
+             WHERE id = ? AND user_id = ?`
+          ).bind(projectId, user.id).first();
+
+          return json({
+            message: "Projet modifié avec succès.",
+            project: updated
+          });
+        }
+
+        // SUPPRIMER
+        if (request.method === "DELETE") {
+          await env.DB.prepare(
+            "DELETE FROM projects WHERE id = ? AND user_id = ?"
+          ).bind(projectId, user.id).run();
+
+          return json({
+            message: "Projet supprimé avec succès."
+          });
+        }
+
+        return json({ error: "Méthode non autorisée." }, 405);
+
+      } catch (error) {
+        console.error("ERREUR GESTION PROJET:", error);
+        return json({
+          error: "Impossible de traiter cette opération."
+        }, 500);
+      }
+    }
+
+    // DÉCONNEXION
     if (path === "/api/logout" && request.method === "POST") {
       try {
         const token = getCookie(request, "221cloud_session");
@@ -326,7 +498,6 @@ export default {
 
       } catch (error) {
         console.error("ERREUR DECONNEXION 221CLOUD:", error);
-
         return json({
           error: "Impossible de se déconnecter."
         }, 500);
