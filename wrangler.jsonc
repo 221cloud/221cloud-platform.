@@ -1,3 +1,4 @@
+
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "221cloud-platform",
@@ -5,7 +6,8 @@
   "compatibility_date": "2026-11-19",
   "assets": {
     "directory": "./public",
-    "binding": "ASSETS"
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
   },
   "d1_databases": [
     {
@@ -13,11 +15,11 @@
       "database_name": "221cloud-main",
       "database_id": "f11969a7-88b5-4a7f-ad18-84d3120d7ab4"
     }
-  ]
-,
-"observability": {
-  "logs": {
-    "enabled": true,
-    "invocation_logs": true
+  ],
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
   }
-}}
+}
