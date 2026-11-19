@@ -3,16 +3,34 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // Vérification du fonctionnement du moteur
     if (url.pathname === "/api/health") {
       return Response.json({
         platform: "221Cloud",
         status: "online",
-        message: "Le moteur 221Cloud fonctionne."
+        database: "connected"
       });
     }
 
-    // Affichage du site
+    if (url.pathname === "/api/database-test") {
+      try {
+        const result = await env.DB.prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
+        ).all();
+
+        return Response.json({
+          platform: "221Cloud",
+          database: "connected",
+          tables: result.results
+        });
+      } catch (error) {
+        return Response.json({
+          platform: "221Cloud",
+          database: "error",
+          message: error.message
+        }, { status: 500 });
+      }
+    }
+
     return env.ASSETS.fetch(request);
   }
 };
