@@ -303,11 +303,18 @@ async function b2Request(env, method, objectKey, body = null, contentType = null
     headers.set("Content-Type", contentType);
   }
 
-  return fetch(targetUrl.toString(), {
-    method,
-    headers,
-    body: method === "PUT" ? body : undefined
-  });
+  const requestBody =
+  method === "PUT" && body !== null
+    ? new Blob([body], {
+        type: contentType || "application/octet-stream"
+      })
+    : undefined;
+
+return fetch(targetUrl.toString(), {
+  method,
+  headers,
+  body: requestBody
+});
 }
 
 function storageConfigurationAvailable(env) {
