@@ -1,0 +1,18 @@
+
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "221cloud-platform",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-19",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "221cloud-main",
+      "database_id": "f11969a7-88b5-4a7f-ad18-84d3120d7ab4"
+    }
+  ]
+}
