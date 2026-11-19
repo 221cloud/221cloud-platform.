@@ -885,6 +885,10 @@ export default {
         }
 
         const buffer = new Uint8Array(await file.arrayBuffer());
+        console.log("DIAGNOSTIC STOCKAGE :", {
+  tailleFichier: file.size,
+  tailleBuffer: buffer.byteLength
+});
         const id = crypto.randomUUID();
         const objectKey = `${user.id}/${id}`;
         const mimeType = file.type || "application/octet-stream";
