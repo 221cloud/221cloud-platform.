@@ -3,6 +3,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    // Vérifier le fonctionnement du moteur
     if (url.pathname === "/api/health") {
       return Response.json({
         platform: "221Cloud",
@@ -11,6 +12,7 @@ export default {
       });
     }
 
+    // Tester la connexion à la base D1
     if (url.pathname === "/api/database-test") {
       try {
         const result = await env.DB.prepare(
@@ -24,12 +26,14 @@ export default {
         });
       } catch (error) {
         return Response.json({
+          platform: "221Cloud",
           database: "error",
           message: error.message
         }, { status: 500 });
       }
     }
 
+    // Afficher le site web
     return env.ASSETS.fetch(request);
   }
 };
