@@ -252,9 +252,9 @@ async function b2Request(env, method, objectKey, body = null, contentType = null
   );
 
   const canonicalHeaders =
-    `host:${endpoint.host}\n` +
-    `x-amz-content-sha256:${payloadHash}\n` +
-    `x-amz-date:${amzDate}`;
+  `host:${endpoint.host}\n` +
+  `x-amz-content-sha256:${payloadHash}\n` +
+  `x-amz-date:${amzDate}\n`;
 
   const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
 
