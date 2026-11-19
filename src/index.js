@@ -31,6 +31,7 @@ async function hashToken(token) {
 
 async function hashPassword(password) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
+
   const key = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(password),
@@ -56,6 +57,7 @@ async function hashPassword(password) {
 async function verifyPassword(password, stored) {
   try {
     const [algorithm, iterations, salt, expected] = stored.split("$");
+
     if (algorithm !== "pbkdf2") return false;
 
     const key = await crypto.subtle.importKey(
@@ -83,9 +85,11 @@ async function verifyPassword(password, stored) {
     if (actual.length !== expectedBytes.length) return false;
 
     let difference = 0;
+
     for (let i = 0; i < actual.length; i++) {
       difference |= actual[i] ^ expectedBytes[i];
     }
+
     return difference === 0;
   } catch {
     return false;
@@ -94,8 +98,11 @@ async function verifyPassword(password, stored) {
 
 function getCookie(request, name) {
   const cookies = request.headers.get("Cookie") || "";
-  const item = cookies.split(";").map(v => v.trim())
+
+  const item = cookies.split(";")
+    .map(v => v.trim())
     .find(v => v.startsWith(name + "="));
+
   return item ? item.slice(name.length + 1) : null;
 }
 
@@ -106,7 +113,12 @@ async function createSession(env, userId) {
 
   await env.DB.prepare(
     "INSERT INTO sessions (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)"
-  ).bind(crypto.randomUUID(), userId, tokenHash, expires.toISOString()).run();
+  ).bind(
+    crypto.randomUUID(),
+    userId,
+    tokenHash,
+    expires.toISOString()
+  ).run();
 
   return token;
 }
@@ -117,6 +129,7 @@ function sessionCookie(token) {
 
 async function currentUser(request, env) {
   const token = getCookie(request, "221cloud_session");
+
   if (!token) return null;
 
   const tokenHash = await hashToken(token);
@@ -156,10 +169,11 @@ export default {
           tables: result.results
         });
       } catch (error) {
+        console.error("ERREUR DATABASE:", error);
+
         return json({
           platform: "221Cloud",
-          database: "error",
-          message: error.message
+          database: "error"
         }, 500);
       }
     }
@@ -167,6 +181,7 @@ export default {
     if (path === "/api/register" && request.method === "POST") {
       try {
         const body = await request.json();
+
         const email = String(body.email || "").trim().toLowerCase();
         const password = String(body.password || "");
         const fullName = String(body.full_name || "").trim();
@@ -176,7 +191,9 @@ export default {
         }
 
         if (password.length < 12 || password.length > 128) {
-          return json({ error: "Le mot de passe doit contenir entre 12 et 128 caractères." }, 400);
+          return json({
+            error: "Le mot de passe doit contenir entre 12 et 128 caractères."
+          }, 400);
         }
 
         const existing = await env.DB.prepare(
@@ -184,7 +201,9 @@ export default {
         ).bind(email).first();
 
         if (existing) {
-          return json({ error: "Cette adresse e-mail est déjà utilisée." }, 409);
+          return json({
+            error: "Cette adresse e-mail est déjà utilisée."
+          }, 409);
         }
 
         const userId = crypto.randomUUID();
@@ -192,23 +211,40 @@ export default {
 
         await env.DB.prepare(
           "INSERT INTO users (id, email, full_name, password_hash, role) VALUES (?, ?, ?, ?, 'client')"
-        ).bind(userId, email, fullName || null, passwordHash).run();
+        ).bind(
+          userId,
+          email,
+          fullName || null,
+          passwordHash
+        ).run();
 
         const token = await createSession(env, userId);
 
         return json({
           message: "Compte créé avec succès.",
-          user: { id: userId, email, full_name: fullName || null, role: "client" }
-        }, 201, { "Set-Cookie": sessionCookie(token) });
+          user: {
+            id: userId,
+            email,
+            full_name: fullName || null,
+            role: "client"
+          }
+        }, 201, {
+          "Set-Cookie": sessionCookie(token)
+        });
 
       } catch (error) {
-        return json({ error: "Impossible de créer le compte." }, 500);
+        console.error("ERREUR INSCRIPTION 221CLOUD:", error);
+
+        return json({
+          error: "Impossible de créer le compte."
+        }, 500);
       }
     }
 
     if (path === "/api/login" && request.method === "POST") {
       try {
         const body = await request.json();
+
         const email = String(body.email || "").trim().toLowerCase();
         const password = String(body.password || "");
 
@@ -216,9 +252,14 @@ export default {
           "SELECT id, email, full_name, role, password_hash FROM users WHERE email = ?"
         ).bind(email).first();
 
-        if (!user || !user.password_hash ||
-            !(await verifyPassword(password, user.password_hash))) {
-          return json({ error: "E-mail ou mot de passe incorrect." }, 401);
+        if (
+          !user ||
+          !user.password_hash ||
+          !(await verifyPassword(password, user.password_hash))
+        ) {
+          return json({
+            error: "E-mail ou mot de passe incorrect."
+          }, 401);
         }
 
         const token = await createSession(env, user.id);
@@ -231,40 +272,65 @@ export default {
             full_name: user.full_name,
             role: user.role
           }
-        }, 200, { "Set-Cookie": sessionCookie(token) });
+        }, 200, {
+          "Set-Cookie": sessionCookie(token)
+        });
 
       } catch (error) {
-        return json({ error: "Impossible de se connecter." }, 500);
+        console.error("ERREUR CONNEXION 221CLOUD:", error);
+
+        return json({
+          error: "Impossible de se connecter."
+        }, 500);
       }
     }
 
     if (path === "/api/me" && request.method === "GET") {
-      const user = await currentUser(request, env);
+      try {
+        const user = await currentUser(request, env);
 
-      if (!user) {
-        return json({ error: "Non connecté." }, 401);
+        if (!user) {
+          return json({ error: "Non connecté." }, 401);
+        }
+
+        return json({ user });
+
+      } catch (error) {
+        console.error("ERREUR SESSION 221CLOUD:", error);
+
+        return json({
+          error: "Impossible de vérifier la session."
+        }, 500);
       }
-
-      return json({ user });
     }
 
     if (path === "/api/logout" && request.method === "POST") {
-      const token = getCookie(request, "221cloud_session");
+      try {
+        const token = getCookie(request, "221cloud_session");
 
-      if (token) {
-        const tokenHash = await hashToken(token);
-        await env.DB.prepare(
-          "DELETE FROM sessions WHERE token_hash = ?"
-        ).bind(tokenHash).run();
-      }
+        if (token) {
+          const tokenHash = await hashToken(token);
 
-      return json(
-        { message: "Déconnexion réussie." },
-        200,
-        {
-          "Set-Cookie": "221cloud_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0"
+          await env.DB.prepare(
+            "DELETE FROM sessions WHERE token_hash = ?"
+          ).bind(tokenHash).run();
         }
-      );
+
+        return json(
+          { message: "Déconnexion réussie." },
+          200,
+          {
+            "Set-Cookie": "221cloud_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0"
+          }
+        );
+
+      } catch (error) {
+        console.error("ERREUR DECONNEXION 221CLOUD:", error);
+
+        return json({
+          error: "Impossible de se déconnecter."
+        }, 500);
+      }
     }
 
     return env.ASSETS.fetch(request);
