@@ -479,8 +479,19 @@ function showAuthForm(form) {
 
 function setLoggedIn(user) {
   currentUser = user;
+
   document.getElementById("authScreen").classList.add("hidden");
   document.getElementById("appScreen").classList.remove("hidden");
+
+  const adminButton = document.querySelector(".admin-nav");
+
+  if (adminButton) {
+    adminButton.classList.toggle(
+      "hidden",
+      user.role !== "admin"
+    );
+  }
+
   showPage("overview");
 }
 
