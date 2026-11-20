@@ -1288,9 +1288,9 @@ async function loadStorageFiles() {
     if (progress) progress.style.width = percent.toFixed(1) + "%";
 
     if (percentElement) {
-      percentElement.textContent = percent.toFixed(1) + "% utilisé · " +
-        formatBytes(Math.max(0, limit - used)) + " disponible";
-    }
+  percentElement.textContent = usagePercent.toFixed(1) + "% utilisé · " +
+    formatBytes(available) + " disponible";
+}
 
     renderStorageFiles();
   } catch(error) {
