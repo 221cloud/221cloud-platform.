@@ -1221,7 +1221,34 @@ if (path === "/api/subscription" && request.method === "GET") {
           (total, file) => total + Number(file.file_size || 0),
           0
         );
+        // Récupération du forfait actuel
+        const subscription = await env.DB.prepare(`
+          SELECT plan, status
+          FROM subscriptions
+          WHERE user_id = ?
+          ORDER BY created_at DESC
+          LIMIT 1
+        `).bind(user.id).first();
 
+        const plan = subscription?.status === "active"
+          ? subscription.plan
+          : "free";
+
+        // Limites selon le forfait
+        const storageLimits = {
+          free: 1024 * 1024 * 1024,
+          starter: 5 * 1024 * 1024 * 1024,
+          pro: 20 * 1024 * 1024 * 1024
+        };
+
+        const limit = storageLimits[plan] ?? storageLimits.free;
+
+        const available = Math.max(0, limit - used);
+
+        const usagePercent = Math.min(
+          100,
+          Math.round((used / limit) * 100)
+        );
         return json({
           files,
           used,
