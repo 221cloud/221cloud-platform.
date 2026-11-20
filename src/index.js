@@ -967,7 +967,7 @@ if (path === "/api/subscription" && request.method === "GET") {
           message: "Hébergement associé au projet.",
           hosting: {
             ...hosting,
-            url: `https://221cloud-platform.elhadji-dame-sall.workers.dev/site/${hosting.slug}`
+            url: `https://221cloud-platform.elhadjidame-sall.workers.dev/site/${hosting.slug}`
           }
         });
 
