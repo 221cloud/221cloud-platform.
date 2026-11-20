@@ -1517,10 +1517,15 @@ if (path === "/api/subscription" && request.method === "GET") {
           file.mime_type || "application/octet-stream"
         );
 
-        headers.set(
-          "Content-Disposition",
-          `attachment; filename*=UTF-8''${encodeURIComponent(file.file_name)}`
-        );
+        const previewRequested =
+  new URL(request.url).searchParams.get("preview") === "1";
+const isImage = String(file.mime_type || "").toLowerCase().startsWith("image/");
+const disposition = previewRequested && isImage ? "inline" : "attachment";
+
+headers.set(
+  "Content-Disposition",
+  `${disposition}; filename*=UTF-8''${encodeURIComponent(file.file_name)}`
+);
 
         headers.set("Cache-Control", "private, no-store");
 
