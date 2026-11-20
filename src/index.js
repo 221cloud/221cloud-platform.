@@ -966,8 +966,6 @@ if (path === "/api/subscription" && request.method === "GET") {
         }
         const id = crypto.randomUUID();
 
-        const id = crypto.randomUUID();
-
 await env.DB.prepare(
   `INSERT INTO projects (id, user_id, name, type, status)
    VALUES (?, ?, ?, ?, 'pending')`
