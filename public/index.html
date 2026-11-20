@@ -1471,6 +1471,7 @@ function renderStorageFiles() {
       <p class="muted">${escapeHTML(formatBytes(file.file_size))} · ${escapeHTML(file.mime_type || "Fichier")}</p>
       <div class="muted">Ajouté le : ${escapeHTML(formatDate(file.created_at))}</div>
       <div class="item-actions">
+        ${String(file.mime_type || "").toLowerCase().startsWith("image/") ? `<button class="secondary" onclick="previewStorageImage('${escapeHTML(file.id)}')">Aperçu</button>` : ""}
         <button class="secondary" onclick="downloadStorageFile('${escapeHTML(file.id)}')">Télécharger</button>
         <button class="danger" onclick="deleteStorageFile('${escapeHTML(file.id)}')">Supprimer</button>
       </div>
@@ -1517,6 +1518,64 @@ async function uploadStorageFile() {
   } finally {
     button.disabled = false;
     button.textContent = "Envoyer dans le cloud";
+  }
+}
+
+let activeStoragePreviewUrl = null;
+
+async function previewStorageImage(id) {
+  try {
+    const file = storageFilesCache.find(item => item.id === id);
+    if (!file || !String(file.mime_type || "").toLowerCase().startsWith("image/")) {
+      throw new Error("Ce fichier n'est pas une image.");
+    }
+
+    const response = await fetch(
+      API + "/storage/" + encodeURIComponent(id) + "/download?preview=1",
+      {credentials:"same-origin"}
+    );
+
+    if (!response.ok) {
+      let data = {};
+      try { data = await response.json(); } catch(e) {}
+      throw new Error(data.error || "Impossible d'afficher cette image.");
+    }
+
+    const blob = await response.blob();
+    if (activeStoragePreviewUrl) URL.revokeObjectURL(activeStoragePreviewUrl);
+    activeStoragePreviewUrl = URL.createObjectURL(blob);
+
+    const overlay = document.createElement("div");
+    overlay.id = "storageImagePreview";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;padding:20px;";
+    overlay.innerHTML = `
+      <div style="position:relative;max-width:100%;max-height:100%;display:flex;flex-direction:column;align-items:center;gap:12px;">
+        <button type="button" id="closeStoragePreview" aria-label="Fermer l'aperçu" style="align-self:flex-end;background:#fff;color:#111;border:0;border-radius:8px;padding:10px 15px;font-weight:600;">Fermer ✕</button>
+        <img src="${activeStoragePreviewUrl}" alt="${escapeHTML(file.file_name || "Aperçu de l'image")}" style="display:block;max-width:100%;max-height:80vh;object-fit:contain;border-radius:10px;">
+        <div style="color:#fff;text-align:center;overflow-wrap:anywhere;">${escapeHTML(file.file_name || "")}</div>
+      </div>
+    `;
+
+    const closePreview = () => {
+      overlay.remove();
+      document.removeEventListener("keydown", onPreviewKeydown);
+      if (activeStoragePreviewUrl) {
+        URL.revokeObjectURL(activeStoragePreviewUrl);
+        activeStoragePreviewUrl = null;
+      }
+    };
+    const onPreviewKeydown = event => {
+      if (event.key === "Escape") closePreview();
+    };
+
+    overlay.addEventListener("click", event => {
+      if (event.target === overlay) closePreview();
+    });
+    overlay.querySelector("#closeStoragePreview").addEventListener("click", closePreview);
+    document.addEventListener("keydown", onPreviewKeydown);
+    document.body.appendChild(overlay);
+  } catch(error) {
+    alert(error.message);
   }
 }
 
