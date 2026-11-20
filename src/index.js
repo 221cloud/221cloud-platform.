@@ -908,7 +908,38 @@ if (path === "/api/subscription" && request.method === "GET") {
             error: "Type de projet invalide."
           }, 400);
         }
+        // Vérification de la limite de projets selon l'abonnement
+        const subscription = await env.DB.prepare(`
+          SELECT plan, status
+          FROM subscriptions
+          WHERE user_id = ?
+          ORDER BY created_at DESC
+          LIMIT 1
+        `).bind(user.id).first();
 
+        const plan = subscription?.status === "active"
+          ? subscription.plan
+          : "free";
+
+        const projectLimits = {
+          free: 1,
+          starter: 5,
+          pro: 20
+        };
+
+        const maxProjects = projectLimits[plan] ?? 1;
+
+        const projectCount = await env.DB.prepare(`
+          SELECT COUNT(*) AS total
+          FROM projects
+          WHERE user_id = ?
+        `).bind(user.id).first();
+
+        if (Number(projectCount?.total || 0) >= maxProjects) {
+          return json({
+            error: `Votre forfait ${plan} autorise au maximum ${maxProjects} projet(s). Passez à une offre supérieure pour en créer davantage.`
+          }, 403);
+        }
         const id = crypto.randomUUID();
 
         await env.DB.prepare(
