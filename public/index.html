@@ -1111,7 +1111,22 @@ async function createProject() {
     message.innerHTML = `<p class="error-text">${escapeHTML(error.message)}</p>`;
   }
 }
+async function enableProjectHosting(projectId) {
+  try {
+    const data = await api(
+      `/projects/${encodeURIComponent(projectId)}/hosting`,
+      { method: "POST" }
+    );
 
+    alert(
+      data.message + "\n" +
+      "Adresse du site : " + data.hosting.url
+    );
+
+  } catch (error) {
+    alert(error.message);
+  }
+}
 async function editProject(id) {
   const project = projectsCache.find(item => item.id === id);
   if (!project) return;
