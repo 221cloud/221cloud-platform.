@@ -1254,25 +1254,47 @@ export default {
           return json({ error: "Fichier introuvable." }, 404);
         }
 
-        const deleteResponse = await b2Request(
-          env,
-          "DELETE",
-          file.storage_key
-        );
+        
+        try {
+          if (file.b2_file_id) {
+            await b2NativeDelete(
+              env,
+              file.b2_file_id,
+              file.storage_key
+            );
+          } else {
+            const deleteResponse = await b2Request(
+              env,
+              "DELETE",
+              file.storage_key
+            );
 
-        if (!deleteResponse.ok && deleteResponse.status !== 404) {
-          const errorDetails = await deleteResponse.text();
+            if (!deleteResponse.ok && deleteResponse.status !== 404) {
+              const errorDetails = await deleteResponse.text();
 
+              console.error(
+                "ERREUR SUPPRESSION BACKBLAZE:",
+                deleteResponse.status,
+                errorDetails.slice(0, 1500)
+              );
+
+              return json({
+                error: "Impossible de supprimer le fichier du stockage."
+              }, 502);
+            }
+          }
+        } catch (deleteError) {
           console.error(
             "ERREUR SUPPRESSION BACKBLAZE:",
-            deleteResponse.status,
-            errorDetails.slice(0, 1500)
+            deleteError
           );
 
           return json({
-            error: "Impossible de supprimer le fichier du stockage."
+            error: "Impossible de supprimer le fichier du stockage.",
+            diagnostic: String(deleteError.message || deleteError)
           }, 502);
         }
+
 
         await env.DB.prepare(
           "DELETE FROM cloud_files WHERE id = ? AND user_id = ?"
