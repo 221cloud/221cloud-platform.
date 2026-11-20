@@ -966,15 +966,38 @@ if (path === "/api/subscription" && request.method === "GET") {
         }
         const id = crypto.randomUUID();
 
-        await env.DB.prepare(
-          `INSERT INTO projects (id, user_id, name, type, status)
-           VALUES (?, ?, ?, ?, 'pending')`
-        ).bind(id, user.id, name, type).run();
+        const id = crypto.randomUUID();
 
-        const project = await env.DB.prepare(
-          `SELECT id, name, type, status, created_at
-           FROM projects WHERE id = ? AND user_id = ?`
-        ).bind(id, user.id).first();
+await env.DB.prepare(
+  `INSERT INTO projects (id, user_id, name, type, status)
+   VALUES (?, ?, ?, ?, 'pending')`
+).bind(id, user.id, name, type).run();
+
+let hosting = null;
+
+if (type === "website") {
+  const hostingId = crypto.randomUUID();
+  const slug = await generateWebsiteSlug(env, name);
+
+  await env.DB.prepare(`
+    INSERT INTO website_hostings (
+      id, user_id, project_id, slug, status
+    )
+    VALUES (?, ?, ?, ?, 'draft')
+  `).bind(hostingId, user.id, id, slug).run();
+
+  hosting = {
+    id: hostingId,
+    slug,
+    status: "draft",
+    url: `https://221cloud-platform.elhadji-dame-sall.workers.dev/site/${slug}`
+  };
+}
+
+const project = await env.DB.prepare(
+  `SELECT id, name, type, status, created_at
+   FROM projects WHERE id = ? AND user_id = ?`
+).bind(id, user.id).first();
 
         return json({
           message: "Projet créé avec succès.",
