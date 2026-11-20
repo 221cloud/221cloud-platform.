@@ -981,6 +981,282 @@ if (path === "/api/subscription" && request.method === "GET") {
       }
     }
 
+    // ENVOYER UN FICHIER VERS UN DÉPLOIEMENT
+    const deploymentFileMatch = path.match(
+      /^\/api\/projects\/([^/]+)\/deployments\/([^/]+)\/files$/
+    );
+
+    if (deploymentFileMatch && request.method === "POST") {
+      try {
+        const user = await currentUser(request, env);
+
+        if (!user) {
+          return json({ error: "Vous devez être connecté." }, 401);
+        }
+
+        if (!storageConfigurationAvailable(env)) {
+          return json({
+            error: "Le stockage cloud n'est pas configuré."
+          }, 503);
+        }
+
+        const projectId = decodeURIComponent(
+          deploymentFileMatch[1]
+        );
+
+        const deploymentId = decodeURIComponent(
+          deploymentFileMatch[2]
+        );
+
+        const deployment = await env.DB.prepare(`
+          SELECT
+            deployments.id,
+            deployments.status,
+            website_hostings.id AS hosting_id
+          FROM deployments
+          JOIN projects
+            ON projects.id = deployments.project_id
+          JOIN website_hostings
+            ON website_hostings.project_id = projects.id
+          WHERE deployments.id = ?
+            AND projects.id = ?
+            AND projects.user_id = ?
+            AND projects.type = 'website'
+            AND website_hostings.user_id = ?
+          LIMIT 1
+        `).bind(
+          deploymentId,
+          projectId,
+          user.id,
+          user.id
+        ).first();
+
+        if (!deployment) {
+          return json({
+            error: "Déploiement introuvable."
+          }, 404);
+        }
+
+        if (deployment.status !== "pending") {
+          return json({
+            error: "Ce déploiement n'accepte plus de fichiers."
+          }, 409);
+        }
+
+        const contentType = request.headers.get("Content-Type") || "";
+
+        if (!contentType.toLowerCase().includes("multipart/form-data")) {
+          return json({
+            error: "Format d'envoi invalide."
+          }, 400);
+        }
+
+        const form = await request.formData();
+        const file = form.get("file");
+
+        if (!file || typeof file.arrayBuffer !== "function") {
+          return json({
+            error: "Aucun fichier reçu."
+          }, 400);
+        }
+
+        if (file.size <= 0) {
+          return json({
+            error: "Le fichier est vide."
+          }, 400);
+        }
+
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+          return json({
+            error: "La taille maximale autorisée est de 20 Mo par fichier."
+          }, 413);
+        }
+
+        // Vérification du chemin du fichier
+        const filePath = String(
+          form.get("file_path") || file.name || ""
+        ).trim();
+
+        const pathParts = filePath.split("/");
+
+        if (
+          !filePath ||
+          filePath.length > 500 ||
+          filePath.startsWith("/") ||
+          filePath.includes("\\") ||
+          /[\u0000-\u001F\u007F]/.test(filePath) ||
+          pathParts.some(part =>
+            !part || part === "." || part === ".."
+          )
+        ) {
+          return json({
+            error: "Chemin de fichier invalide."
+          }, 400);
+        }
+
+        // Empêcher les doublons dans un même déploiement
+        const existingFile = await env.DB.prepare(`
+          SELECT id
+          FROM website_files
+          WHERE deployment_id = ?
+            AND file_path = ?
+          LIMIT 1
+        `).bind(deploymentId, filePath).first();
+
+        if (existingFile) {
+          return json({
+            error: "Ce fichier existe déjà dans ce déploiement."
+          }, 409);
+        }
+
+        // Récupération du forfait
+        const subscription = await env.DB.prepare(`
+          SELECT plan, status
+          FROM subscriptions
+          WHERE user_id = ?
+          ORDER BY created_at DESC
+          LIMIT 1
+        `).bind(user.id).first();
+
+        const plan = subscription?.status === "active"
+          ? subscription.plan
+          : "free";
+
+        const storageLimits = {
+          free: 1024 * 1024 * 1024,
+          starter: 5 * 1024 * 1024 * 1024,
+          pro: 20 * 1024 * 1024 * 1024
+        };
+
+        const maxStorage = storageLimits[plan] ?? storageLimits.free;
+
+        // Calcul du stockage privé et des sites web
+        const usage = await env.DB.prepare(`
+          SELECT
+            COALESCE((
+              SELECT SUM(file_size)
+              FROM cloud_files
+              WHERE user_id = ?
+            ), 0) +
+            COALESCE((
+              SELECT SUM(website_files.file_size)
+              FROM website_files
+              JOIN website_hostings
+                ON website_hostings.id = website_files.hosting_id
+              WHERE website_hostings.user_id = ?
+            ), 0) AS used
+        `).bind(user.id, user.id).first();
+
+        const used = Number(usage?.used || 0);
+
+        if (used + file.size > maxStorage) {
+          return json({
+            error: `Votre forfait ${plan} ne dispose pas d'assez d'espace de stockage.`
+          }, 413);
+        }
+
+        const buffer = new Uint8Array(
+          await file.arrayBuffer()
+        );
+
+        const id = crypto.randomUUID();
+
+        const storageKey =
+          `websites/${user.id}/${deployment.hosting_id}/${deploymentId}/${filePath}`;
+
+        const mimeType =
+          file.type || "application/octet-stream";
+
+        let uploadedFile;
+
+        try {
+          uploadedFile = await b2NativeUpload(
+            env,
+            storageKey,
+            buffer,
+            mimeType
+          );
+        } catch (uploadError) {
+          console.error(
+            "ERREUR ENVOI FICHIER SITE VERS B2:",
+            uploadError
+          );
+
+          return json({
+            error: "Le transfert du fichier du site a échoué."
+          }, 502);
+        }
+
+        try {
+          await env.DB.prepare(`
+            INSERT INTO website_files (
+              id,
+              hosting_id,
+              deployment_id,
+              file_path,
+              file_size,
+              mime_type,
+              storage_key,
+              b2_file_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(
+            id,
+            deployment.hosting_id,
+            deploymentId,
+            filePath,
+            file.size,
+            mimeType,
+            storageKey,
+            uploadedFile.fileId
+          ).run();
+
+        } catch (databaseError) {
+          console.error(
+            "ERREUR ENREGISTREMENT FICHIER SITE:",
+            databaseError
+          );
+
+          try {
+            await b2NativeDelete(
+              env,
+              uploadedFile.fileId,
+              uploadedFile.fileName
+            );
+          } catch (cleanupError) {
+            console.error(
+              "ERREUR NETTOYAGE FICHIER SITE:",
+              cleanupError
+            );
+          }
+
+          return json({
+            error: "Le fichier a été transféré mais son enregistrement a échoué."
+          }, 500);
+        }
+
+        return json({
+          message: "Fichier du site envoyé avec succès.",
+          file: {
+            id,
+            file_path: filePath,
+            file_size: file.size,
+            mime_type: mimeType
+          }
+        }, 201);
+
+      } catch (error) {
+        console.error(
+          "ERREUR ENVOI FICHIER DÉPLOIEMENT:",
+          error
+        );
+
+        return json({
+          error: "Impossible d'envoyer le fichier du site."
+        }, 500);
+      }
+    }
+
     // RATTACHER UN HÉBERGEMENT À UN PROJET EXISTANT
     const hostingProjectMatch = path.match(
       /^\/api\/projects\/([^/]+)\/hosting$/
