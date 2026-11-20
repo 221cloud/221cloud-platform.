@@ -326,6 +326,144 @@ function storageConfigurationAvailable(env) {
   );
 }
 
+async function b2NativeAuthorize(env) {
+  if (!storageConfigurationAvailable(env)) {
+    throw new Error("STORAGE_CONFIGURATION_MISSING");
+  }
+
+  const response = await fetch(
+    "https://api.backblazeb2.com/b2api/v4/b2_authorize_account",
+    {
+      headers: {
+        Authorization:
+          "Basic " +
+          btoa(
+            env.B2_KEY_ID + ":" + env.B2_APPLICATION_KEY
+          )
+      }
+    }
+  );
+
+  const responseText = await response.text();
+
+  if (!response.ok) {
+    throw new Error(
+      "B2_AUTHORIZATION_FAILED: " + responseText.slice(0, 500)
+    );
+  }
+
+  const auth = JSON.parse(responseText);
+  const storage = auth.apiInfo.storageApi;
+
+  const bucket = storage.allowed.buckets.find(
+    item => item.name === env.B2_BUCKET_NAME
+  );
+
+  if (!bucket || !bucket.id) {
+    throw new Error("B2_BUCKET_NOT_FOUND");
+  }
+
+  return {
+    apiUrl: storage.apiUrl,
+    downloadUrl: storage.downloadUrl,
+    authorizationToken: auth.authorizationToken,
+    bucketId: bucket.id
+  };
+}
+
+async function b2NativeJson(auth, action, data) {
+  const response = await fetch(
+    `${auth.apiUrl}/b2api/v4/${action}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: auth.authorizationToken,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(data)
+    }
+  );
+
+  const responseText = await response.text();
+
+  if (!response.ok) {
+    throw new Error(
+      `B2_${action}_FAILED: ${responseText.slice(0, 500)}`
+    );
+  }
+
+  return JSON.parse(responseText);
+}
+
+async function b2NativeUpload(env, objectKey, body, contentType) {
+  const auth = await b2NativeAuthorize(env);
+
+  const uploadInfo = await b2NativeJson(
+    auth,
+    "b2_get_upload_url",
+    { bucketId: auth.bucketId }
+  );
+
+  const bytes =
+    body instanceof Uint8Array
+      ? body
+      : new Uint8Array(body);
+
+  const digest = await crypto.subtle.digest("SHA-1", bytes);
+
+  const sha1 = Array.from(new Uint8Array(digest))
+    .map(byte => byte.toString(16).padStart(2, "0"))
+    .join("");
+
+  const response = await fetch(uploadInfo.uploadUrl, {
+    method: "POST",
+    headers: {
+      Authorization: uploadInfo.authorizationToken,
+      "X-Bz-File-Name": encodeURIComponent(objectKey),
+      "Content-Type": contentType || "application/octet-stream",
+      "X-Bz-Content-Sha1": sha1
+    },
+    body: bytes
+  });
+
+  const responseText = await response.text();
+
+  if (!response.ok) {
+    throw new Error(
+      "B2_UPLOAD_FAILED: " + responseText.slice(0, 500)
+    );
+  }
+
+  return JSON.parse(responseText);
+}
+
+async function b2NativeDownload(env, fileId) {
+  const auth = await b2NativeAuthorize(env);
+
+  const url =
+    `${auth.downloadUrl}/b2api/v4/b2_download_file_by_id` +
+    `?fileId=${encodeURIComponent(fileId)}`;
+
+  return fetch(url, {
+    headers: {
+      Authorization: auth.authorizationToken
+    }
+  });
+}
+
+async function b2NativeDelete(env, fileId, fileName) {
+  const auth = await b2NativeAuthorize(env);
+
+  return b2NativeJson(
+    auth,
+    "b2_delete_file_version",
+    {
+      fileId,
+      fileName
+    }
+  );
+}
+
 function safeFileName(value) {
   return String(value || "fichier")
     .replace(/[\r\n"]/g, "_")
