@@ -1471,7 +1471,8 @@ function renderStorageFiles() {
       <p class="muted">${escapeHTML(formatBytes(file.file_size))} · ${escapeHTML(file.mime_type || "Fichier")}</p>
       <div class="muted">Ajouté le : ${escapeHTML(formatDate(file.created_at))}</div>
       <div class="item-actions">
-        <button class="secondary" onclick="downloadStorageFile('${escapeHTML(file.id)}')">Télécharger</button>
+        ${String(file.mime_type || "").toLowerCase().startsWith("image/") ? `<button class="secondary" onclick="previewStorageImage('${escapeHTML(file.id)}')">Aperçu</button>` : ""}
+<button class="secondary" onclick="downloadStorageFile('${escapeHTML(file.id)}')">Télécharger</button>
         <button class="danger" onclick="deleteStorageFile('${escapeHTML(file.id)}')">Supprimer</button>
       </div>
     </div>
