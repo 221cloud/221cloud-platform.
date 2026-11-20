@@ -1276,15 +1276,43 @@ if (path === "/api/subscription" && request.method === "GET") {
           }, 413);
         }
 
-        const usage = await env.DB.prepare(
-          "SELECT COALESCE(SUM(file_size), 0) AS used FROM cloud_files WHERE user_id = ?"
-        ).bind(user.id).first();
+                // Récupération du forfait de l'utilisateur
+        const subscription = await env.DB.prepare(`
+          SELECT plan, status
+          FROM subscriptions
+          WHERE user_id = ?
+          ORDER BY created_at DESC
+          LIMIT 1
+        `).bind(user.id).first();
+
+        const plan = subscription?.status === "active"
+          ? subscription.plan
+          : "free";
+
+        // Quotas de stockage en octets
+        const storageLimits = {
+          free: 1024 * 1024 * 1024,
+          starter: 5 * 1024 * 1024 * 1024,
+          pro: 20 * 1024 * 1024 * 1024
+        };
+
+        const maxStorage = storageLimits[plan] ?? storageLimits.free;
+
+        // Calcul de l'espace déjà utilisé
+        const usage = await env.DB.prepare(`
+          SELECT COALESCE(SUM(file_size), 0) AS used
+          FROM cloud_files
+          WHERE user_id = ?
+        `).bind(user.id).first();
 
         const used = Number(usage?.used || 0);
 
-        if (used + file.size > STORAGE_LIMIT_BYTES) {
+        // Vérification du quota
+        if (used + file.size > maxStorage) {
+          const quotaGo = maxStorage / (1024 * 1024 * 1024);
+
           return json({
-            error: "Votre quota de stockage de 1 Go est atteint."
+            error: `Votre forfait ${plan} autorise ${quotaGo} Go de stockage. Votre espace disponible est insuffisant.`
           }, 413);
         }
 
