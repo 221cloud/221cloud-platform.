@@ -1141,7 +1141,7 @@ export default {
         const fileId = decodeURIComponent(downloadMatch[1]);
 
         const file = await env.DB.prepare(
-          `SELECT id, file_name, mime_type, storage_key
+          `SELECT id, file_name, mime_type, storage_key, b2_file_id
            FROM cloud_files
            WHERE id = ? AND user_id = ?`
         ).bind(fileId, user.id).first();
