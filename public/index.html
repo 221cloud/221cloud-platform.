@@ -1439,8 +1439,7 @@ async function renderSubscriptionPage() {
   `;
 
   try {
-    const response = await api("/subscription");
-    const data = await response.json();
+    const data = await api("/subscription");
 
     if (!response.ok || !data.subscription) {
       throw new Error(data.error || "Impossible de charger l'abonnement.");
