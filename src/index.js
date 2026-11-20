@@ -150,6 +150,30 @@ AND users.status = 'active'
 
   return result || null;
 }
+async function generateWebsiteSlug(env, projectName) {
+  const base = String(projectName || "site")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 50)
+    .replace(/-+$/g, "") || "site";
+
+  let slug = base;
+  let suffix = 2;
+
+  while (
+    await env.DB.prepare(
+      "SELECT id FROM website_hostings WHERE slug = ? LIMIT 1"
+    ).bind(slug).first()
+  ) {
+    slug = `${base}-${suffix}`;
+    suffix++;
+  }
+
+  return slug;
+}
 async function requireAdmin(request, env) {
   const user = await currentUser(request, env);
 
