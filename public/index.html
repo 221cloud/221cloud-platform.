@@ -1521,8 +1521,8 @@ async function uploadStorageFile() {
   }
 }
 
-async function downloadStorageFile(id) {
-  let activeStoragePreviewUrl = null;
+
+let activeStoragePreviewUrl = null;
 
 async function previewStorageImage(id) {
   try {
@@ -1550,6 +1550,9 @@ async function previewStorageImage(id) {
     }
 
     activeStoragePreviewUrl = URL.createObjectURL(blob);
+
+    const oldOverlay = document.getElementById("storageImagePreview");
+    if (oldOverlay) oldOverlay.remove();
 
     const overlay = document.createElement("div");
     overlay.id = "storageImagePreview";
@@ -1589,6 +1592,8 @@ async function previewStorageImage(id) {
     alert(error.message);
   }
 }
+
+async function downloadStorageFile(id) {
   try {
     const response = await fetch(
       API + "/storage/" + encodeURIComponent(id) + "/download",
@@ -1619,7 +1624,6 @@ async function previewStorageImage(id) {
   }
 }
 
-async function deleteStorageFile(id) {
   if (!confirm("Voulez-vous vraiment supprimer ce fichier du cloud ?")) return;
 
   try {
