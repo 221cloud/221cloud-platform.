@@ -1287,6 +1287,20 @@ async function loadStorageFiles() {
     const percentElement = document.getElementById("storagePercent");
 
     if (usedElement) usedElement.textContent = formatBytes(used);
+    const limitElement = document.getElementById("storageLimitLabel");
+const noticeElement = document.getElementById("storageUploadNotice");
+
+if (limitElement) {
+  limitElement.textContent =
+    "Sur " + formatBytes(limit) + " disponibles · Forfait " + plan.toUpperCase();
+}
+
+if (noticeElement) {
+  noticeElement.textContent =
+    "Limite : " + formatBytes(Number(data.maxFileSize || 0)) +
+    " par fichier. Votre espace personnel est limité à " +
+    formatBytes(limit) + ".";
+}
     if (countElement) countElement.textContent = storageFilesCache.length;
     if (progress) progress.style.width = usagePercent.toFixed(1) + "%";
 
