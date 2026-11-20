@@ -696,7 +696,104 @@ function renderOverview() {
 
   loadOverviewStats();
 }
+async function renderAdmin() {
+  const main = document.getElementById("mainContent");
 
+  main.innerHTML = `
+    <div class="dashboard-hero">
+      <div class="dashboard-kicker">Administration 221Cloud</div>
+      <h1>Espace administrateur 🛡</h1>
+      <p>Gérez et surveillez votre plateforme.</p>
+    </div>
+
+    <div class="section-head">
+      <h2>Statistiques générales</h2>
+    </div>
+
+    <div class="grid" id="adminStats">
+      <div class="card">Chargement des statistiques...</div>
+    </div>
+
+    <div class="section-head">
+      <h2>Utilisateurs inscrits</h2>
+    </div>
+
+    <div class="card" id="adminUsers">
+      Chargement des utilisateurs...
+    </div>
+  `;
+
+  try {
+    const [stats, usersData] = await Promise.all([
+      api("/admin/stats"),
+      api("/admin/users")
+    ]);
+
+    document.getElementById("adminStats").innerHTML = `
+      <div class="card">
+        <div class="muted">Utilisateurs</div>
+        <div class="stat">${Number(stats.users)}</div>
+      </div>
+
+      <div class="card">
+        <div class="muted">Projets</div>
+        <div class="stat">${Number(stats.projects)}</div>
+      </div>
+
+      <div class="card">
+        <div class="muted">Bases de données</div>
+        <div class="stat">${Number(stats.databases)}</div>
+      </div>
+
+      <div class="card">
+        <div class="muted">Fichiers stockés</div>
+        <div class="stat">${Number(stats.files)}</div>
+      </div>
+
+      <div class="card">
+        <div class="muted">Stockage total utilisé</div>
+        <div class="stat">${(Number(stats.storageUsed) / (1024 * 1024)).toFixed(2)} Mo</div>
+      </div>
+    `;
+
+    const users = usersData.users || [];
+
+    document.getElementById("adminUsers").innerHTML = users.length
+      ? `
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr>
+                <th style="text-align:left;padding:12px">Nom</th>
+                <th style="text-align:left;padding:12px">Email</th>
+                <th style="text-align:left;padding:12px">Rôle</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${users.map(user => `
+                <tr>
+                  <td style="padding:12px">${escapeHTML(user.full_name || "—")}</td>
+                  <td style="padding:12px">${escapeHTML(user.email)}</td>
+                  <td style="padding:12px">${escapeHTML(user.role)}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      `
+      : "Aucun utilisateur trouvé.";
+
+  } catch (error) {
+    document.getElementById("adminStats").innerHTML = `
+      <div class="card">
+        Impossible de charger les statistiques : ${escapeHTML(error.message)}
+      </div>
+    `;
+
+    document.getElementById("adminUsers").textContent =
+      "Impossible de charger les utilisateurs.";
+  }
+}
 async function loadOverviewStats() {
   const projectElement = document.getElementById("projectCount");
   const databaseElement = document.getElementById("databaseCount");
