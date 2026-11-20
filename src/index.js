@@ -1217,10 +1217,23 @@ if (path === "/api/subscription" && request.method === "GET") {
         ).bind(user.id).all();
 
         const files = result.results || [];
-        const used = files.reduce(
-          (total, file) => total + Number(file.file_size || 0),
-          0
-        );
+        const usage = await env.DB.prepare(`
+  SELECT
+    COALESCE((
+      SELECT SUM(file_size)
+      FROM cloud_files
+      WHERE user_id = ?
+    ), 0) +
+    COALESCE((
+      SELECT SUM(website_files.file_size)
+      FROM website_files
+      JOIN website_hostings
+        ON website_hostings.id = website_files.hosting_id
+      WHERE website_hostings.user_id = ?
+    ), 0) AS used
+`).bind(user.id, user.id).first();
+
+const used = Number(usage?.used || 0);
         // Récupération du forfait actuel
         const subscription = await env.DB.prepare(`
           SELECT plan, status
