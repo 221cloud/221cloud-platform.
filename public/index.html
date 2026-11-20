@@ -1533,7 +1533,11 @@ async function previewStorageImage(id) {
     if (!file || !String(file.mime_type || "").toLowerCase().startsWith("image/")) {
       throw new Error("Ce fichier n'est pas une image.");
     }
-
+loadingOverlay = document.createElement("div");
+loadingOverlay.id = "storagePreviewLoading";
+loadingOverlay.style.cssText = "position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;";
+loadingOverlay.textContent = "Chargement de l'image...";
+document.body.appendChild(loadingOverlay);
     const response = await fetch(
       API + "/storage/" + encodeURIComponent(id) + "/download?preview=1",
       {credentials:"same-origin"}
