@@ -1662,7 +1662,128 @@ async function downloadStorageFile(id) {
     alert(error.message);
   }
 }
+async function renderHostingPage() {
+  const main = document.getElementById("mainContent");
 
+  main.innerHTML = `
+    <h1 class="page-title">Hébergement web</h1>
+    <p class="page-subtitle">Gérez vos sites web et leurs déploiements.</p>
+    <div class="card">
+      <p>Chargement de vos hébergements...</p>
+    </div>
+  `;
+
+  try {
+    const data = await api("/projects");
+
+    const websiteProjects = (data.projects || []).filter(
+      project => project.type === "website"
+    );
+
+    if (!websiteProjects.length) {
+      main.innerHTML = `
+        <h1 class="page-title">Hébergement web</h1>
+        <p class="page-subtitle">Gérez vos sites web et leurs déploiements.</p>
+        <div class="card">
+          <h3>Aucun site web</h3>
+          <p class="muted">Créez d'abord un projet de type Site web dans la rubrique Mes projets.</p>
+        </div>
+      `;
+      return;
+    }
+
+    const hostingResults = await Promise.all(
+      websiteProjects.map(async project => {
+        try {
+          const result = await api(
+            `/projects/${encodeURIComponent(project.id)}/hosting`
+          );
+
+          return { project, result, error: null };
+        } catch (error) {
+          return { project, result: null, error: error.message };
+        }
+      })
+    );
+
+    main.innerHTML = `
+      <h1 class="page-title">Hébergement web</h1>
+      <p class="page-subtitle">Gérez vos sites web et leurs déploiements.</p>
+
+      ${hostingResults.map(({ project, result, error }) => {
+        if (error) {
+          return `
+            <div class="card">
+              <h3>${escapeHTML(project.name)}</h3>
+              <p class="error-text">${escapeHTML(error)}</p>
+            </div>
+          `;
+        }
+
+        const hosting = result.hosting;
+        const deployments = result.deployments || [];
+
+        return `
+          <div class="card">
+            <h3>${escapeHTML(project.name)}</h3>
+
+            ${
+              hosting
+                ? `
+                  <p>
+                    <span class="muted">État de l'hébergement :</span>
+                    <span class="status">${escapeHTML(hosting.status)}</span>
+                  </p>
+
+                  <p class="muted">Adresse du site :</p>
+                  ${
+                    hosting.status === "active"
+                      ? `<p><a href="${escapeHTML(hosting.url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(hosting.url)}</a></p>`
+                      : `<p class="muted">L'adresse sera accessible après publication du site.</p>`
+                  }
+                `
+                : `
+                  <p class="muted">L'hébergement n'est pas encore associé à ce projet.</p>
+                `
+            }
+
+            <div class="section-head">
+              <h3>Déploiements</h3>
+              <span class="muted">${deployments.length} au total</span>
+            </div>
+
+            ${
+              deployments.length
+                ? deployments.map(deployment => `
+                    <div class="item-card">
+                      <p>
+                        <strong>Déploiement</strong>
+                        <span class="status">${escapeHTML(deployment.status)}</span>
+                      </p>
+                      <p class="muted">
+                        Fichiers : ${Number(deployment.file_count || 0)}
+                      </p>
+                      <p class="muted">
+                        Créé le : ${escapeHTML(formatDate(deployment.created_at))}
+                      </p>
+                    </div>
+                  `).join("")
+                : `<p class="muted">Aucun déploiement pour le moment.</p>`
+            }
+          </div>
+        `;
+      }).join("")}
+    `;
+
+  } catch (error) {
+    main.innerHTML = `
+      <h1 class="page-title">Hébergement web</h1>
+      <div class="card">
+        <p class="error-text">${escapeHTML(error.message)}</p>
+      </div>
+    `;
+  }
+}
 /* AUTRES PAGES */
 
 function renderPlaceholder(title, description) {
