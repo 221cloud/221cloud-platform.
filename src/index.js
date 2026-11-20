@@ -908,6 +908,77 @@ if (path === "/api/subscription" && request.method === "GET") {
       }
     }
 
+    // RATTACHER UN HÉBERGEMENT À UN PROJET EXISTANT
+    const hostingProjectMatch = path.match(
+      /^\/api\/projects\/([^/]+)\/hosting$/
+    );
+
+    if (hostingProjectMatch && request.method === "POST") {
+      try {
+        const user = await currentUser(request, env);
+
+        if (!user) {
+          return json({ error: "Vous devez être connecté." }, 401);
+        }
+
+        const projectId = decodeURIComponent(hostingProjectMatch[1]);
+
+        const project = await env.DB.prepare(
+          `SELECT id, name, type
+           FROM projects
+           WHERE id = ? AND user_id = ?`
+        ).bind(projectId, user.id).first();
+
+        if (!project) {
+          return json({ error: "Projet introuvable." }, 404);
+        }
+
+        if (project.type !== "website") {
+          return json({
+            error: "Ce projet n'est pas un site web."
+          }, 400);
+        }
+
+        let hosting = await env.DB.prepare(
+          `SELECT id, slug, status
+           FROM website_hostings
+           WHERE project_id = ? AND user_id = ?`
+        ).bind(projectId, user.id).first();
+
+        if (!hosting) {
+          const hostingId = crypto.randomUUID();
+          const slug = await generateWebsiteSlug(env, project.name);
+
+          await env.DB.prepare(`
+            INSERT INTO website_hostings (
+              id, user_id, project_id, slug, status
+            )
+            VALUES (?, ?, ?, ?, 'draft')
+          `).bind(hostingId, user.id, projectId, slug).run();
+
+          hosting = {
+            id: hostingId,
+            slug,
+            status: "draft"
+          };
+        }
+
+        return json({
+          message: "Hébergement associé au projet.",
+          hosting: {
+            ...hosting,
+            url: `https://221cloud-platform.elhadji-dame-sall.workers.dev/site/${hosting.slug}`
+          }
+        });
+
+      } catch (error) {
+        console.error("ERREUR HÉBERGEMENT PROJET:", error);
+        return json({
+          error: "Impossible de préparer l'hébergement."
+        }, 500);
+      }
+    }
+
     // CRÉATION D'UN PROJET
     if (path === "/api/projects" && request.method === "POST") {
       try {
