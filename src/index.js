@@ -1257,6 +1257,150 @@ if (path === "/api/subscription" && request.method === "GET") {
       }
     }
 
+    // PUBLIER UN DÉPLOIEMENT
+    const publishDeploymentMatch = path.match(
+      /^\/api\/projects\/([^/]+)\/deployments\/([^/]+)\/publish$/
+    );
+
+    if (publishDeploymentMatch && request.method === "POST") {
+      try {
+        const user = await currentUser(request, env);
+
+        if (!user) {
+          return json({ error: "Vous devez être connecté." }, 401);
+        }
+
+        const projectId = decodeURIComponent(
+          publishDeploymentMatch[1]
+        );
+
+        const deploymentId = decodeURIComponent(
+          publishDeploymentMatch[2]
+        );
+
+        const deployment = await env.DB.prepare(`
+          SELECT
+            deployments.id,
+            deployments.status,
+            website_hostings.id AS hosting_id,
+            website_hostings.slug
+          FROM deployments
+          JOIN projects
+            ON projects.id = deployments.project_id
+          JOIN website_hostings
+            ON website_hostings.project_id = projects.id
+          WHERE deployments.id = ?
+            AND projects.id = ?
+            AND projects.user_id = ?
+            AND projects.type = 'website'
+            AND website_hostings.user_id = ?
+          LIMIT 1
+        `).bind(
+          deploymentId,
+          projectId,
+          user.id,
+          user.id
+        ).first();
+
+        if (!deployment) {
+          return json({
+            error: "Déploiement introuvable."
+          }, 404);
+        }
+
+        if (deployment.status !== "pending") {
+          return json({
+            error: "Ce déploiement n'est pas en attente de publication."
+          }, 409);
+        }
+
+        // Vérifier la présence du fichier index.html à la racine
+        const indexFile = await env.DB.prepare(`
+          SELECT id
+          FROM website_files
+          WHERE hosting_id = ?
+            AND deployment_id = ?
+            AND file_path = 'index.html'
+          LIMIT 1
+        `).bind(
+          deployment.hosting_id,
+          deploymentId
+        ).first();
+
+        if (!indexFile) {
+          return json({
+            error: "Publication impossible : le fichier index.html est absent à la racine du site."
+          }, 400);
+        }
+
+        const deploymentUrl =
+          `https://221cloud-platform.elhadjidame-sall.workers.dev/site/${deployment.slug}`;
+
+        // Activer la nouvelle version sans supprimer les anciennes
+        const results = await env.DB.batch([
+          env.DB.prepare(`
+            UPDATE deployments
+            SET status = 'published',
+                deployment_url = ?
+            WHERE id = ?
+              AND project_id = ?
+              AND status = 'pending'
+          `).bind(
+            deploymentUrl,
+            deploymentId,
+            projectId
+          ),
+
+          env.DB.prepare(`
+            UPDATE website_hostings
+            SET active_deployment_id = ?,
+                status = 'active',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+              AND user_id = ?
+              AND EXISTS (
+                SELECT 1
+                FROM deployments
+                WHERE id = ?
+                  AND project_id = ?
+                  AND status = 'published'
+              )
+          `).bind(
+            deploymentId,
+            deployment.hosting_id,
+            user.id,
+            deploymentId,
+            projectId
+          )
+        ]);
+
+        if (
+          !results[0]?.meta?.changes ||
+          !results[1]?.meta?.changes
+        ) {
+          return json({
+            error: "La publication n'a pas pu être finalisée."
+          }, 409);
+        }
+
+        return json({
+          message: "Site publié avec succès.",
+          deployment: {
+            id: deploymentId,
+            status: "published",
+            url: deploymentUrl
+          }
+        });
+
+      } catch (error) {
+        console.error("ERREUR PUBLICATION SITE:", error);
+
+        return json({
+          error: "Impossible de publier le site."
+        }, 500);
+      }
+    }
+
     // RATTACHER UN HÉBERGEMENT À UN PROJET EXISTANT
     const hostingProjectMatch = path.match(
       /^\/api\/projects\/([^/]+)\/hosting$/
