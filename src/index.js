@@ -1405,7 +1405,80 @@ if (path === "/api/subscription" && request.method === "GET") {
     const hostingProjectMatch = path.match(
       /^\/api\/projects\/([^/]+)\/hosting$/
     );
+    // CONSULTER LES INFORMATIONS D'UN HÉBERGEMENT
+    if (hostingProjectMatch && request.method === "GET") {
+      try {
+        const user = await currentUser(request, env);
 
+        if (!user) {
+          return json({ error: "Vous devez être connecté." }, 401);
+        }
+
+        const projectId = decodeURIComponent(hostingProjectMatch[1]);
+
+        const project = await env.DB.prepare(`
+          SELECT id, name, type
+          FROM projects
+          WHERE id = ? AND user_id = ?
+        `).bind(projectId, user.id).first();
+
+        if (!project) {
+          return json({ error: "Projet introuvable." }, 404);
+        }
+
+        if (project.type !== "website") {
+          return json({
+            error: "Ce projet n'est pas un site web."
+          }, 400);
+        }
+
+        const hosting = await env.DB.prepare(`
+          SELECT
+            id,
+            slug,
+            status,
+            active_deployment_id,
+            created_at,
+            updated_at
+          FROM website_hostings
+          WHERE project_id = ? AND user_id = ?
+        `).bind(projectId, user.id).first();
+
+        const deployments = await env.DB.prepare(`
+          SELECT
+            d.id,
+            d.status,
+            d.deployment_url,
+            d.created_at,
+            COUNT(wf.id) AS file_count
+          FROM deployments d
+          LEFT JOIN website_files wf
+            ON wf.deployment_id = d.id
+          WHERE d.project_id = ?
+          GROUP BY d.id
+          ORDER BY d.created_at DESC
+        `).bind(projectId).all();
+
+        return json({
+          project: {
+            id: project.id,
+            name: project.name
+          },
+          hosting: hosting ? {
+            ...hosting,
+            url: `https://221cloud-platform.elhadjidame-sall.workers.dev/site/${hosting.slug}`
+          } : null,
+          deployments: deployments.results || []
+        });
+
+      } catch (error) {
+        console.error("ERREUR CONSULTATION HÉBERGEMENT:", error);
+
+        return json({
+          error: "Impossible de récupérer les informations de l'hébergement."
+        }, 500);
+      }
+    }
     // HÉBERGEMENT : AFFICHER UN SITE WEB PUBLIÉ
     const siteMatch = path.match(/^\/site\/([^/]+)(?:\/(.*))?$/);
 
