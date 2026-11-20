@@ -1285,7 +1285,7 @@ async function loadStorageFiles() {
 
     if (usedElement) usedElement.textContent = formatBytes(used);
     if (countElement) countElement.textContent = storageFilesCache.length;
-    if (progress) progress.style.width = percent.toFixed(1) + "%";
+    if (progress) progress.style.width = usagePercent.toFixed(1) + "%";
 
     if (percentElement) {
   percentElement.textContent = usagePercent.toFixed(1) + "% utilisé · " +
