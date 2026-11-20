@@ -538,6 +538,26 @@ if (path === "/api/admin/stats") {
     storageUsed: files.storage_used
   });
 }
+if (path === "/api/admin/users") {
+  const auth = await requireAdmin(request, env);
+
+  if (auth.response) return auth.response;
+
+  const result = await env.DB.prepare(
+    `SELECT
+       id,
+       email,
+       full_name,
+       role,
+       created_at
+     FROM users
+     ORDER BY created_at DESC`
+  ).all();
+
+  return json({
+    users: result.results || []
+  });
+}
     if (path === "/api/database-test") {
       try {
         const result = await env.DB.prepare(
