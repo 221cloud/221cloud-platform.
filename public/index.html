@@ -1427,6 +1427,117 @@ function renderAccount() {
   `;
 }
 
+async function renderSubscriptionPage() {
+  const main = document.getElementById("mainContent");
+
+  main.innerHTML = `
+    <h1 class="page-title">Mon abonnement</h1>
+    <p class="page-subtitle">Gérez votre forfait et découvrez nos offres.</p>
+    <div class="card">
+      <p>Chargement de votre abonnement...</p>
+    </div>
+  `;
+
+  try {
+    const response = await api("/subscription");
+    const data = await response.json();
+
+    if (!response.ok || !data.subscription) {
+      throw new Error(data.error || "Impossible de charger l'abonnement.");
+    }
+
+    const subscription = data.subscription;
+
+    const plans = {
+      free: {
+        name: "Free",
+        storage: "1 Go",
+        projects: "1 projet",
+        description: "Pour découvrir 221Cloud."
+      },
+      starter: {
+        name: "Starter",
+        storage: "5 Go",
+        projects: "5 projets",
+        description: "Pour développer vos premiers projets."
+      },
+      pro: {
+        name: "Pro",
+        storage: "20 Go",
+        projects: "20 projets",
+        description: "Pour vos activités numériques avancées."
+      }
+    };
+
+    const plan = plans[subscription.plan] || plans.free;
+
+    main.innerHTML = `
+      <h1 class="page-title">Mon abonnement</h1>
+      <p class="page-subtitle">Gérez votre forfait et découvrez nos offres.</p>
+
+      <div class="card">
+        <div class="muted">Votre forfait actuel</div>
+        <h2>${escapeHTML(plan.name)}</h2>
+        <span class="status online">● ${escapeHTML(subscription.status)}</span>
+        <p>${escapeHTML(plan.description)}</p>
+        <div class="grid">
+          <div>
+            <h3>${plan.storage}</h3>
+            <p class="muted">Stockage prévu</p>
+          </div>
+          <div>
+            <h3>${plan.projects}</h3>
+            <p class="muted">Projets autorisés</p>
+          </div>
+        </div>
+        <p class="muted">Début : ${escapeHTML(subscription.started_at || "Non renseigné")}</p>
+        <p class="muted">Expiration : ${escapeHTML(subscription.expires_at || "Aucune")}</p>
+      </div>
+
+      <div class="section-head">
+        <h2>Nos offres</h2>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h3>Free</h3>
+          <h2>Gratuit</h2>
+          <p>1 Go de stockage</p>
+          <p>1 projet</p>
+          <button disabled>Votre offre</button>
+        </div>
+
+        <div class="card">
+          <h3>Starter</h3>
+          <h2>5 Go</h2>
+          <p>5 projets</p>
+          <p>Pour commencer à développer.</p>
+          <button disabled>Bientôt disponible</button>
+        </div>
+
+        <div class="card">
+          <h3>Pro</h3>
+          <h2>20 Go</h2>
+          <p>20 projets</p>
+          <p>Pour aller plus loin.</p>
+          <button disabled>Bientôt disponible</button>
+        </div>
+      </div>
+
+      <p class="muted">Les capacités des offres sont indicatives et pourront évoluer. Les offres payantes ne sont pas encore disponibles.</p>
+    `;
+  } catch (error) {
+    main.innerHTML = `
+      <h1 class="page-title">Mon abonnement</h1>
+      <div class="card">
+        <p>Impossible de charger votre abonnement.</p>
+        <p class="muted">${escapeHTML(error.message)}</p>
+        <button onclick="renderSubscriptionPage()">Réessayer</button>
+      </div>
+    `;
+  }
+}
+
 function formatDate(value) {
   if (!value) return "Date inconnue";
   const date = new Date(value);
