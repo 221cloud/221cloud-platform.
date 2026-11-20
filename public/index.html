@@ -1322,11 +1322,21 @@ function renderStoragePage() {
     </div>
 
     <div class="section-head">
-      <h2>Mes fichiers</h2>
-      <button class="secondary" onclick="loadStorageFiles()">Actualiser</button>
-    </div>
+  <h2>Mes fichiers</h2>
+  <button class="secondary" onclick="loadStorageFiles()">Actualiser</button>
+</div>
 
-    <div id="storageFilesList">
+<div class="card" style="margin-bottom:15px;">
+  <input
+    type="search"
+    id="storageSearchInput"
+    placeholder="Rechercher un fichier par son nom..."
+    oninput="renderStorageFiles()"
+    style="width:100%;"
+  >
+</div>
+
+<div id="storageFilesList">
       <div class="empty">Chargement des fichiers...</div>
     </div>
   `;
