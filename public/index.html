@@ -1276,6 +1276,7 @@ async function loadStorageFiles() {
     const percent = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
 
     const usedElement = document.getElementById("storageUsed");
+    const limitElement = document.getElementById("storageLimitLabel");
     const countElement = document.getElementById("storageCount");
     const progress = document.getElementById("storageProgress");
     const percentElement = document.getElementById("storagePercent");
