@@ -820,7 +820,42 @@ if (
         }, 500);
       }
     }
+if (path === "/api/subscription" && request.method === "GET") {
+  try {
+    const user = await currentUser(request, env);
 
+    if (!user) {
+      return json({ error: "Non connecté." }, 401);
+    }
+
+    const subscription = await env.DB.prepare(`
+      SELECT
+        plan,
+        status,
+        started_at,
+        expires_at,
+        auto_renew
+      FROM subscriptions
+      WHERE user_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).bind(user.id).first();
+
+    if (!subscription) {
+      return json({
+        error: "Aucun abonnement trouvé."
+      }, 404);
+    }
+
+    return json({ subscription });
+
+  } catch (error) {
+    console.error("ERREUR ABONNEMENT 221CLOUD:", error);
+    return json({
+      error: "Impossible de récupérer l'abonnement."
+    }, 500);
+  }
+}
     // LISTE DES PROJETS
     if (path === "/api/projects" && request.method === "GET") {
       try {
