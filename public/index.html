@@ -1384,6 +1384,7 @@ if (noticeElement) {
   }
 }
 
+
 function renderStorageFiles() {
   const list = document.getElementById("storageFilesList");
   if (!list) return;
@@ -1393,7 +1394,19 @@ function renderStorageFiles() {
     return;
   }
 
-  list.innerHTML = storageFilesCache.map(file => `
+  const searchInput = document.getElementById("storageSearchInput");
+  const search = searchInput ? searchInput.value.trim().toLowerCase() : "";
+
+  const filteredFiles = storageFilesCache.filter(file =>
+    String(file.file_name || "").toLowerCase().includes(search)
+  );
+
+  if (!filteredFiles.length) {
+    list.innerHTML = `<div class="empty">Aucun fichier ne correspond à votre recherche.</div>`;
+    return;
+  }
+
+  list.innerHTML = filteredFiles.map(file => `
     <div class="item-card">
       <div class="file-name">${escapeHTML(file.file_name || "Fichier sans nom")}</div>
       <p class="muted">${escapeHTML(formatBytes(file.file_size))} · ${escapeHTML(file.mime_type || "Fichier")}</p>
@@ -1405,6 +1418,7 @@ function renderStorageFiles() {
     </div>
   `).join("");
 }
+
 
 async function uploadStorageFile() {
   const input = document.getElementById("storageFileInput");
