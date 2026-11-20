@@ -1001,7 +1001,8 @@ const project = await env.DB.prepare(
 
         return json({
           message: "Projet créé avec succès.",
-          project
+          project,
+hosting
         }, 201);
 
       } catch (error) {
