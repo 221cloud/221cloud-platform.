@@ -216,6 +216,29 @@ main {
   flex-wrap:wrap;
   margin-top:15px;
 }
+/* Boutons de la liste des fichiers */
+#storageFilesList .item-actions button {
+  border-radius: 9px;
+  padding: 10px 15px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+#storageFilesList .item-actions button:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.15);
+}
+
+#storageFilesList .item-actions .secondary {
+  background: linear-gradient(135deg, #334b70, #26344c);
+  border: 1px solid rgba(120, 160, 220, 0.25);
+}
+
+#storageFilesList .item-actions .danger {
+  background: linear-gradient(135deg, #a83250, #7d2639);
+  border: 1px solid rgba(255, 120, 150, 0.2);
+}
 .secondary { background:#26344c; color:#e2e8f0; }
 .danger { background:#7d2639; }
 .success-text { color:var(--green); }
