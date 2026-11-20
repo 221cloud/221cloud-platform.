@@ -908,6 +908,79 @@ if (path === "/api/subscription" && request.method === "GET") {
       }
     }
 
+    // CRÉER UN NOUVEAU DÉPLOIEMENT
+    const deploymentProjectMatch = path.match(
+      /^\/api\/projects\/([^/]+)\/deployments$/
+    );
+
+    if (deploymentProjectMatch && request.method === "POST") {
+      try {
+        const user = await currentUser(request, env);
+
+        if (!user) {
+          return json({ error: "Vous devez être connecté." }, 401);
+        }
+
+        const projectId = decodeURIComponent(
+          deploymentProjectMatch[1]
+        );
+
+        const project = await env.DB.prepare(`
+          SELECT id, name, type
+          FROM projects
+          WHERE id = ? AND user_id = ?
+        `).bind(projectId, user.id).first();
+
+        if (!project) {
+          return json({ error: "Projet introuvable." }, 404);
+        }
+
+        if (project.type !== "website") {
+          return json({
+            error: "Ce projet n'est pas un site web."
+          }, 400);
+        }
+
+        const hosting = await env.DB.prepare(`
+          SELECT id, slug, active_deployment_id
+          FROM website_hostings
+          WHERE project_id = ? AND user_id = ?
+        `).bind(projectId, user.id).first();
+
+        if (!hosting) {
+          return json({
+            error: "Aucun hébergement n'est associé à ce projet."
+          }, 404);
+        }
+
+        const deploymentId = crypto.randomUUID();
+
+        await env.DB.prepare(`
+          INSERT INTO deployments (
+            id, project_id, status
+          )
+          VALUES (?, ?, 'pending')
+        `).bind(deploymentId, projectId).run();
+
+        return json({
+          message: "Déploiement préparé.",
+          deployment: {
+            id: deploymentId,
+            project_id: projectId,
+            hosting_id: hosting.id,
+            slug: hosting.slug,
+            status: "pending"
+          }
+        }, 201);
+
+      } catch (error) {
+        console.error("ERREUR CRÉATION DÉPLOIEMENT:", error);
+        return json({
+          error: "Impossible de préparer le déploiement."
+        }, 500);
+      }
+    }
+
     // RATTACHER UN HÉBERGEMENT À UN PROJET EXISTANT
     const hostingProjectMatch = path.match(
       /^\/api\/projects\/([^/]+)\/hosting$/
