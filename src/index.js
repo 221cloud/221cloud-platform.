@@ -506,7 +506,38 @@ export default {
         status: "online"
       });
     }
+if (path === "/api/admin/stats") {
+  const auth = await requireAdmin(request, env);
 
+  if (auth.response) return auth.response;
+
+  const users = await env.DB.prepare(
+    "SELECT COUNT(*) AS total FROM users"
+  ).first();
+
+  const projects = await env.DB.prepare(
+    "SELECT COUNT(*) AS total FROM projects"
+  ).first();
+
+  const databases = await env.DB.prepare(
+    "SELECT COUNT(*) AS total FROM customer_databases"
+  ).first();
+
+  const files = await env.DB.prepare(
+    `SELECT
+       COUNT(*) AS total,
+       COALESCE(SUM(file_size), 0) AS storage_used
+     FROM cloud_files`
+  ).first();
+
+  return json({
+    users: users.total,
+    projects: projects.total,
+    databases: databases.total,
+    files: files.total,
+    storageUsed: files.storage_used
+  });
+}
     if (path === "/api/database-test") {
       try {
         const result = await env.DB.prepare(
