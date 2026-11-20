@@ -1242,7 +1242,9 @@ function renderStoragePage() {
       <p class="muted">Choisissez un fichier à enregistrer dans votre espace cloud.</p>
       <label>Sélectionner un fichier</label>
       <input id="storageFileInput" type="file">
-      <div class="notice">Limite : 20 Mo par fichier. Votre espace personnel est limité à 1 Go.</div>
+      <div class="notice" id="storageUploadNotice">
+  Limite : 20 Mo par fichier. Votre espace personnel dépend de votre forfait.
+</div>
       <button id="uploadButton" onclick="uploadStorageFile()">Envoyer dans le cloud</button>
       <div id="uploadMessage"></div>
     </div>
