@@ -1332,8 +1332,20 @@ function renderStoragePage() {
     id="storageSearchInput"
     placeholder="Rechercher un fichier par son nom..."
     oninput="renderStorageFiles()"
+    style="width:100%; margin-bottom:12px;"
+  >
+
+  <select
+    id="storageTypeFilter"
+    onchange="renderStorageFiles()"
     style="width:100%;"
   >
+    <option value="all">Tous les fichiers</option>
+    <option value="image">Images</option>
+    <option value="video">Vidéos</option>
+    <option value="document">Documents</option>
+    <option value="other">Autres fichiers</option>
+  </select>
 </div>
 
 <div id="storageFilesList">
