@@ -540,7 +540,7 @@ if (path === "/api/admin/stats") {
     storageUsed: files.storage_used
   });
 }
-if (path === "/api/admin/users") {
+if (path === "/api/admin/users" && request.method === "GET") {
   const auth = await requireAdmin(request, env);
 
   if (auth.response) return auth.response;
@@ -551,6 +551,7 @@ if (path === "/api/admin/users") {
        email,
        full_name,
        role,
+       status,
        created_at
      FROM users
      ORDER BY created_at DESC`
