@@ -148,7 +148,32 @@ async function currentUser(request, env) {
 
   return result || null;
 }
+async function requireAdmin(request, env) {
+  const user = await currentUser(request, env);
 
+  if (!user) {
+    return {
+      user: null,
+      response: json({
+        error: "Authentification requise."
+      }, 401)
+    };
+  }
+
+  if (user.role !== "admin") {
+    return {
+      user: null,
+      response: json({
+        error: "Accès réservé aux administrateurs."
+      }, 403)
+    };
+  }
+
+  return {
+    user,
+    response: null
+  };
+}
 const PROJECT_TYPES = ["website", "application", "database", "other"];
 
 function validProjectName(value) {
