@@ -1598,7 +1598,12 @@ document.body.appendChild(loadingOverlay);
     document.addEventListener("keydown", onPreviewKeydown);
     document.body.appendChild(overlay);
 
-  } catch(error) {
+    } catch(error) {
+    if (loadingOverlay) {
+      loadingOverlay.remove();
+      loadingOverlay = null;
+    }
+
     alert(error.message);
   }
 }
