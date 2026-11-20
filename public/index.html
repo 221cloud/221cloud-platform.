@@ -1225,9 +1225,13 @@ function renderDatabases() {
         <h3>▤ ${escapeHTML(database.name)}</h3>
         <div class="muted">Projet associé : ${escapeHTML(project ? project.name : "Aucun")}</div>
         <div class="muted">Créée le : ${escapeHTML(formatDate(database.created_at))}</div>
-        <div class="item-actions">
-          <button class="danger" onclick="deleteDatabase('${escapeHTML(database.id)}')">Supprimer</button>
-        </div>
+              <div class="item-actions">
+        <button class="secondary" onclick="editProject('${escapeHTML(project.id)}')">Modifier</button>
+        ${project.type === "website" ? `
+          <button onclick="enableProjectHosting('${escapeHTML(project.id)}')">Activer l'hébergement</button>
+        ` : ""}
+        <button class="danger" onclick="deleteProject('${escapeHTML(project.id)}')">Supprimer</button>
+      </div>
       </div>
     `;
   }).join("");
