@@ -1070,9 +1070,12 @@ function renderProjects() {
       <p><span class="status">${escapeHTML(project.status || "pending")}</span></p>
       <div class="muted">Créé le : ${escapeHTML(formatDate(project.created_at))}</div>
       <div class="item-actions">
-        <button class="secondary" onclick="editProject('${escapeHTML(project.id)}')">Modifier</button>
-        <button class="danger" onclick="deleteProject('${escapeHTML(project.id)}')">Supprimer</button>
-      </div>
+  <button class="secondary" onclick="editProject('${escapeHTML(project.id)}')">Modifier</button>
+  ${project.type === "website" ? `
+    <button onclick="enableProjectHosting('${escapeHTML(project.id)}')">Activer l'hébergement</button>
+  ` : ""}
+  <button class="danger" onclick="deleteProject('${escapeHTML(project.id)}')">Supprimer</button>
+</div>
     </div>
   `).join("");
 }
