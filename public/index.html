@@ -1525,6 +1525,8 @@ async function uploadStorageFile() {
 let activeStoragePreviewUrl = null;
 
 async function previewStorageImage(id) {
+  let loadingOverlay = null;
+
   try {
     const file = storageFilesCache.find(item => item.id === id);
 
