@@ -1250,11 +1250,14 @@ if (path === "/api/subscription" && request.method === "GET") {
           Math.round((used / limit) * 100)
         );
         return json({
-          files,
-          used,
-          limit: STORAGE_LIMIT_BYTES,
-          maxFileSize: MAX_FILE_SIZE_BYTES
-        });
+  files,
+  used,
+  limit,
+  available,
+  usagePercent,
+  plan,
+  maxFileSize: MAX_FILE_SIZE_BYTES
+});
 
       } catch (error) {
         console.error("ERREUR LISTE STOCKAGE:", error);
