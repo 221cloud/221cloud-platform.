@@ -912,10 +912,13 @@ export default {
           );
 
           return json({
-            error: "Le transfert vers le stockage cloud a échoué.",
-            diagnostic: errorDetails.slice(0, 1000),
-            storage_status: uploadResponse.status
-          }, 502);
+  error: "Le transfert vers le stockage cloud a échoué.",
+  diagnostic:
+    "Taille fichier : " + file.size +
+    " octets ; taille buffer : " + buffer.byteLength +
+    " octets. " + errorDetails.slice(0, 800),
+  storage_status: uploadResponse.status
+}, 502);
         }
 
         try {
