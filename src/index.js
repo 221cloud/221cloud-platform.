@@ -1039,59 +1039,66 @@ export default {
         const mimeType = file.type || "application/octet-stream";
         const fileName = safeFileName(file.name);
 
-        const uploadResponse = await b2Request(
-          env,
-          "PUT",
-          objectKey,
-          buffer,
-          mimeType
-        );
+       
+        let uploadedFile;
 
-        if (!uploadResponse.ok) {
-          const errorDetails = await uploadResponse.text();
-
+        try {
+          uploadedFile = await b2NativeUpload(
+            env,
+            objectKey,
+            buffer,
+            mimeType
+          );
+        } catch (uploadError) {
           console.error(
             "ERREUR ENVOI BACKBLAZE:",
-            uploadResponse.status,
-            errorDetails.slice(0, 1500)
+            uploadError
           );
 
           return json({
-  error: "Le transfert vers le stockage cloud a échoué.",
-  diagnostic:
-    "Taille fichier : " + file.size +
-    " octets ; taille buffer : " + buffer.byteLength +
-    " octets. " + errorDetails.slice(0, 800),
-  storage_status: uploadResponse.status
-}, 502);
+            error: "Le transfert vers le stockage cloud a échoué.",
+            diagnostic: String(uploadError.message || uploadError)
+          }, 502);
         }
 
         try {
           await env.DB.prepare(
             `INSERT INTO cloud_files
-             (id, user_id, file_name, file_size, mime_type, storage_key)
-             VALUES (?, ?, ?, ?, ?, ?)`
+             (id, user_id, file_name, file_size, mime_type, storage_key, b2_file_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
           ).bind(
             id,
             user.id,
             fileName,
             file.size,
             mimeType,
-            objectKey
+            objectKey,
+            uploadedFile.fileId
           ).run();
         } catch (databaseError) {
-          console.error("ERREUR ENREGISTREMENT FICHIER:", databaseError);
+          console.error(
+            "ERREUR ENREGISTREMENT FICHIER:",
+            databaseError
+          );
 
           try {
-            await b2Request(env, "DELETE", objectKey);
+            await b2NativeDelete(
+              env,
+              uploadedFile.fileId,
+              uploadedFile.fileName
+            );
           } catch (cleanupError) {
-            console.error("ERREUR NETTOYAGE FICHIER:", cleanupError);
+            console.error(
+              "ERREUR NETTOYAGE FICHIER:",
+              cleanupError
+            );
           }
 
           return json({
             error: "Le fichier a été transféré mais son enregistrement a échoué."
           }, 500);
         }
+
 
         return json({
           message: "Fichier envoyé avec succès.",
