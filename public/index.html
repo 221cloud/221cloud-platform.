@@ -1407,6 +1407,7 @@ if (noticeElement) {
 }
 
 
+
 function renderStorageFiles() {
   const list = document.getElementById("storageFilesList");
   if (!list) return;
@@ -1417,14 +1418,50 @@ function renderStorageFiles() {
   }
 
   const searchInput = document.getElementById("storageSearchInput");
-  const search = searchInput ? searchInput.value.trim().toLowerCase() : "";
+  const typeFilter = document.getElementById("storageTypeFilter");
 
-  const filteredFiles = storageFilesCache.filter(file =>
-    String(file.file_name || "").toLowerCase().includes(search)
-  );
+  const search = searchInput
+    ? searchInput.value.trim().toLowerCase()
+    : "";
+
+  const selectedType = typeFilter
+    ? typeFilter.value
+    : "all";
+
+  const filteredFiles = storageFilesCache.filter(file => {
+    const fileName = String(file.file_name || "").toLowerCase();
+    const mimeType = String(file.mime_type || "").toLowerCase();
+
+    const matchesSearch = fileName.includes(search);
+
+    const isImage = mimeType.startsWith("image/");
+    const isVideo = mimeType.startsWith("video/");
+
+    const isDocument =
+      mimeType.startsWith("text/") ||
+      mimeType === "application/pdf" ||
+      mimeType.includes("document") ||
+      mimeType.includes("wordprocessingml") ||
+      mimeType.includes("msword") ||
+      mimeType.includes("spreadsheet") ||
+      mimeType.includes("presentation") ||
+      mimeType.includes("opendocument") ||
+      mimeType === "application/rtf";
+
+    let matchesType = true;
+
+    if (selectedType === "image") matchesType = isImage;
+    else if (selectedType === "video") matchesType = isVideo;
+    else if (selectedType === "document") matchesType = isDocument;
+    else if (selectedType === "other") {
+      matchesType = !isImage && !isVideo && !isDocument;
+    }
+
+    return matchesSearch && matchesType;
+  });
 
   if (!filteredFiles.length) {
-    list.innerHTML = `<div class="empty">Aucun fichier ne correspond à votre recherche.</div>`;
+    list.innerHTML = `<div class="empty">Aucun fichier ne correspond à votre recherche ou à cette catégorie.</div>`;
     return;
   }
 
@@ -1440,6 +1477,7 @@ function renderStorageFiles() {
     </div>
   `).join("");
 }
+
 
 
 async function uploadStorageFile() {
