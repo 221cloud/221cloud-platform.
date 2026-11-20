@@ -1341,14 +1341,24 @@ const used = Number(usage?.used || 0);
 
         const maxStorage = storageLimits[plan] ?? storageLimits.free;
 
-        // Calcul de l'espace déjà utilisé
-        const usage = await env.DB.prepare(`
-          SELECT COALESCE(SUM(file_size), 0) AS used
-          FROM cloud_files
-          WHERE user_id = ?
-        `).bind(user.id).first();
+        // Calcul de l'espace utilisé : cloud privé + hébergement web
+const usage = await env.DB.prepare(`
+  SELECT
+    COALESCE((
+      SELECT SUM(file_size)
+      FROM cloud_files
+      WHERE user_id = ?
+    ), 0) +
+    COALESCE((
+      SELECT SUM(website_files.file_size)
+      FROM website_files
+      JOIN website_hostings
+        ON website_hostings.id = website_files.hosting_id
+      WHERE website_hostings.user_id = ?
+    ), 0) AS used
+`).bind(user.id, user.id).first();
 
-        const used = Number(usage?.used || 0);
+const used = Number(usage?.used || 0);
 
         // Vérification du quota
         if (used + file.size > maxStorage) {
