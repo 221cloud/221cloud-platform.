@@ -704,6 +704,36 @@ if (
           email,
           fullName || null,
           passwordHash
+                ).run();
+
+        // Créer automatiquement l'abonnement Free
+        await env.DB.prepare(`
+          INSERT INTO subscriptions (
+            id,
+            user_id,
+            plan,
+            status,
+            created_at,
+            started_at,
+            expires_at,
+            auto_renew
+          )
+          SELECT
+            ?,
+            ?,
+            'free',
+            'active',
+            CURRENT_TIMESTAMP,
+            CURRENT_TIMESTAMP,
+            NULL,
+            0
+          WHERE NOT EXISTS (
+            SELECT 1 FROM subscriptions WHERE user_id = ?
+          )
+        `).bind(
+          crypto.randomUUID(),
+          userId,
+          userId
         ).run();
 
         const token = await createSession(env, userId);
