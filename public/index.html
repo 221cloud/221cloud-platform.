@@ -697,6 +697,7 @@ function renderOverview() {
 
   loadOverviewStats();
 }
+
 async function renderAdmin() {
   const main = document.getElementById("mainContent");
 
@@ -716,7 +717,7 @@ async function renderAdmin() {
     </div>
 
     <div class="section-head">
-      <h2>Utilisateurs inscrits</h2>
+      <h2>Gestion des utilisateurs</h2>
     </div>
 
     <div class="card" id="adminUsers">
@@ -758,8 +759,9 @@ async function renderAdmin() {
     `;
 
     const users = usersData.users || [];
+    const usersContainer = document.getElementById("adminUsers");
 
-    document.getElementById("adminUsers").innerHTML = users.length
+    usersContainer.innerHTML = users.length
       ? `
         <div style="overflow-x:auto">
           <table style="width:100%;border-collapse:collapse">
@@ -768,21 +770,105 @@ async function renderAdmin() {
                 <th style="text-align:left;padding:12px">Nom</th>
                 <th style="text-align:left;padding:12px">Email</th>
                 <th style="text-align:left;padding:12px">Rôle</th>
+                <th style="text-align:left;padding:12px">Statut</th>
+                <th style="text-align:left;padding:12px">Actions</th>
               </tr>
             </thead>
             <tbody>
-              ${users.map(user => `
-                <tr>
-                  <td style="padding:12px">${escapeHTML(user.full_name || "—")}</td>
-                  <td style="padding:12px">${escapeHTML(user.email)}</td>
-                  <td style="padding:12px">${escapeHTML(user.role)}</td>
-                </tr>
-              `).join("")}
+              ${users.map(user => {
+                const isSelf = currentUser && currentUser.id === user.id;
+                const encodedId = encodeURIComponent(user.id);
+
+                return `
+                  <tr>
+                    <td style="padding:12px">
+                      ${escapeHTML(user.full_name || "—")}
+                    </td>
+
+                    <td style="padding:12px">
+                      ${escapeHTML(user.email)}
+                    </td>
+
+                    <td style="padding:12px">
+                      ${user.role === "admin" ? "Administrateur" : "Client"}
+                    </td>
+
+                    <td style="padding:12px">
+                      ${user.status === "active" ? "Actif" : "Suspendu"}
+                    </td>
+
+                    <td style="padding:12px">
+                      <div style="display:flex;gap:8px;flex-wrap:wrap;min-width:190px">
+
+                        <button
+                          type="button"
+                          data-action="role"
+                          data-user-id="${encodedId}"
+                          data-value="${user.role === "admin" ? "client" : "admin"}"
+                          ${isSelf ? "disabled" : ""}
+                        >
+                          ${user.role === "admin" ? "Rétrograder" : "Promouvoir"}
+                        </button>
+
+                        <button
+                          type="button"
+                          data-action="status"
+                          data-user-id="${encodedId}"
+                          data-value="${user.status === "active" ? "suspended" : "active"}"
+                          ${isSelf ? "disabled" : ""}
+                        >
+                          ${user.status === "active" ? "Suspendre" : "Réactiver"}
+                        </button>
+
+                      </div>
+                    </td>
+                  </tr>
+                `;
+              }).join("")}
             </tbody>
           </table>
         </div>
       `
       : "Aucun utilisateur trouvé.";
+
+    usersContainer.onclick = async function(event) {
+      const button = event.target.closest("button[data-action]");
+
+      if (!button || button.disabled) return;
+
+      const userId = decodeURIComponent(button.dataset.userId);
+      const action = button.dataset.action;
+      const value = button.dataset.value;
+
+      const message = action === "role"
+        ? `Confirmer le changement de rôle vers "${value}" ?`
+        : `Confirmer le changement de statut vers "${value}" ?`;
+
+      if (!confirm(message)) return;
+
+      button.disabled = true;
+
+      try {
+        const changes = action === "role"
+          ? { role: value }
+          : { status: value };
+
+        await api("/admin/users/" + encodeURIComponent(userId), {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(changes)
+        });
+
+        alert("Modification effectuée.");
+        await renderAdmin();
+
+      } catch (error) {
+        alert("Erreur : " + error.message);
+        button.disabled = false;
+      }
+    };
 
   } catch (error) {
     document.getElementById("adminStats").innerHTML = `
@@ -794,6 +880,8 @@ async function renderAdmin() {
     document.getElementById("adminUsers").textContent =
       "Impossible de charger les utilisateurs.";
   }
+}
+
 }
 async function loadOverviewStats() {
   const projectElement = document.getElementById("projectCount");
