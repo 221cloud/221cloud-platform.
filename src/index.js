@@ -1059,7 +1059,7 @@ if (type === "website") {
     id: hostingId,
     slug,
     status: "draft",
-    url: `https://221cloud-platform.elhadji-dame-sall.workers.dev/site/${slug}`
+    url: `https://221cloud-platform.elhadjidame-sall.workers.devsite/${slug}`
   };
 }
 
