@@ -1192,7 +1192,6 @@ export default {
           }, downloadResponse.status === 404 ? 404 : 502);
         }
 
-        }
 
         const headers = new Headers();
 
