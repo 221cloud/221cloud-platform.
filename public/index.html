@@ -991,9 +991,6 @@ async function loadOverviewStats() {
 
     if (fileElement) fileElement.textContent = files.length;
     if (usedElement) usedElement.textContent = formatBytes(used);
-if (limitElement) {
-  limitElement.textContent = "Sur " + formatBytes(limit) + " disponibles · Forfait " + plan.toUpperCase();
-}
     const remaining = document.getElementById("overviewStorageRemaining");
     const progress = document.getElementById("overviewStorageProgress");
 
