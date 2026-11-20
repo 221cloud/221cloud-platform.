@@ -1150,11 +1150,33 @@ export default {
           return json({ error: "Fichier introuvable." }, 404);
         }
 
-        const downloadResponse = await b2Request(
-          env,
-          "GET",
-          file.storage_key
-        );
+        
+        let downloadResponse;
+
+        try {
+          if (file.b2_file_id) {
+            downloadResponse = await b2NativeDownload(
+              env,
+              file.b2_file_id
+            );
+          } else {
+            downloadResponse = await b2Request(
+              env,
+              "GET",
+              file.storage_key
+            );
+          }
+        } catch (downloadError) {
+          console.error(
+            "ERREUR TELECHARGEMENT BACKBLAZE:",
+            downloadError
+          );
+
+          return json({
+            error: "Impossible de récupérer le fichier.",
+            diagnostic: String(downloadError.message || downloadError)
+          }, 502);
+        }
 
         if (!downloadResponse.ok) {
           const errorDetails = await downloadResponse.text();
@@ -1168,6 +1190,8 @@ export default {
           return json({
             error: "Impossible de récupérer le fichier."
           }, downloadResponse.status === 404 ? 404 : 502);
+        }
+
         }
 
         const headers = new Headers();
