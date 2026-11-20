@@ -561,6 +561,90 @@ if (path === "/api/admin/users" && request.method === "GET") {
     users: result.results || []
   });
 }
+if (
+  path.startsWith("/api/admin/users/") &&
+  request.method === "PATCH"
+) {
+  const auth = await requireAdmin(request, env);
+
+  if (auth.response) return auth.response;
+
+  const userId = decodeURIComponent(
+    path.slice("/api/admin/users/".length)
+  );
+
+  const body = await request.json();
+
+  const target = await env.DB.prepare(
+    `SELECT id, role, status
+     FROM users
+     WHERE id = ?
+     LIMIT 1`
+  ).bind(userId).first();
+
+  if (!target) {
+    return json({ error: "Utilisateur introuvable." }, 404);
+  }
+
+  const role = body.role === undefined
+    ? target.role
+    : String(body.role);
+
+  const status = body.status === undefined
+    ? target.status
+    : String(body.status);
+
+  if (!["admin", "client"].includes(role)) {
+    return json({ error: "Rôle invalide." }, 400);
+  }
+
+  if (!["active", "suspended"].includes(status)) {
+    return json({ error: "Statut invalide." }, 400);
+  }
+
+  if (
+    target.id === auth.user.id &&
+    (role !== "admin" || status !== "active")
+  ) {
+    return json({
+      error: "Vous ne pouvez pas rétrograder ou suspendre votre propre compte."
+    }, 403);
+  }
+
+  if (
+    target.role === "admin" &&
+    target.status === "active" &&
+    (role !== "admin" || status !== "active")
+  ) {
+    const admins = await env.DB.prepare(
+      `SELECT COUNT(*) AS total
+       FROM users
+       WHERE role = 'admin' AND status = 'active'`
+    ).first();
+
+    if (admins.total <= 1) {
+      return json({
+        error: "Impossible de modifier le dernier administrateur actif."
+      }, 403);
+    }
+  }
+
+  await env.DB.prepare(
+    `UPDATE users
+     SET role = ?, status = ?
+     WHERE id = ?`
+  ).bind(role, status, userId).run();
+
+  return json({
+    success: true,
+    message: "Utilisateur mis à jour.",
+    user: {
+      id: userId,
+      role,
+      status
+    }
+  });
+}
     if (path === "/api/database-test") {
       try {
         const result = await env.DB.prepare(
