@@ -142,7 +142,9 @@ async function currentUser(request, env) {
     `SELECT users.id, users.email, users.full_name, users.role
      FROM sessions
      JOIN users ON users.id = sessions.user_id
-     WHERE sessions.token_hash = ? AND sessions.expires_at > ?
+     WHERE sessions.token_hash = ?
+AND sessions.expires_at > ?
+AND users.status = 'active'
      LIMIT 1`
   ).bind(tokenHash, new Date().toISOString()).first();
 
