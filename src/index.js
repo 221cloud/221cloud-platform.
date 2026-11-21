@@ -2716,6 +2716,69 @@ headers.set(
       }
     }
 
+
+    // STOCKAGE : RENOMMAGE D'UN FICHIER
+    const storageRenameMatch = path.match(
+      /^\\/api\\/storage\\/([^/]+)\\/rename$/
+    );
+
+    if (storageRenameMatch) {
+      if (request.method !== "PATCH") {
+        return json({ error: "Méthode non autorisée." }, 405);
+      }
+
+      try {
+        const user = await currentUser(request, env);
+
+        if (!user) {
+          return json({ error: "Vous devez être connecté." }, 401);
+        }
+
+        const fileId = decodeURIComponent(storageRenameMatch[1]);
+        const body = await request.json();
+        const fileName = String(body.name || "").trim();
+
+        if (
+          !fileName ||
+          fileName.length > 255 ||
+          fileName === "." ||
+          fileName === ".." ||
+          fileName.includes("/") ||
+          fileName.includes("\\\\") ||
+          /[\\u0000-\\u001F\\u007F]/.test(fileName)
+        ) {
+          return json({ error: "Nom de fichier invalide." }, 400);
+        }
+
+        const file = await env.DB.prepare(
+          "SELECT id, file_name FROM cloud_files WHERE id = ? AND user_id = ? LIMIT 1"
+        ).bind(fileId, user.id).first();
+
+        if (!file) {
+          return json({ error: "Fichier introuvable." }, 404);
+        }
+
+        if (file.file_name === fileName) {
+          return json({ message: "Le fichier porte déjà ce nom." });
+        }
+
+        await env.DB.prepare(
+          "UPDATE cloud_files SET file_name = ? WHERE id = ? AND user_id = ?"
+        ).bind(fileName, fileId, user.id).run();
+
+        return json({
+          message: "Fichier renommé avec succès.",
+          file_name: fileName
+        });
+
+      } catch (error) {
+        console.error("ERREUR RENOMMAGE STOCKAGE:", error);
+        return json({
+          error: "Impossible de renommer le fichier."
+        }, 500);
+      }
+    }
+
     // STOCKAGE : SUPPRESSION D'UN FICHIER
     const storageMatch = path.match(/^\/api\/storage\/([^/]+)$/);
 
