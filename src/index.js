@@ -485,7 +485,14 @@ async function b2NativeUpload(env, objectKey, body, contentType) {
     );
   }
 
-  return JSON.parse(responseText);
+  const uploadedResult = JSON.parse(responseText);
+
+  // Conserver l'empreinte calculée localement, indépendamment du format
+  // de la réponse B2, afin de pouvoir la vérifier au téléchargement.
+  return {
+    ...uploadedResult,
+    contentSha1: sha1
+  };
 }
 
 async function b2NativeDownload(env, fileId) {
