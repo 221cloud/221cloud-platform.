@@ -1871,6 +1871,42 @@ function renderStorageStats(used, limit, available) {
     <div class="progress" style="margin-bottom:16px;">
       <div class="progress-bar" style="width:${availablePercent.toFixed(1)}%;"></div>
     </div>
+    <div style="display:flex; align-items:center; gap:24px; flex-wrap:wrap; margin:18px 0 22px;">
+      <div
+        role="img"
+        aria-label="Graphique circulaire de la répartition des fichiers actifs par catégorie"
+        style="width:190px; height:190px; flex:0 0 190px; border-radius:50%; background:${totalActiveBytes > 0 ? `conic-gradient(${categories.map((item, index) => {
+          const start = categories.slice(0, index).reduce((sum, category) => sum + category.bytes, 0) / totalActiveBytes * 100;
+          const end = start + item.bytes / totalActiveBytes * 100;
+          const colors = ["#438cff", "#8b72ff", "#24d6a0", "#f59e0b"];
+          return `${colors[index]} ${start.toFixed(2)}% ${end.toFixed(2)}%`;
+        }).join(", ")})` : "conic-gradient(#283653 0% 100%)"}; display:grid; place-items:center; box-shadow:0 8px 24px rgba(0,0,0,.2);"
+      >
+        <div style="width:112px; height:112px; border-radius:50%; background:#11182b; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;">
+          <strong style="font-size:21px;">${totalFiles}</strong>
+          <span class="muted" style="font-size:11px;">fichiers actifs</span>
+        </div>
+      </div>
+      <div style="flex:1; min-width:190px;">
+        ${categories.map((item, index) => {
+          const percent = totalActiveBytes > 0 ? (item.bytes / totalActiveBytes) * 100 : 0;
+          const colors = ["#438cff", "#8b72ff", "#24d6a0", "#f59e0b"];
+          return `
+            <div style="display:flex; align-items:center; gap:10px; margin:10px 0;">
+              <span aria-hidden="true" style="width:12px; height:12px; flex:0 0 12px; border-radius:3px; background:${colors[index]};"></span>
+              <div style="flex:1; min-width:0;">
+                <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+                  <strong>${item.name}</strong>
+                  <span class="muted">${percent.toFixed(1)} %</span>
+                </div>
+                <div class="muted" style="font-size:12px;">${item.count} fichier(s) · ${formatBytes(item.bytes)}</div>
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </div>
+    <h4 style="margin:8px 0 12px;">Détail par catégorie</h4>
     ${categories.map(item => {
       const percent = totalActiveBytes > 0 ? (item.bytes / totalActiveBytes) * 100 : 0;
       return `
