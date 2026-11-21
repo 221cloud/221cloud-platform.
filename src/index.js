@@ -2719,7 +2719,7 @@ headers.set(
 
     // STOCKAGE : RENOMMAGE D'UN FICHIER
     const storageRenameMatch = path.match(
-      /^\\/api\\/storage\\/([^/]+)\\/rename$/
+      /^\/api\/storage\/([^/]+)\/rename$/
     );
 
     if (storageRenameMatch) {
@@ -2744,8 +2744,8 @@ headers.set(
           fileName === "." ||
           fileName === ".." ||
           fileName.includes("/") ||
-          fileName.includes("\\\\") ||
-          /[\\u0000-\\u001F\\u007F]/.test(fileName)
+          fileName.includes("\\") ||
+          /[\u0000-\u001F\u007F]/.test(fileName)
         ) {
           return json({ error: "Nom de fichier invalide." }, 400);
         }
