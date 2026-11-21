@@ -4498,7 +4498,7 @@ function renderAccount() {
 
   document.getElementById("mainContent").innerHTML = `
     <h1 class="page-title">Mon compte</h1>
-    <p class="page-subtitle">Informations de votre compte 221Cloud.</p>
+    <p class="page-subtitle">Informations et sécurité de votre compte 221Cloud.</p>
 
     <div class="card form-card">
       <h3>Informations personnelles</h3>
@@ -4506,7 +4506,85 @@ function renderAccount() {
       <p><span class="muted">E-mail :</span><br>${escapeHTML(email)}</p>
       <p><span class="muted">Rôle :</span><br>${escapeHTML(currentUser?.role || "client")}</p>
     </div>
+
+    <div class="card form-card">
+      <h3>Changer le mot de passe</h3>
+      <p class="muted">Choisis un mot de passe de 12 à 128 caractères. Ton accès actuel sera conservé et les autres sessions seront déconnectées.</p>
+      <form onsubmit="changeAccountPassword(event)">
+        <label for="accountCurrentPassword">Mot de passe actuel</label>
+        <input id="accountCurrentPassword" type="password" autocomplete="current-password" required>
+        <label for="accountNewPassword">Nouveau mot de passe</label>
+        <input id="accountNewPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+        <label for="accountConfirmPassword">Confirmer le nouveau mot de passe</label>
+        <input id="accountConfirmPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+        <button type="submit">Modifier le mot de passe</button>
+      </form>
+      <div id="accountPasswordMessage" aria-live="polite"></div>
+    </div>
+
+    <div class="card form-card">
+      <h3>Sessions connectées</h3>
+      <p class="muted">Déconnecte les autres appareils et navigateurs associés à ton compte. Cet appareil restera connecté.</p>
+      <button class="secondary" type="button" onclick="revokeOtherSessions()">Déconnecter les autres sessions</button>
+      <div id="accountSessionsMessage" aria-live="polite"></div>
+    </div>
   `;
+}
+
+async function changeAccountPassword(event) {
+  event.preventDefault();
+
+  const currentInput = document.getElementById("accountCurrentPassword");
+  const newInput = document.getElementById("accountNewPassword");
+  const confirmInput = document.getElementById("accountConfirmPassword");
+  const message = document.getElementById("accountPasswordMessage");
+
+  if (newInput.value !== confirmInput.value) {
+    message.innerHTML = '<p class="error-text">Les deux nouveaux mots de passe ne correspondent pas.</p>';
+    return;
+  }
+
+  const submitButton = event.submitter;
+  if (submitButton) submitButton.disabled = true;
+
+  try {
+    const result = await api("/account/password", {
+      method: "POST",
+      body: JSON.stringify({
+        current_password: currentInput.value,
+        new_password: newInput.value
+      })
+    });
+
+    message.innerHTML = '<p class="success-text">' + escapeHTML(result.message) + '</p>';
+    currentInput.value = "";
+    newInput.value = "";
+    confirmInput.value = "";
+  } catch (error) {
+    message.innerHTML = '<p class="error-text">' + escapeHTML(error.message) + '</p>';
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
+}
+
+async function revokeOtherSessions() {
+  const confirmed = confirm(
+    "Confirmer la déconnexion de tous les autres appareils et navigateurs ? Cet appareil restera connecté."
+  );
+  if (!confirmed) return;
+
+  const message = document.getElementById("accountSessionsMessage");
+  try {
+    const result = await api("/account/revoke-sessions", {
+      method: "POST",
+      body: JSON.stringify({})
+    });
+    message.innerHTML = '<p class="success-text">' +
+      escapeHTML(result.message) +
+      ' (' + Number(result.revoked || 0) + ' session(s) révoquée(s))</p>';
+  } catch (error) {
+    message.innerHTML = '<p class="error-text">' + escapeHTML(error.message) + '</p>';
+  }
 }
 
 async function renderSubscriptionPage() {
