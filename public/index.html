@@ -2178,6 +2178,7 @@ function renderStoragePage() {
         <button class="secondary" type="button" onclick="exportStorageHistoryCSV()">⬇ Exporter en CSV</button>
         <button class="secondary" type="button" onclick="exportStorageHistoryPDF()">📄 Créer un PDF</button>
         <button class="secondary" type="button" onclick="downloadStorageMetadataBackup()">🗂 Sauvegarde complète</button>
+        <button class="secondary" type="button" onclick="restoreStorageBackup()">↥ Restaurer une sauvegarde ZIP</button>
       </div>
       <label for="storageHistoryFilter">Filtrer les opérations</label>
       <select id="storageHistoryFilter" onchange="applyStorageHistoryFilters()" style="width:100%;margin:8px 0 12px;">
@@ -2734,6 +2735,197 @@ async function downloadStorageMetadataBackup() {
       button.textContent = originalLabel;
     }
   }
+}
+
+function read221ZipArchive(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const view = new DataView(buffer);
+  const decoder = new TextDecoder("utf-8");
+  let endOffset = -1;
+  const minOffset = Math.max(0, bytes.length - 65557);
+  for (let offset = bytes.length - 22; offset >= minOffset; offset--) {
+    if (view.getUint32(offset, true) === 0x06054B50) {
+      endOffset = offset;
+      break;
+    }
+  }
+  if (endOffset < 0) throw new Error("Archive ZIP invalide : fin du fichier introuvable.");
+  const entryCount = view.getUint16(endOffset + 10, true);
+  const centralSize = view.getUint32(endOffset + 12, true);
+  const centralOffset = view.getUint32(endOffset + 16, true);
+  if (entryCount === 0xFFFF || centralSize === 0xFFFFFFFF || centralOffset === 0xFFFFFFFF) {
+    throw new Error("Ce format ZIP volumineux n'est pas pris en charge.");
+  }
+  if (centralOffset + centralSize > bytes.length) throw new Error("Index ZIP incomplet ou endommagé.");
+  const entries = new Map();
+  let cursor = centralOffset;
+  for (let i = 0; i < entryCount; i++) {
+    if (view.getUint32(cursor, true) !== 0x02014B50) throw new Error("Index ZIP invalide.");
+    const flags = view.getUint16(cursor + 8, true);
+    const method = view.getUint16(cursor + 10, true);
+    const crc = view.getUint32(cursor + 16, true);
+    const compressedSize = view.getUint32(cursor + 20, true);
+    const uncompressedSize = view.getUint32(cursor + 24, true);
+    const nameLength = view.getUint16(cursor + 28, true);
+    const extraLength = view.getUint16(cursor + 30, true);
+    const commentLength = view.getUint16(cursor + 32, true);
+    const localOffset = view.getUint32(cursor + 42, true);
+    const name = decoder.decode(bytes.slice(cursor + 46, cursor + 46 + nameLength));
+    cursor += 46 + nameLength + extraLength + commentLength;
+    if (flags & 1) throw new Error("Archive protégée par mot de passe non prise en charge.");
+    if (method !== 0) throw new Error("Cette archive utilise une compression non prise en charge. Utilisez une sauvegarde ZIP créée par 221Cloud.");
+    if (compressedSize !== uncompressedSize) throw new Error("Taille ZIP incohérente.");
+    if (view.getUint32(localOffset, true) !== 0x04034B50) throw new Error("Entrée ZIP invalide.");
+    const localNameLength = view.getUint16(localOffset + 26, true);
+    const localExtraLength = view.getUint16(localOffset + 28, true);
+    const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+    const dataEnd = dataStart + compressedSize;
+    if (dataEnd > bytes.length) throw new Error("Fichier tronqué dans l'archive ZIP.");
+    const data = bytes.slice(dataStart, dataEnd);
+    if (zip221Crc32(data) !== crc) throw new Error("Vérification d'intégrité échouée pour : " + name);
+    entries.set(name, data);
+  }
+  return entries;
+}
+
+async function restoreStorageBackup() {
+  const button = document.querySelector('#storageHistoryCard button[onclick="restoreStorageBackup()"]');
+  const originalLabel = button?.textContent || "↥ Restaurer une sauvegarde ZIP";
+  const picker = document.createElement("input");
+  picker.type = "file";
+  picker.accept = ".zip,application/zip";
+  picker.style.display = "none";
+  document.body.appendChild(picker);
+  picker.onchange = async () => {
+    const archiveFile = picker.files?.[0];
+    picker.remove();
+    if (!archiveFile) return;
+    if (archiveFile.size > 110 * 1024 * 1024) {
+      alert("Cette archive dépasse la limite de restauration de 110 Mo sur navigateur mobile.");
+      return;
+    }
+    if (button) { button.disabled = true; button.textContent = "Analyse de l’archive..."; }
+    try {
+      const entries = read221ZipArchive(await archiveFile.arrayBuffer());
+      const metadataBytes = entries.get("221Cloud-metadata.json");
+      if (!metadataBytes) throw new Error("Fichier 221Cloud-metadata.json introuvable. Sélectionnez une sauvegarde complète créée par 221Cloud.");
+      let backup;
+      try { backup = JSON.parse(new TextDecoder("utf-8").decode(metadataBytes)); }
+      catch (e) { throw new Error("Le fichier de métadonnées est illisible."); }
+      if (backup.product !== "221Cloud" || !backup.contents) throw new Error("Cette archive ne correspond pas au format de sauvegarde 221Cloud.");
+      const files = Array.isArray(backup.contents.files) ? backup.contents.files : [];
+      const folders = Array.isArray(backup.contents.folders) ? backup.contents.folders : [];
+      if (!files.length && !folders.length) throw new Error("Cette sauvegarde ne contient aucun fichier ni dossier à restaurer.");
+      const totalBytes = files.reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0);
+      const oversized = files.filter(file => Number(file.file_size) > MAX_FILE_SIZE_BYTES);
+      if (oversized.length) throw new Error("Certains fichiers dépassent la limite actuelle de 20 Mo par fichier. Aucun élément n'a été restauré.");
+      const storage = await api("/storage");
+      const used = Number(storage.used || 0);
+      const limit = Number(storage.limit || STORAGE_LIMIT_BYTES);
+      if (used + totalBytes > limit) throw new Error("Espace insuffisant. Il faut " + formatBytes(totalBytes) + " supplémentaires, mais il ne reste que " + formatBytes(Math.max(0, limit - used)) + ".");
+      const fileEntries = [];
+      const folderMap = new Map(folders.map(folder => [folder.id, folder]));
+      const pathCache = new Map();
+      function folderPath(id, seen = new Set()) {
+        if (!id || !folderMap.has(id) || seen.has(id)) return "";
+        if (pathCache.has(id)) return pathCache.get(id);
+        const folder = folderMap.get(id);
+        const next = new Set(seen); next.add(id);
+        const parent = folderPath(folder.parent_id, next);
+        const name = String(folder.name || "Dossier").replace(/[\\/]/g, "_");
+        const path = parent ? parent + "/" + name : name;
+        pathCache.set(id, path);
+        return path;
+      }
+      for (const file of files) {
+        const originalPath = folderPath(file.folder_id);
+        const prefix = file.deleted_at ? "Corbeille/" : "";
+        const safeName = String(file.file_name || "fichier").replace(/[\\/]/g, "_");
+        const expectedPath = prefix + (originalPath ? originalPath + "/" : "") + safeName;
+        const data = entries.get(expectedPath);
+        if (!data) throw new Error("Fichier manquant dans l'archive : " + expectedPath + ". Aucun élément n'a été restauré.");
+        if (data.length !== Number(file.file_size || 0)) throw new Error("Taille incorrecte pour " + safeName + ". Aucun élément n'a été restauré.");
+        fileEntries.push({ metadata: file, data, isTrash: Boolean(file.deleted_at) });
+      }
+      const stamp = new Date().toLocaleString("fr-FR").replace(/[/:]/g, "-");
+      const rootName = "Restauration 221Cloud - " + stamp;
+      if (!confirm(
+        "Restaurer cette sauvegarde dans un nouveau dossier « " + rootName + " » ?\n\n" +
+        "Fichiers : " + files.length + "\nDossiers d'origine : " + folders.length + "\nVolume : " + formatBytes(totalBytes) +
+        "\n\nLes fichiers de la sauvegarde seront ajoutés comme copies. Les originaux ne seront ni remplacés ni supprimés. Les éléments de l'ancienne corbeille seront réimportés dans un sous-dossier « Corbeille »."
+      )) return;
+      if (button) button.textContent = "Création des dossiers...";
+      const rootResult = await api("/storage/folders", { method: "POST", body: JSON.stringify({ name: rootName, parent_id: null }) });
+      const restoredRootId = rootResult.folder?.id;
+      if (!restoredRootId) throw new Error("Le dossier de restauration n'a pas pu être créé.");
+      const createdFolders = new Map();
+      const pending = [...folders];
+      let passes = 0;
+      while (pending.length && passes <= folders.length) {
+        passes++;
+        let progressed = false;
+        for (let i = pending.length - 1; i >= 0; i--) {
+          const folder = pending[i];
+          if (folder.parent_id && !createdFolders.has(folder.parent_id)) continue;
+          const parentId = folder.parent_id ? createdFolders.get(folder.parent_id) : restoredRootId;
+          const result = await api("/storage/folders", {
+            method: "POST",
+            body: JSON.stringify({ name: String(folder.name || "Dossier").slice(0, 80), parent_id: parentId })
+          });
+          createdFolders.set(folder.id, result.folder.id);
+          pending.splice(i, 1);
+          progressed = true;
+        }
+        if (!progressed) break;
+      }
+      if (pending.length) throw new Error("La structure de certains dossiers est invalide. Les éléments déjà créés sont conservés dans « " + rootName + " ».");
+      const trashFolderIds = new Map();
+      if (fileEntries.some(item => item.isTrash)) {
+        const result = await api("/storage/folders", { method: "POST", body: JSON.stringify({ name: "Corbeille", parent_id: restoredRootId }) });
+        trashFolderIds.set(null, result.folder.id);
+        const pendingTrash = [...folders];
+        let trashPasses = 0;
+        while (pendingTrash.length && trashPasses <= folders.length) {
+          trashPasses++;
+          let progressed = false;
+          for (let i = pendingTrash.length - 1; i >= 0; i--) {
+            const folder = pendingTrash[i];
+            if (folder.parent_id && !trashFolderIds.has(folder.parent_id)) continue;
+            const parentId = folder.parent_id ? trashFolderIds.get(folder.parent_id) : trashFolderIds.get(null);
+            const result = await api("/storage/folders", { method: "POST", body: JSON.stringify({ name: String(folder.name || "Dossier").slice(0, 80), parent_id: parentId }) });
+            trashFolderIds.set(folder.id, result.folder.id);
+            pendingTrash.splice(i, 1);
+            progressed = true;
+          }
+          if (!progressed) break;
+        }
+        if (pendingTrash.length) throw new Error("Structure de la corbeille invalide. Les éléments déjà restaurés sont conservés.");
+      }
+      let restoredCount = 0;
+      for (let i = 0; i < fileEntries.length; i++) {
+        const item = fileEntries[i];
+        if (button) button.textContent = "Importation " + (i + 1) + "/" + fileEntries.length + "...";
+        const destinationId = item.isTrash
+          ? (item.metadata.folder_id ? trashFolderIds.get(item.metadata.folder_id) : trashFolderIds.get(null))
+          : (item.metadata.folder_id ? createdFolders.get(item.metadata.folder_id) : restoredRootId);
+        if (!destinationId) throw new Error("Dossier de destination introuvable pour " + item.metadata.file_name + ". " + restoredCount + " fichier(s) ont déjà été restaurés dans « " + rootName + " ».");
+        const form = new FormData();
+        const blob = new Blob([item.data], { type: item.metadata.mime_type || "application/octet-stream" });
+        form.append("file", blob, String(item.metadata.file_name || "fichier"));
+        form.append("folder_id", destinationId);
+        await api("/storage/upload", { method: "POST", body: form });
+        restoredCount++;
+      }
+      await loadStorageFiles();
+      alert("Restauration terminée.\n\nFichiers copiés : " + restoredCount + "\nDossiers recréés : " + (1 + createdFolders.size + trashFolderIds.size) + "\nVolume importé : " + formatBytes(totalBytes) + "\n\nLes originaux et la sauvegarde ZIP sont restés inchangés. Les fichiers de l'ancienne corbeille sont maintenant des copies actives rangées dans le dossier « Corbeille » de la restauration.");
+    } catch (error) {
+      alert("Restauration interrompue : " + error.message + "\n\nLes originaux ne sont pas modifiés. Si l'importation avait déjà commencé, les copies déjà importées restent dans le dossier de restauration.");
+      try { await loadStorageFiles(); } catch (e) {}
+    } finally {
+      if (button) { button.disabled = false; button.textContent = originalLabel; }
+    }
+  };
+  picker.click();
 }
 
 async function exportStorageHistoryPDF() {
