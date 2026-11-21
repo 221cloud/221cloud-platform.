@@ -2073,7 +2073,7 @@ function renderDatabases() {
     return `
       <div class="item-card">
         <h3>▤ ${escapeHTML(database.name)}</h3>
-        <div class="muted">Projet associé : ${escapeHTML(project ? project.name : "Aucun")}</div>
+        <div class="muted">Projet associé : ${escapeHTML(project ? project.name : (database.project_name || "Aucun"))}</div>
         <div class="muted">Créée le : ${escapeHTML(formatDate(database.created_at))}</div>
               
       </div>
