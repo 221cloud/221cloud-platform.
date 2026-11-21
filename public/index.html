@@ -1715,7 +1715,18 @@ async function renderHostingPage() {
           return `
             <div class="card">
               <h3>${escapeHTML(project.name)}</h3>
-              <div style="margin:16px 0">
+              <p class="error-text">${escapeHTML(error)}</p>
+            </div>
+          `;
+        }
+
+        const hosting = result.hosting;
+        const deployments = result.deployments || [];
+
+        return `
+          <div class="card">
+            <h3>${escapeHTML(project.name)}</h3>
+            <div style="margin:16px 0">
   <label for="websiteFiles-${escapeHTML(project.id)}">
     Sélectionner les fichiers du site
   </label>
@@ -1735,17 +1746,6 @@ async function renderHostingPage() {
 >
   Envoyer et publier le site
 </button>
-              <p class="error-text">${escapeHTML(error)}</p>
-            </div>
-          `;
-        }
-
-        const hosting = result.hosting;
-        const deployments = result.deployments || [];
-
-        return `
-          <div class="card">
-            <h3>${escapeHTML(project.name)}</h3>
 
             ${
               hosting
