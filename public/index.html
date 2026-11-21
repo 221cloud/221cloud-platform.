@@ -1759,7 +1759,7 @@ async function createStorageFolder() {
 async function moveStorageFile(id) {
   const choices = [{ id: null, name: "Racine" }, ...storageFoldersCache];
   const description = choices.map((folder, index) => `${index}. ${folder.name}`).join("\n");
-  const answer = prompt("Choisissez le dossier de destination en indiquant son numéro :\\n" + description, "0");
+  const answer = prompt("Choisissez le dossier de destination en indiquant son numéro :\n" + description, "0");
   if (answer === null) return;
   const index = Number(answer);
   if (!Number.isInteger(index) || index < 0 || index >= choices.length) {
