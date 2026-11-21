@@ -1308,7 +1308,8 @@ async function loadOverviewStats() {
   const results = await Promise.allSettled([
     api("/projects"),
     api("/databases"),
-    api("/storage")
+    api("/storage"),
+    api("/account/security-log")
   ]);
 
   if (results[0].status === "fulfilled") {
@@ -1357,7 +1358,8 @@ async function loadOverviewStats() {
   renderDashboardNotifications(
     results[0].status === "fulfilled" ? projectsCache : [],
     results[1].status === "fulfilled" ? databasesCache : [],
-    results[2].status === "fulfilled" ? results[2].value : null
+    results[2].status === "fulfilled" ? results[2].value : null,
+    results[3].status === "fulfilled" ? results[3].value : null
   );
 
   if (refreshStatus) {
@@ -1571,7 +1573,7 @@ async function renderAllNotificationsPage() {
   renderDashboardNotificationsFromCache();
 }
 
-function renderDashboardNotifications(projects, databases, storageData) {
+function renderDashboardNotifications(projects, databases, storageData, securityData) {
   const notifications = [];
   const now = Date.now();
   const recentWindow = 7 * 24 * 60 * 60 * 1000;
@@ -1635,6 +1637,36 @@ function renderDashboardNotifications(projects, databases, storageData) {
     }
   }
 
+  const securityLabels = {
+    login: "Nouvelle connexion au compte",
+    logout: "Déconnexion du compte",
+    password_change: "Mot de passe modifié",
+    sessions_revoked: "Autres sessions déconnectées"
+  };
+
+  (securityData?.events || []).forEach(event => {
+    const timestamp = new Date(event.created_at || 0).getTime();
+    if (!Number.isFinite(timestamp) || timestamp <= 0 || now - timestamp > recentWindow) return;
+
+    const title = securityLabels[event.action] || "Activité de sécurité";
+    const message = [event.description, event.device_info]
+      .filter(Boolean)
+      .join(" · ");
+    const important = event.action === "password_change" || event.action === "sessions_revoked";
+
+    notifications.push({
+      id: "security-" + String(event.id),
+      title,
+      message,
+      date: event.created_at,
+      icon: important ? "🔐" : "🛡️",
+      level: important ? "warning" : "info",
+      priority: important ? 4 : 2,
+      page: "account",
+      category: "account"
+    });
+  });
+
   notifications.sort((a, b) => {
     const priorityDifference = Number(b.priority || 0) - Number(a.priority || 0);
     if (priorityDifference !== 0) return priorityDifference;
@@ -1645,7 +1677,7 @@ function renderDashboardNotifications(projects, databases, storageData) {
 
   dashboardNotificationsCache = notifications.map(item => ({
     ...item,
-    id: encodeURIComponent([item.title, item.message, item.date || ""].join("|"))
+    id: item.id || encodeURIComponent([item.title, item.message, item.date || ""].join("|"))
   }));
   renderDashboardNotificationsFromCache();
 }
