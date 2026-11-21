@@ -569,7 +569,11 @@ function renderWebsiteFileTree(files, baseUrl = "") {
         </details>
       `).join("");
 
-    const filesHTML = node.files.map(({ name, file }) => `
+    const filesHTML = node.files.map(({ name, file }) => {
+  const fileUrl = `${baseUrl}/${file.file_path.split("/").map(encodeURIComponent).join("/")}`;
+  const canPreview = ["text/html", "image/png", "image/jpeg", "image/gif", "image/svg+xml", "image/webp"].includes(file.mime_type);
+
+  return `
       <div class="item-card">
         <p><strong>📄 ${escapeHTML(name)}</strong></p>
         <p class="muted">
