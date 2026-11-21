@@ -1880,10 +1880,14 @@ async function uploadStorageFile() {
   message.innerHTML = `<p class="muted">Envoi de ${escapeHTML(file.name)}...</p>`;
 
   try {
-    await api("/storage/upload", {
+    const uploadResult = await api("/storage/upload", {
       method:"POST",
       body:formData
     });
+
+    if ((uploadResult.file?.folder_id || null) !== (activeStorageFolderId || null)) {
+      throw new Error("Le fichier a été envoyé, mais le dossier de destination n'a pas été confirmé. Actualisez la liste avant de réessayer.");
+    }
 
     message.innerHTML = `<p class="success-text">Fichier envoyé avec succès !</p>`;
     input.value = "";
