@@ -521,6 +521,11 @@ function safeFileName(value) {
     .slice(0, 255);
 }
 
+async function ensureStorageFoldersSchema(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS storage_folders (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, parent_id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)").run();
+  const columns = await env.DB.prepare("PRAGMA table_info(cloud_files)").all();
+  if (!(columns.results || []).some(column => column.name === "folder_id")) await env.DB.prepare("ALTER TABLE cloud_files ADD COLUMN folder_id TEXT").run();
+}
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -1051,8 +1056,14 @@ if (path === "/api/subscription" && request.method === "GET") {
           }, 400);
         }
 
+        await ensureStorageFoldersSchema(env);
         const form = await request.formData();
         const file = form.get("file");
+        const requestedFolderId = String(form.get("folder_id") || "").trim() || null;
+        if (requestedFolderId) {
+          const targetFolder = await env.DB.prepare("SELECT id FROM storage_folders WHERE id = ? AND user_id = ? LIMIT 1").bind(requestedFolderId, user.id).first();
+          if (!targetFolder) return json({ error: "Dossier de destination introuvable." }, 404);
+        }
 
         if (!file || typeof file.arrayBuffer !== "function") {
           return json({
@@ -2351,6 +2362,57 @@ hosting
       }
     }
 
+
+    // STOCKAGE : CRÉATION D'UN DOSSIER
+    if (path === "/api/storage/folders" && request.method === "POST") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureStorageFoldersSchema(env);
+        const body = await request.json();
+        const name = String(body.name || "").trim();
+        const parentId = String(body.parent_id || "").trim() || null;
+        if (!name || name.length > 80 || /[\\/\\\\\\u0000-\\u001F\\u007F]/.test(name) || name === "." || name === "..") return json({ error: "Nom de dossier invalide." }, 400);
+        if (parentId) {
+          const parent = await env.DB.prepare("SELECT id FROM storage_folders WHERE id = ? AND user_id = ? LIMIT 1").bind(parentId, user.id).first();
+          if (!parent) return json({ error: "Dossier parent introuvable." }, 404);
+        }
+        const duplicate = await env.DB.prepare("SELECT id FROM storage_folders WHERE user_id = ? AND parent_id IS ? AND name = ? COLLATE NOCASE LIMIT 1").bind(user.id, parentId, name).first();
+        if (duplicate) return json({ error: "Un dossier porte déjà ce nom à cet emplacement." }, 409);
+        const id = crypto.randomUUID();
+        await env.DB.prepare("INSERT INTO storage_folders (id, user_id, name, parent_id) VALUES (?, ?, ?, ?)").bind(id, user.id, name, parentId).run();
+        return json({ message: "Dossier créé avec succès.", folder: { id, name, parent_id: parentId } }, 201);
+      } catch (error) {
+        console.error("ERREUR CRÉATION DOSSIER:", error);
+        return json({ error: "Impossible de créer le dossier." }, 500);
+      }
+    }
+
+    // STOCKAGE : DÉPLACEMENT D'UN FICHIER
+    const storageMoveMatch = path.match(/^\\/api\\/storage\\/([^/]+)\\/move$/);
+    if (storageMoveMatch) {
+      if (request.method !== "PATCH") return json({ error: "Méthode non autorisée." }, 405);
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureStorageFoldersSchema(env);
+        const fileId = decodeURIComponent(storageMoveMatch[1]);
+        const body = await request.json();
+        const folderId = String(body.folder_id || "").trim() || null;
+        const file = await env.DB.prepare("SELECT id FROM cloud_files WHERE id = ? AND user_id = ? LIMIT 1").bind(fileId, user.id).first();
+        if (!file) return json({ error: "Fichier introuvable." }, 404);
+        if (folderId) {
+          const folder = await env.DB.prepare("SELECT id FROM storage_folders WHERE id = ? AND user_id = ? LIMIT 1").bind(folderId, user.id).first();
+          if (!folder) return json({ error: "Dossier de destination introuvable." }, 404);
+        }
+        await env.DB.prepare("UPDATE cloud_files SET folder_id = ? WHERE id = ? AND user_id = ?").bind(folderId, fileId, user.id).run();
+        return json({ message: "Fichier déplacé avec succès.", folder_id: folderId });
+      } catch (error) {
+        console.error("ERREUR DÉPLACEMENT FICHIER:", error);
+        return json({ error: "Impossible de déplacer le fichier." }, 500);
+      }
+    }
+
     // STOCKAGE : LISTE DES FICHIERS ET QUOTA
     if (path === "/api/storage" && request.method === "GET") {
       try {
@@ -2360,14 +2422,19 @@ hosting
           return json({ error: "Vous devez être connecté." }, 401);
         }
 
+        await ensureStorageFoldersSchema(env);
         const result = await env.DB.prepare(
-          `SELECT id, file_name, file_size, mime_type, created_at
+          `SELECT id, file_name, file_size, mime_type, created_at, folder_id
            FROM cloud_files
            WHERE user_id = ?
            ORDER BY created_at DESC`
         ).bind(user.id).all();
-
+        const folderResult = await env.DB.prepare(
+          `SELECT id, name, parent_id, created_at FROM storage_folders
+           WHERE user_id = ? ORDER BY name COLLATE NOCASE ASC`
+        ).bind(user.id).all();
         const files = result.results || [];
+        const folders = folderResult.results || [];
         const usage = await env.DB.prepare(`
   SELECT
     COALESCE((
@@ -2415,6 +2482,7 @@ const used = Number(usage?.used || 0);
         );
         return json({
   files,
+  folders,
   used,
   limit,
   available,
@@ -2555,8 +2623,8 @@ const used = Number(usage?.used || 0);
         try {
           await env.DB.prepare(
             `INSERT INTO cloud_files
-             (id, user_id, file_name, file_size, mime_type, storage_key, b2_file_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`
+             (id, user_id, file_name, file_size, mime_type, storage_key, b2_file_id, folder_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
           ).bind(
             id,
             user.id,
@@ -2564,7 +2632,8 @@ const used = Number(usage?.used || 0);
             file.size,
             mimeType,
             objectKey,
-            uploadedFile.fileId
+            uploadedFile.fileId,
+            requestedFolderId
           ).run();
         } catch (databaseError) {
           console.error(
