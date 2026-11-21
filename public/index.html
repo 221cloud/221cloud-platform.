@@ -526,7 +526,7 @@ async function api(path, options = {}) {
 
   return data;
 }
-function renderWebsiteFileTree(files, baseUrl = "") {
+function renderWebsiteFileTree(files, baseUrl = "", projectId = "") {
   const root = {
     folders: {},
     files: []
@@ -593,6 +593,15 @@ const downloadUrl = `${fileUrl}?download=1`;
           : ""
       }
       <p><a href="${escapeHTML(downloadUrl)}">Télécharger</a></p>
+      ${
+  file.file_path === "index.html"
+    ? ""
+    : `<p>
+        <button type="button" onclick="deleteWebsiteFile('${escapeHTML(projectId)}', '${escapeHTML(file.id)}')">
+          Supprimer
+        </button>
+      </p>`
+}
     </div>
   `;
 }).join("");
@@ -601,6 +610,24 @@ const downloadUrl = `${fileUrl}?download=1`;
   }
 
   return renderNode(root);
+}
+async function deleteWebsiteFile(projectId, fileId) {
+  if (!confirm("Voulez-vous vraiment supprimer ce fichier du site ?")) {
+    return;
+  }
+
+  try {
+    await api(
+      `/projects/${encodeURIComponent(projectId)}/hosting/files/${encodeURIComponent(fileId)}`,
+      { method: "DELETE" }
+    );
+
+    alert("Fichier supprimé avec succès.");
+    await renderHostingPage();
+
+  } catch (error) {
+    alert(error.message);
+  }
 }
 function escapeHTML(value) {
   return String(value ?? "").replace(/[&<>"']/g, char => ({
@@ -1964,7 +1991,8 @@ ${
   websiteFiles.length
     ? renderWebsiteFileTree(
     websiteFiles,
-    hosting?.url || ""
+    hosting?.url || "",
+    project.id
   )
     : `<p class="muted">Aucun fichier dans le déploiement actif.</p>`
 }
