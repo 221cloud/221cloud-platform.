@@ -3094,6 +3094,7 @@ async function restoreHostedSitesFromBackup() {
       return;
     }
     if (button) { button.disabled = true; button.textContent = "Analyse des sites..."; }
+    let pendingDeployment = null;
 
     try {
       const entries = read221ZipArchive(await archiveFile.arrayBuffer());
@@ -3224,7 +3225,6 @@ async function restoreHostedSitesFromBackup() {
 
       let publishedSites = 0;
       let uploadedMissing = 0;
-      let pendingDeployment = null;
       for (let planIndex = 0; planIndex < plans.length; planIndex++) {
         const plan = plans[planIndex];
         if (button) button.textContent = "Préparation site " + (planIndex + 1) + "/" + plans.length + "...";
@@ -3276,7 +3276,7 @@ async function restoreHostedSitesFromBackup() {
       );
     } catch (error) {
       let cleanupMessage = "";
-      if (typeof pendingDeployment !== "undefined" && pendingDeployment) {
+      if (pendingDeployment) {
         try {
           const currentHosting = await api("/projects/" + encodeURIComponent(pendingDeployment.projectId) + "/hosting");
           if (currentHosting.hosting?.active_deployment_id === pendingDeployment.deploymentId) {
