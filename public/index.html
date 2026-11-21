@@ -2398,9 +2398,27 @@ function renderStorageFolders() {
       : "Destination : Racine";
   }
   if (breadcrumb) {
-    breadcrumb.innerHTML = activeStorageFolderId
-      ? `<button class="secondary" onclick="openStorageFolder('${escapeHTML(currentFolder?.parent_id || "")}')">← Retour</button> <span style="margin-left:8px;">Dossier : ${escapeHTML(currentFolder?.name || "")}</span> <button class="secondary" onclick="openStorageFolder('')" style="margin-left:8px;">Racine</button>`
-      : "Emplacement : Racine";
+    const path = [];
+    let cursor = currentFolder;
+    const visited = new Set();
+
+    while (cursor && !visited.has(cursor.id)) {
+      visited.add(cursor.id);
+      path.unshift(cursor);
+      cursor = storageFoldersCache.find(folder => folder.id === cursor.parent_id) || null;
+    }
+
+    breadcrumb.innerHTML = [
+      `<button type="button" class="secondary" onclick="openStorageFolder('')">Racine</button>`,
+      ...path.map((folder, index) => {
+        const folderId = escapeHTML(folder.id);
+        const folderName = escapeHTML(folder.name);
+        const isCurrent = index === path.length - 1;
+        return isCurrent
+          ? `<span aria-current="location" style="font-weight:700;color:#fff;">› ${folderName}</span>`
+          : `<button type="button" class="secondary" onclick="openStorageFolder('${folderId}')">› ${folderName}</button>`;
+      })
+    ].join(' ');
   }
 
   const folders = storageFoldersCache.filter(folder =>
