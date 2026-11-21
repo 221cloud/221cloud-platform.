@@ -1011,6 +1011,7 @@ function renderOverview() {
         <div class="progress">
           <div class="progress-bar" id="overviewStorageProgress"></div>
         </div>
+        <div class="muted" id="overviewStoragePercent">Calcul en cours...</div>
       </div>
     </div>
 
@@ -1282,7 +1283,9 @@ async function loadOverviewStats() {
     if (remaining) {
       remaining.textContent = formatBytes(Math.max(0, limit - used)) + " disponibles";
     }
-    if (progress) progress.style.width = usagePercent.toFixed(1) + "%";
+    if (progress) progress.style.width = percent.toFixed(1) + "%";
+    const percentLabel = document.getElementById("overviewStoragePercent");
+    if (percentLabel) percentLabel.textContent = percent.toFixed(1) + " % utilisé";
   } else {
     if (fileElement) fileElement.textContent = "—";
     if (usedElement) usedElement.textContent = "—";
