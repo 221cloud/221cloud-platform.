@@ -623,6 +623,7 @@ let databasesCache = [];
 let storageFilesCache = [];
 let storageFoldersCache = [];
 let storageTrashCache = [];
+let storageHistoryCache = [];
 let dashboardNotificationsCache = [];
 let activeStorageFolderId = null;
 let storageView = "files";
@@ -2170,6 +2171,16 @@ function renderStoragePage() {
       <button class="secondary" onclick="loadStorageHistory()">↻ Actualiser</button>
     </div>
     <div class="card" id="storageHistoryCard">
+      <label for="storageHistoryFilter">Filtrer les opérations</label>
+      <select id="storageHistoryFilter" onchange="renderStorageHistory(storageHistoryCache)" style="width:100%;margin:8px 0 12px;">
+        <option value="all">Toutes les opérations</option>
+        <option value="upload">Fichiers ajoutés</option>
+        <option value="move">Fichiers déplacés</option>
+        <option value="trash">Fichiers mis à la corbeille</option>
+        <option value="restore">Fichiers restaurés</option>
+        <option value="permanent_delete">Suppressions définitives</option>
+      </select>
+      <div id="storageHistoryResultCount" class="muted" style="margin-bottom:10px;"></div>
       <div id="storageHistoryList" class="muted">Chargement de l'historique...</div>
     </div>
   `;
@@ -2464,7 +2475,8 @@ async function loadStorageHistory() {
   if (container) container.innerHTML = '<div class="muted">Chargement de l’historique...</div>';
   try {
     const data = await api("/storage/history");
-    renderStorageHistory(data.activities || []);
+    storageHistoryCache = data.activities || [];
+    renderStorageHistory(storageHistoryCache);
   } catch (error) {
     if (container) {
       container.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message) + '</div>';
@@ -2475,8 +2487,20 @@ async function loadStorageHistory() {
 function renderStorageHistory(activities) {
   const container = document.getElementById("storageHistoryList");
   if (!container) return;
+  const filter = document.getElementById("storageHistoryFilter")?.value || "all";
+  const filteredActivities = filter === "all"
+    ? activities
+    : activities.filter(item => item.action === filter);
+  const count = document.getElementById("storageHistoryResultCount");
+  if (count) {
+    count.textContent = filteredActivities.length + " opération(s) affichée(s) sur " + activities.length;
+  }
   if (!activities.length) {
     container.innerHTML = '<div class="empty">Aucune activité enregistrée pour le moment. Les prochaines opérations de stockage apparaîtront ici.</div>';
+    return;
+  }
+  if (!filteredActivities.length) {
+    container.innerHTML = '<div class="empty">Aucune opération ne correspond à ce filtre.</div>';
     return;
   }
   const labels = {
@@ -2486,7 +2510,7 @@ function renderStorageHistory(activities) {
     restore: { icon: "♻️", title: "Fichier restauré" },
     permanent_delete: { icon: "❌", title: "Fichier supprimé définitivement" }
   };
-  container.innerHTML = activities.map(item => {
+  container.innerHTML = filteredActivities.map(item => {
     const info = labels[item.action] || { icon: "📁", title: "Activité de stockage" };
     const date = item.created_at ? new Date(item.created_at.replace(" ", "T") + "Z") : null;
     const dateLabel = date && !Number.isNaN(date.getTime())
