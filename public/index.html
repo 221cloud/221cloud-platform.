@@ -980,7 +980,7 @@ function showPage(page) {
   else if (page === "notifications") renderAllNotificationsPage();
     else if (page === "subscription") renderSubscriptionPage();
   else if (page === "hosting") renderHostingPage();
-  else if (page === "applications") renderPlaceholder("Applications", "La gestion de vos applications sera ajoutée prochainement.");
+  else if (page === "applications") renderApplicationsPage();
   else if (page === "admin") renderAdmin();
   else if (page === "account") renderAccount();
 }
@@ -4562,6 +4562,166 @@ ${
   }
 }
 /* AUTRES PAGES */
+
+/* APPLICATIONS */
+
+async function renderApplicationsPage() {
+  document.getElementById("mainContent").innerHTML = `
+    <h1 class="page-title">Applications</h1>
+    <p class="page-subtitle">Créez et suivez vos applications depuis votre espace 221Cloud.</p>
+
+    <div class="card form-card">
+      <h3>＋ Nouvelle application</h3>
+      <label for="applicationName">Nom de l'application</label>
+      <input id="applicationName" maxlength="100" placeholder="Exemple : Mon application mobile">
+      <button id="createApplicationButton" type="button" onclick="createApplication()">Créer l'application</button>
+      <div id="applicationMessage" aria-live="polite"></div>
+    </div>
+
+    <div class="notice">
+      Les applications sont enregistrées comme des projets de type « Application ».
+      Elles utilisent donc la limite de projets de votre forfait, partagée avec les sites web et les autres projets.
+    </div>
+
+    <div class="section-head">
+      <h2>Mes applications</h2>
+      <span class="muted" id="applicationTotal">Chargement...</span>
+    </div>
+    <div id="applicationsList"><div class="empty">Chargement des applications...</div></div>
+  `;
+
+  await loadApplications();
+}
+
+async function loadApplications() {
+  const list = document.getElementById("applicationsList");
+  if (!list) return;
+
+  list.innerHTML = `<div class="empty">Chargement des applications...</div>`;
+
+  try {
+    const data = await api("/projects");
+    projectsCache = Array.isArray(data.projects) ? data.projects : [];
+    renderApplications(projectsCache.filter(project => project.type === "application"));
+  } catch (error) {
+    list.innerHTML = `<div class="notice error-text">${escapeHTML(error.message)}</div>`;
+    const total = document.getElementById("applicationTotal");
+    if (total) total.textContent = "Indisponible";
+  }
+}
+
+function renderApplications(applications) {
+  const list = document.getElementById("applicationsList");
+  const total = document.getElementById("applicationTotal");
+  if (!list) return;
+
+  if (total) total.textContent = applications.length + " application(s)";
+
+  if (!applications.length) {
+    list.innerHTML = `
+      <div class="empty">
+        <h3>Aucune application pour le moment</h3>
+        <p>Créez votre première application avec le formulaire ci-dessus.</p>
+      </div>
+    `;
+    return;
+  }
+
+  list.innerHTML = applications.map(application => {
+    const status = application.status === "active"
+      ? "Active"
+      : application.status === "deployed"
+        ? "Déployée"
+        : application.status === "pending"
+          ? "En préparation"
+          : (application.status || "En préparation");
+
+    return `
+      <div class="item-card">
+        <div class="storage-file-heading">
+          <div class="storage-file-icon">▦</div>
+          <div class="storage-file-details">
+            <h3>${escapeHTML(application.name)}</h3>
+            <div class="muted">Application 221Cloud</div>
+          </div>
+        </div>
+        <p><span class="status">${escapeHTML(status)}</span></p>
+        <div class="muted">Créée le : ${escapeHTML(formatDate(application.created_at))}</div>
+        <div class="item-actions">
+          <button class="secondary" type="button" onclick="renameApplication('${escapeHTML(application.id)}')">Modifier le nom</button>
+          <button class="danger" type="button" onclick="moveApplicationToTrash('${escapeHTML(application.id)}')">Mettre à la corbeille</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function createApplication() {
+  const input = document.getElementById("applicationName");
+  const message = document.getElementById("applicationMessage");
+  const button = document.getElementById("createApplicationButton");
+  const name = input?.value.trim();
+
+  if (!name) {
+    message.innerHTML = `<p class="error-text">Saisissez le nom de l'application.</p>`;
+    return;
+  }
+
+  button.disabled = true;
+  button.textContent = "Création...";
+
+  try {
+    await api("/projects", {
+      method: "POST",
+      body: JSON.stringify({ name, type: "application" })
+    });
+    input.value = "";
+    message.innerHTML = `<p class="success-text">Application créée avec succès.</p>`;
+    await loadApplications();
+  } catch (error) {
+    message.innerHTML = `<p class="error-text">${escapeHTML(error.message)}</p>`;
+  } finally {
+    button.disabled = false;
+    button.textContent = "Créer l'application";
+  }
+}
+
+async function renameApplication(id) {
+  const application = projectsCache.find(item => item.id === id && item.type === "application");
+  if (!application) return;
+
+  const name = prompt("Nouveau nom de l'application :", application.name);
+  if (name === null) return;
+  if (!name.trim()) {
+    alert("Le nom ne peut pas être vide.");
+    return;
+  }
+
+  try {
+    await api("/projects/" + encodeURIComponent(id), {
+      method: "PATCH",
+      body: JSON.stringify({ name: name.trim(), type: "application" })
+    });
+    await loadApplications();
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function moveApplicationToTrash(id) {
+  const application = projectsCache.find(item => item.id === id && item.type === "application");
+  if (!application) return;
+
+  if (!confirm("Placer l'application « " + application.name + " » dans la corbeille ? Ses données et éléments associés seront conservés et le projet pourra être restauré depuis Mes projets.")) return;
+
+  try {
+    const result = await api("/projects/" + encodeURIComponent(id), { method: "DELETE" });
+    alert(result.message || "Application placée dans la corbeille.");
+    await loadApplications();
+  } catch (error) {
+    alert(error.message);
+  }
+}
 
 function renderPlaceholder(title, description) {
   document.getElementById("mainContent").innerHTML = `
