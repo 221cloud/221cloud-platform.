@@ -2525,6 +2525,92 @@ function changeStorageHistoryPage(direction) {
   loadStorageHistory(nextPage);
 }
 
+function zip221U16(value) {
+  const bytes = new Uint8Array(2);
+  new DataView(bytes.buffer).setUint16(0, value, true);
+  return bytes;
+}
+
+function zip221U32(value) {
+  const bytes = new Uint8Array(4);
+  new DataView(bytes.buffer).setUint32(0, value >>> 0, true);
+  return bytes;
+}
+
+function zip221Join(parts) {
+  const length = parts.reduce((sum, part) => sum + part.length, 0);
+  const result = new Uint8Array(length);
+  let offset = 0;
+  parts.forEach(part => {
+    result.set(part, offset);
+    offset += part.length;
+  });
+  return result;
+}
+
+function zip221Crc32(bytes) {
+  if (!zip221Crc32.table) {
+    zip221Crc32.table = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      zip221Crc32.table[n] = c >>> 0;
+    }
+  }
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) {
+    crc = zip221Crc32.table[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function build221CloudZip(entries) {
+  const encoder = new TextEncoder();
+  const localParts = [];
+  const centralParts = [];
+  let localOffset = 0;
+  const now = new Date();
+  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2);
+  const dosDate = ((Math.max(1980, now.getFullYear()) - 1980) << 9) |
+    ((now.getMonth() + 1) << 5) | now.getDate();
+
+  entries.forEach(entry => {
+    const nameBytes = encoder.encode(entry.name);
+    const data = entry.data instanceof Uint8Array ? entry.data : new Uint8Array(entry.data || 0);
+    const crc = zip221Crc32(data);
+    const size = data.length;
+    const flags = 0x0800;
+
+    const localHeader = zip221Join([
+      zip221U32(0x04034B50), zip221U16(20), zip221U16(flags),
+      zip221U16(0), zip221U16(dosTime), zip221U16(dosDate),
+      zip221U32(crc), zip221U32(size), zip221U32(size),
+      zip221U16(nameBytes.length), zip221U16(0), nameBytes
+    ]);
+    localParts.push(localHeader, data);
+
+    const centralHeader = zip221Join([
+      zip221U32(0x02014B50), zip221U16(20), zip221U16(20),
+      zip221U16(flags), zip221U16(0), zip221U16(dosTime),
+      zip221U16(dosDate), zip221U32(crc), zip221U32(size),
+      zip221U32(size), zip221U16(nameBytes.length), zip221U16(0),
+      zip221U16(0), zip221U16(0), zip221U16(0),
+      zip221U32(0), zip221U32(localOffset), nameBytes
+    ]);
+    centralParts.push(centralHeader);
+    localOffset += localHeader.length + size;
+  });
+
+  const centralDirectory = zip221Join(centralParts);
+  const endRecord = zip221Join([
+    zip221U32(0x06054B50), zip221U16(0), zip221U16(0),
+    zip221U16(entries.length), zip221U16(entries.length),
+    zip221U32(centralDirectory.length), zip221U32(localOffset),
+    zip221U16(0)
+  ]);
+  return new Blob([...localParts, centralDirectory, endRecord], { type: "application/zip" });
+}
+
 async function downloadStorageMetadataBackup() {
   const button = document.querySelector('#storageHistoryCard button[onclick="downloadStorageMetadataBackup()"]');
   const originalLabel = button?.textContent || "🗂 Sauvegarde complète";
@@ -2535,8 +2621,91 @@ async function downloadStorageMetadataBackup() {
 
   try {
     const backup = await api("/storage/backup");
-    const json = JSON.stringify(backup, null, 2);
-    const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+    const files = backup.contents?.files || [];
+    const folders = backup.contents?.folders || [];
+    const totalBytes = files.reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0);
+    const maxArchiveBytes = 100 * 1024 * 1024;
+
+    if (totalBytes > maxArchiveBytes) {
+      throw new Error("La sauvegarde dépasse la limite de préparation de 100 Mo sur navigateur. Aucun fichier n'a été modifié. Une sauvegarde par lots sera nécessaire.");
+    }
+
+    if (!confirm(
+      "Créer une archive ZIP contenant les vrais fichiers de votre Stockage cloud, y compris ceux de la corbeille ?\n\n" +
+      "Fichiers : " + files.length + "\n" +
+      "Dossiers : " + folders.length + "\n" +
+      "Volume à télécharger : " + formatBytes(totalBytes) + "\n\n" +
+      "Les originaux resteront inchangés. La préparation peut prendre quelques minutes."
+    )) return;
+
+    const entries = [];
+    const folderMap = new Map(folders.map(folder => [folder.id, folder]));
+    const folderPathCache = new Map();
+
+    function getFolderPath(folderId, visited = new Set()) {
+      if (!folderId || !folderMap.has(folderId) || visited.has(folderId)) return "";
+      if (folderPathCache.has(folderId)) return folderPathCache.get(folderId);
+      const folder = folderMap.get(folderId);
+      const nextVisited = new Set(visited);
+      nextVisited.add(folderId);
+      const parentPath = getFolderPath(folder.parent_id, nextVisited);
+      const name = String(folder.name || "Dossier").replace(/[\\/]/g, "_");
+      const path = parentPath ? parentPath + "/" + name : name;
+      folderPathCache.set(folderId, path);
+      return path;
+    }
+
+    const folderEntries = new Set();
+    folders.forEach(folder => {
+      const path = getFolderPath(folder.id);
+      if (path) folderEntries.add(path + "/");
+    });
+    if (files.some(file => file.deleted_at)) folderEntries.add("Corbeille/");
+
+    folderEntries.forEach(name => entries.push({ name, data: new Uint8Array(0) }));
+
+    for (let index = 0; index < files.length; index++) {
+      const file = files[index];
+      if (button) button.textContent = "Téléchargement " + (index + 1) + "/" + files.length + "...";
+
+      const response = await fetch(
+        API + "/storage/" + encodeURIComponent(file.id) + "/backup-download",
+        { credentials: "same-origin", cache: "no-store" }
+      );
+      if (!response.ok) {
+        let message = "Échec du téléchargement de " + file.file_name + ".";
+        try {
+          const errorData = await response.json();
+          if (errorData.error) message = errorData.error;
+        } catch (e) {}
+        throw new Error(message + " La sauvegarde ZIP a été annulée.");
+      }
+
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const expectedSize = Math.max(0, Number(file.file_size) || 0);
+      if (bytes.length !== expectedSize) {
+        throw new Error("Taille incorrecte pour " + file.file_name + " : fichier reçu " +
+          formatBytes(bytes.length) + ", attendu " + formatBytes(expectedSize) +
+          ". La sauvegarde ZIP a été annulée.");
+      }
+
+      const folderPath = getFolderPath(file.folder_id);
+      const isTrashed = Boolean(file.deleted_at);
+      let archivePath = folderPath ? folderPath + "/" : "";
+      if (isTrashed) archivePath = "Corbeille/" + archivePath;
+      const safeName = String(file.file_name || "fichier").replace(/[\\/]/g, "_");
+      entries.push({ name: archivePath + safeName, data: bytes });
+    }
+
+    backup.archive_created_at = new Date().toISOString();
+    backup.note = "Archive contenant les contenus des fichiers et les métadonnées. Les fichiers de la corbeille sont rangés sous Corbeille/.";
+    entries.push({
+      name: "221Cloud-metadata.json",
+      data: new TextEncoder().encode(JSON.stringify(backup, null, 2))
+    });
+
+    if (button) button.textContent = "Création de l’archive...";
+    const blob = build221CloudZip(entries);
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     const now = new Date();
@@ -2544,22 +2713,21 @@ async function downloadStorageMetadataBackup() {
       String(now.getMonth() + 1).padStart(2, "0") + "-" +
       String(now.getDate()).padStart(2, "0");
     link.href = url;
-    link.download = "221Cloud-sauvegarde-stockage-" + stamp + ".json";
+    link.download = "221Cloud-sauvegarde-complete-" + stamp + ".zip";
     document.body.appendChild(link);
     link.click();
     link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
 
-    const counts = backup.counts || {};
     alert(
-      "Sauvegarde téléchargée.\\n\\n" +
-      "Fichiers : " + Number(counts.files || 0) + "\\n" +
-      "Dossiers : " + Number(counts.folders || 0) + "\\n" +
-      "Opérations d’historique : " + Number(counts.activities || 0) +
-      "\\n\\nLes contenus des fichiers ne sont pas inclus."
+      "Archive ZIP créée et téléchargée.\n\n" +
+      "Fichiers inclus : " + files.length + "\n" +
+      "Dossiers : " + folders.length + "\n" +
+      "Volume des fichiers : " + formatBytes(totalBytes) + "\n\n" +
+      "Les fichiers actifs et ceux de la corbeille sont inclus. Les originaux n’ont pas été modifiés."
     );
   } catch (error) {
-    alert("Impossible de télécharger la sauvegarde : " + error.message);
+    alert("Sauvegarde complète impossible : " + error.message);
   } finally {
     if (button) {
       button.disabled = false;
