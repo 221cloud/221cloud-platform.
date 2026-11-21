@@ -2692,7 +2692,8 @@ const used = Number(usage?.used || 0);
             id,
             file_name: fileName,
             file_size: file.size,
-            mime_type: mimeType
+            mime_type: mimeType,
+            folder_id: requestedFolderId
           }
         }, 201);
 
