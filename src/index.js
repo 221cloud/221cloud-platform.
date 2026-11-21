@@ -2774,6 +2774,8 @@ const used = Number(usage?.used || 0);
           return json({ error: "Vous devez être connecté." }, 401);
         }
 
+        await ensureStorageFoldersSchema(env);
+
         if (!storageConfigurationAvailable(env)) {
           return json({
             error: "Le stockage cloud n'est pas configuré."
@@ -2885,6 +2887,7 @@ headers.set(
           return json({ error: "Vous devez être connecté." }, 401);
         }
 
+        await ensureStorageFoldersSchema(env);
         const fileId = decodeURIComponent(storageRenameMatch[1]);
         const body = await request.json();
         const fileName = String(body.name || "").trim();
