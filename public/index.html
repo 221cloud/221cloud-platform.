@@ -571,17 +571,30 @@ function renderWebsiteFileTree(files, baseUrl = "") {
 
     const filesHTML = node.files.map(({ name, file }) => {
   const fileUrl = `${baseUrl}/${file.file_path.split("/").map(encodeURIComponent).join("/")}`;
-  const canPreview = ["text/html", "image/png", "image/jpeg", "image/gif", "image/svg+xml", "image/webp"].includes(file.mime_type);
+
+  const canPreview = Boolean(baseUrl) && [
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/svg+xml",
+    "image/webp"
+  ].includes(file.mime_type);
 
   return `
-      <div class="item-card">
-        <p><strong>📄 ${escapeHTML(name)}</strong></p>
-        <p class="muted">
-          ${escapeHTML(file.mime_type || "Type inconnu")}
-          · ${Number(file.file_size || 0)} octets
-        </p>
-      </div>
-    `).join("");
+    <div class="item-card">
+      <p><strong>📄 ${escapeHTML(name)}</strong></p>
+      <p class="muted">
+        ${escapeHTML(file.mime_type || "Type inconnu")}
+        · ${Number(file.file_size || 0)} octets
+      </p>
+      ${
+        canPreview
+          ? `<p><a href="${escapeHTML(fileUrl)}" target="_blank" rel="noopener noreferrer">Prévisualiser</a></p>`
+          : ""
+      }
+    </div>
+  `;
+}).join("");
 
     return foldersHTML + filesHTML;
   }
