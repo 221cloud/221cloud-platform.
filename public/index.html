@@ -3158,6 +3158,9 @@ async function restoreHostedSitesFromBackup() {
           if (data.length !== Number(archivedFile.file_size || 0)) {
             throw new Error("Taille incorrecte pour le fichier du site : " + filePath);
           }
+          if (Number(archivedFile.file_size || 0) > MAX_FILE_SIZE_BYTES) {
+            throw new Error("Le fichier " + filePath + " dépasse la limite actuelle de 20 Mo par fichier.");
+          }
 
           if (currentByPath.has(filePath)) {
             alreadyPresent++;
@@ -3221,6 +3224,7 @@ async function restoreHostedSitesFromBackup() {
 
       let publishedSites = 0;
       let uploadedMissing = 0;
+      let pendingDeployment = null;
       for (let planIndex = 0; planIndex < plans.length; planIndex++) {
         const plan = plans[planIndex];
         if (button) button.textContent = "Préparation site " + (planIndex + 1) + "/" + plans.length + "...";
@@ -3230,11 +3234,12 @@ async function restoreHostedSitesFromBackup() {
         );
         const deploymentId = deploymentResult.deployment?.id;
         if (!deploymentId) throw new Error("Impossible de créer une nouvelle version pour " + plan.project.name + ".");
+        pendingDeployment = { projectId: plan.project.id, deploymentId, projectName: plan.project.name };
 
         await api(
           "/projects/" + encodeURIComponent(plan.project.id) + "/deployments/" +
           encodeURIComponent(deploymentId) + "/clone-active",
-          { method: "POST" }
+          { method: "POST", body: JSON.stringify({ additional_bytes: plan.bytes }) }
         );
 
         for (let fileIndex = 0; fileIndex < plan.missingFiles.length; fileIndex++) {
@@ -3259,6 +3264,7 @@ async function restoreHostedSitesFromBackup() {
           { method: "POST" }
         );
         publishedSites++;
+        pendingDeployment = null;
       }
 
       alert(
@@ -3269,8 +3275,23 @@ async function restoreHostedSitesFromBackup() {
         "Les versions précédentes restent dans l'historique des déploiements."
       );
     } catch (error) {
-      alert("Restauration des sites interrompue : " + error.message +
-        "\n\nLes sites déjà publiés avant cette opération restent inchangés. Si un problème est survenu pendant la préparation, une version en attente peut rester non publiée.");
+      let cleanupMessage = "";
+      if (typeof pendingDeployment !== "undefined" && pendingDeployment) {
+        try {
+          const currentHosting = await api("/projects/" + encodeURIComponent(pendingDeployment.projectId) + "/hosting");
+          if (currentHosting.hosting?.active_deployment_id === pendingDeployment.deploymentId) {
+            cleanupMessage = "\\nLa nouvelle version a bien été publiée pour " + pendingDeployment.projectName + ".";
+          } else {
+            await api("/projects/" + encodeURIComponent(pendingDeployment.projectId) + "/deployments/" +
+              encodeURIComponent(pendingDeployment.deploymentId), { method: "DELETE" });
+            cleanupMessage = "\\nLa préparation incomplète a été annulée automatiquement.";
+          }
+        } catch (cleanupError) {
+          cleanupMessage = "\\nUne version en attente n’a pas pu être nettoyée automatiquement ; le site actuellement publié reste prioritaire."; 
+        }
+      }
+      alert("Restauration des sites interrompue : " + error.message + cleanupMessage +
+        "\\nLes sites déjà publiés avant cette opération restent inchangés.");
     } finally {
       if (button) { button.disabled = false; button.textContent = originalLabel; }
     }
