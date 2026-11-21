@@ -1298,6 +1298,12 @@ async function loadOverviewStats() {
     if (fileElement) fileElement.textContent = "—";
     if (usedElement) usedElement.textContent = "—";
   }
+
+  renderRecentActivities(
+    results[0].status === "fulfilled" ? projectsCache : [],
+    results[1].status === "fulfilled" ? databasesCache : [],
+    results[2].status === "fulfilled" ? (results[2].value.files || []) : []
+  );
 }
 
 function renderRecentActivities(projects, databases, files) {
@@ -1343,11 +1349,6 @@ function renderRecentActivities(projects, databases, files) {
       <button class="secondary" onclick="showPage('${activity.page}')">Ouvrir</button>
     </div>
   `).join("");
-  renderRecentActivities(
-    results[0].status === "fulfilled" ? projectsCache : [],
-    results[1].status === "fulfilled" ? databasesCache : [],
-    results[2].status === "fulfilled" ? (results[2].value.files || []) : []
-  );
 }
 
 /* PROJETS */
