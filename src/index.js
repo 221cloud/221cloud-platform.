@@ -1323,6 +1323,10 @@ if (path === "/api/subscription" && request.method === "GET") {
         }
         if (!target.active_deployment_id) return json({ cloned: 0 });
 
+        let cloneRequest = {};
+        try { cloneRequest = await request.json(); } catch (e) {}
+        const additionalBytes = Math.max(0, Number(cloneRequest.additional_bytes) || 0);
+
         const sourceFiles = await env.DB.prepare(`
           SELECT file_path, file_size, mime_type, storage_key, b2_file_id
           FROM website_files
@@ -1351,9 +1355,9 @@ if (path === "/api/subscription" && request.method === "GET") {
               WHERE wh.user_id = ?), 0) AS used
         `).bind(user.id, user.id).first();
         const used = Number(usage?.used || 0);
-        if (used + cloneBytes > maxStorage) {
+        if (used + cloneBytes + additionalBytes > maxStorage) {
           return json({ error: "Espace insuffisant pour préparer la nouvelle version du site. Il faut " +
-            formatBytes(cloneBytes) + " supplémentaires." }, 413);
+            (cloneBytes + additionalBytes) + " octet(s) supplémentaires." }, 413);
         }
 
         for (const file of files) {
@@ -1395,6 +1399,50 @@ if (path === "/api/subscription" && request.method === "GET") {
           try { await b2NativeDelete(env, copy.fileId, copy.fileName); } catch (cleanupError) {}
         }
         return json({ error: error.message || "Impossible de copier les fichiers du site actuel." }, 500);
+      }
+    }
+
+    // ANNULER UN DÉPLOIEMENT DE RESTAURATION EN ATTENTE
+    const abortDeploymentMatch = path.match(
+      /^\/api\/projects\/([^/]+)\/deployments\/([^/]+)$/
+    );
+
+    if (abortDeploymentMatch && request.method === "DELETE") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        const projectId = decodeURIComponent(abortDeploymentMatch[1]);
+        const deploymentId = decodeURIComponent(abortDeploymentMatch[2]);
+        const deployment = await env.DB.prepare(
+          "SELECT d.id, d.status FROM deployments d JOIN projects p ON p.id = d.project_id WHERE d.id = ? AND p.id = ? AND p.user_id = ? AND p.type = 'website' LIMIT 1"
+        ).bind(deploymentId, projectId, user.id).first();
+        if (!deployment) return json({ error: "Déploiement introuvable." }, 404);
+        if (deployment.status !== "pending") {
+          return json({ error: "Seul un déploiement en attente peut être annulé." }, 409);
+        }
+        const filesResult = await env.DB.prepare(
+          "SELECT id, b2_file_id, storage_key FROM website_files WHERE deployment_id = ?"
+        ).bind(deploymentId).all();
+        for (const file of filesResult.results || []) {
+          if (file.b2_file_id) {
+            try {
+              const auth = await b2NativeAuthorize(env);
+              const info = await b2NativeJson(auth, "b2_list_file_versions", {
+                startFileName: file.storage_key, startFileId: null, maxFileCount: 1
+              });
+              const version = (info.files || []).find(item => item.fileId === file.b2_file_id);
+              if (version) await b2NativeDelete(env, file.b2_file_id, version.fileName);
+            } catch (cleanupError) {
+              console.error("ERREUR SUPPRESSION FICHIER DÉPLOIEMENT ANNULÉ:", cleanupError);
+            }
+          }
+        }
+        await env.DB.prepare("DELETE FROM website_files WHERE deployment_id = ?").bind(deploymentId).run();
+        await env.DB.prepare("DELETE FROM deployments WHERE id = ? AND status = 'pending'").bind(deploymentId).run();
+        return json({ message: "Déploiement en attente annulé." });
+      } catch (error) {
+        console.error("ERREUR ANNULATION DÉPLOIEMENT:", error);
+        return json({ error: "Impossible d'annuler le déploiement en attente." }, 500);
       }
     }
 
