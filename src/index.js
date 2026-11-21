@@ -2502,10 +2502,42 @@ hosting
         const user = await currentUser(request, env);
         if (!user) return json({ error: "Vous devez être connecté." }, 401);
         await ensureStorageFoldersSchema(env);
+        const url = new URL(request.url);
+        const requestedPage = Math.max(1, Number.parseInt(url.searchParams.get("page") || "1", 10) || 1);
+        const pageSize = 20;
+        const action = url.searchParams.get("action") || "all";
+        const search = (url.searchParams.get("search") || "").trim().slice(0, 200);
+        const allowedActions = ["upload", "move", "trash", "restore", "permanent_delete"];
+        const conditions = ["user_id = ?"];
+        const values = [user.id];
+        if (allowedActions.includes(action)) {
+          conditions.push("action = ?");
+          values.push(action);
+        }
+        if (search) {
+          conditions.push("LOWER(file_name) LIKE LOWER(?)");
+          values.push("%" + search.replace(/[\\%_]/g, "\\        await ensureStorageFoldersSchema(env);
         const result = await env.DB.prepare(
           "SELECT id, action, file_name, file_size, details, created_at FROM storage_activity_log WHERE user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 100"
         ).bind(user.id).all();
-        return json({ activities: result.results || [] });
+        return json({ activities: result.results || [] });") + "%");
+        }
+        const where = conditions.join(" AND ");
+        const countResult = await env.DB.prepare(
+          "SELECT COUNT(*) AS total FROM storage_activity_log WHERE " + where
+        ).bind(...values).first();
+        const total = Number(countResult?.total || 0);
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        const page = Math.min(requestedPage, totalPages);
+        const offset = (page - 1) * pageSize;
+        const result = await env.DB.prepare(
+          "SELECT id, action, file_name, file_size, details, created_at FROM storage_activity_log WHERE " +
+          where + " ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?"
+        ).bind(...values, pageSize, offset).all();
+        return json({
+          activities: result.results || [],
+          pagination: { page, pageSize, total, totalPages }
+        });
       } catch (error) {
         console.error("ERREUR HISTORIQUE STOCKAGE:", error);
         return json({ error: "Impossible de charger l'historique du stockage." }, 500);
