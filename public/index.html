@@ -294,6 +294,28 @@ main {
   line-height:1;
 }
 .storage-empty-folder { margin-top:8px; line-height:1.9; }
+.storage-thumbnail-button {
+  display:block;
+  width:100%;
+  min-height:90px;
+  max-height:210px;
+  margin:0 0 15px;
+  padding:0;
+  overflow:hidden;
+  border:1px solid rgba(105,145,220,.22);
+  border-radius:12px;
+  background:#0b1426;
+}
+.storage-thumbnail {
+  display:block;
+  width:100%;
+  height:190px;
+  object-fit:contain;
+  background:#0b1426;
+}
+.storage-thumbnail-fallback { display:none; color:var(--muted); padding:15px; }
+.storage-thumbnail-button.thumbnail-error .storage-thumbnail-fallback { display:block; }
+.storage-thumbnail-button:hover { filter:brightness(1.08); }
 .storage-file-heading {
   display:flex;
   align-items:flex-start;
@@ -1914,6 +1936,12 @@ function renderStorageFiles() {
       : "📦";
     return `
     <div class="item-card storage-file-card">
+      ${mimeType.startsWith("image/") ? `
+        <button type="button" class="storage-thumbnail-button" onclick="previewStorageImage('${escapeHTML(file.id)}')" aria-label="Afficher ${escapeHTML(file.file_name || "l'image")} en grand">
+          <img class="storage-thumbnail" src="${API}/storage/${encodeURIComponent(file.id)}/download?preview=1" alt="${escapeHTML(file.file_name || "Aperçu de l'image")}" loading="lazy" onerror="this.closest('.storage-thumbnail-button').classList.add('thumbnail-error'); this.remove();">
+          <span class="storage-thumbnail-fallback">🖼️ Aperçu indisponible</span>
+        </button>
+      ` : ""}
       <div class="storage-file-heading">
         <span class="storage-file-icon">${fileIcon}</span>
         <div class="storage-file-details">
