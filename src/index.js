@@ -539,6 +539,84 @@ async function ensureStorageFoldersSchema(env) {
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_storage_activity_user_date ON storage_activity_log(user_id, created_at DESC)").run();
 }
 
+
+async function loginProtectionKeys(request, email) {
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  return [
+    "ip:" + await hashToken(ip),
+    "email:" + await hashToken(email)
+  ];
+}
+
+async function ensureLoginProtectionSchema(env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS login_attempt_limits (
+      scope_key TEXT PRIMARY KEY,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      window_started_at INTEGER NOT NULL,
+      blocked_until INTEGER NOT NULL DEFAULT 0
+    )`
+  ).run();
+}
+
+async function getLoginBlock(env, keys) {
+  const now = Math.floor(Date.now() / 1000);
+  const rows = await env.DB.prepare(
+    "SELECT blocked_until FROM login_attempt_limits WHERE scope_key IN (?, ?)"
+  ).bind(keys[0], keys[1]).all();
+  return (rows.results || []).some(row => Number(row.blocked_until) > now);
+}
+
+async function recordLoginFailure(env, keys) {
+  const now = Math.floor(Date.now() / 1000);
+  const windowSeconds = 15 * 60;
+  const blockSeconds = 15 * 60;
+
+  for (let i = 0; i < keys.length; i++) {
+    const threshold = i === 0 ? 20 : 8;
+    await env.DB.prepare(
+      `INSERT INTO login_attempt_limits
+        (scope_key, attempts, window_started_at, blocked_until)
+       VALUES (?, 1, ?, 0)
+       ON CONFLICT(scope_key) DO UPDATE SET
+         attempts = CASE
+           WHEN login_attempt_limits.window_started_at <= ? THEN 1
+           ELSE login_attempt_limits.attempts + 1
+         END,
+         window_started_at = CASE
+           WHEN login_attempt_limits.window_started_at <= ? THEN ?
+           ELSE login_attempt_limits.window_started_at
+         END,
+         blocked_until = CASE
+           WHEN (CASE
+             WHEN login_attempt_limits.window_started_at <= ? THEN 1
+             ELSE login_attempt_limits.attempts + 1
+           END) >= ? THEN ?
+           ELSE login_attempt_limits.blocked_until
+         END`
+    ).bind(
+      keys[i],
+      now,
+      now - windowSeconds,
+      now - windowSeconds,
+      now,
+      now - windowSeconds,
+      threshold,
+      now + blockSeconds
+    ).run();
+  }
+
+  await env.DB.prepare(
+    "DELETE FROM login_attempt_limits WHERE window_started_at < ? AND blocked_until < ?"
+  ).bind(now - 86400, now).run();
+}
+
+async function clearLoginFailures(env, keys) {
+  await env.DB.prepare(
+    "DELETE FROM login_attempt_limits WHERE scope_key IN (?, ?)"
+  ).bind(keys[0], keys[1]).run();
+}
+
 async function recordStorageActivity(env, userId, action, file, details = "") {
   try {
     await env.DB.prepare(
@@ -824,6 +902,15 @@ if (
         const email = String(body.email || "").trim().toLowerCase();
         const password = String(body.password || "");
 
+        await ensureLoginProtectionSchema(env);
+        const protectionKeys = await loginProtectionKeys(request, email);
+
+        if (await getLoginBlock(env, protectionKeys)) {
+          return json({
+            error: "Trop de tentatives. Réessaie dans quelques minutes."
+          }, 429, { "Retry-After": "900" });
+        }
+
         const user = await env.DB.prepare(
           "SELECT id, email, full_name, role, password_hash FROM users WHERE email = ?"
         ).bind(email).first();
@@ -833,11 +920,13 @@ if (
           !user.password_hash ||
           !(await verifyPassword(password, user.password_hash))
         ) {
+          await recordLoginFailure(env, protectionKeys);
           return json({
             error: "E-mail ou mot de passe incorrect."
           }, 401);
         }
 
+        await clearLoginFailures(env, protectionKeys);
         const token = await createSession(env, user.id);
 
         return json({
