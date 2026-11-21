@@ -699,6 +699,24 @@ async function recordStorageActivity(env, userId, action, file, details = "") {
     console.error("ERREUR HISTORIQUE STOCKAGE:", error);
   }
 }
+async function ensureApplicationFilesSchema(env) {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS application_files (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      mime_type TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(project_id, file_name)
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_application_files_project ON application_files(project_id, file_name)"
+  ).run();
+}
+
 async function ensureProjectTrashSchema(env) {
   const columns = await env.DB.prepare("PRAGMA table_info(projects)").all();
   const hasDeletedAt = (columns.results || []).some(column => column.name === "deleted_at");
@@ -2606,6 +2624,88 @@ hosting
       } catch (error) {
         console.error("ERREUR RESTAURATION PROJET:", error);
         return json({ error: "Impossible de restaurer ce projet." }, 500);
+      }
+    }
+
+    // APPLICATIONS : LISTER LES FICHIERS DU PROJET
+    const applicationFilesMatch = path.match(/^\\/api\\/projects\\/([^/]+)\\/application-files$/);
+    if (applicationFilesMatch && request.method === "GET") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureApplicationFilesSchema(env);
+        const projectId = decodeURIComponent(applicationFilesMatch[1]);
+        const project = await env.DB.prepare(
+          "SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
+        ).bind(projectId, user.id).first();
+        if (!project) return json({ error: "Application introuvable." }, 404);
+
+        let files = await env.DB.prepare(
+          "SELECT file_name, content, mime_type, created_at, updated_at FROM application_files WHERE project_id = ? ORDER BY file_name ASC"
+        ).bind(projectId).all();
+
+        if (!(files.results || []).length) {
+          const starterFiles = [
+            ["index.html", "<!doctype html>\\n<html lang=\\\"fr\\\">\\n<head>\\n  <meta charset=\\\"utf-8\\\">\\n  <meta name=\\\"viewport\\\" content=\\\"width=device-width, initial-scale=1\\\">\\n  <title>Ma première application</title>\\n  <link rel=\\\"stylesheet\\\" href=\\\"style.css\\\">\\n</head>\\n<body>\\n  <main>\\n    <h1>Bienvenue dans 221Cloud !</h1>\\n    <p>Votre application web commence ici.</p>\\n    <button id=\\\"helloButton\\\">Cliquez ici</button>\\n    <p id=\\\"message\\\"></p>\\n  </main>\\n  <script src=\\\"script.js\\\"></script>\\n</body>\\n</html>", "text/html; charset=utf-8"],
+            ["style.css", "body {\\n  margin: 0;\\n  min-height: 100vh;\\n  display: grid;\\n  place-items: center;\\n  font-family: Arial, sans-serif;\\n  background: #f3f5f9;\\n  color: #172033;\\n}\\nmain {\\n  max-width: 560px;\\n  padding: 40px;\\n  text-align: center;\\n  background: white;\\n  border-radius: 18px;\\n  box-shadow: 0 12px 36px rgba(0,0,0,.08);\\n}\\nbutton {\\n  padding: 12px 18px;\\n  border: 0;\\n  border-radius: 8px;\\n  background: #2457d6;\\n  color: white;\\n  cursor: pointer;\\n}", "text/css"],
+            ["script.js", "document.getElementById(\\\"helloButton\\\").addEventListener(\\\"click\\\", () => {\\n  document.getElementById(\\\"message\\\").textContent = \\\"Bravo ! Votre JavaScript fonctionne.\\\";\\n});", "text/javascript"]
+          ];
+          for (const [fileName, content, mimeType] of starterFiles) {
+            await env.DB.prepare(
+              "INSERT OR IGNORE INTO application_files (id, project_id, file_name, content, mime_type) VALUES (?, ?, ?, ?, ?)"
+            ).bind(crypto.randomUUID(), projectId, fileName, content, mimeType).run();
+          }
+          files = await env.DB.prepare(
+            "SELECT file_name, content, mime_type, created_at, updated_at FROM application_files WHERE project_id = ? ORDER BY file_name ASC"
+          ).bind(projectId).all();
+        }
+        return json({ files: files.results || [] });
+      } catch (error) {
+        console.error("ERREUR FICHIERS APPLICATION:", error);
+        return json({ error: "Impossible de charger les fichiers de l'application." }, 500);
+      }
+    }
+
+    // APPLICATIONS : ENREGISTRER UN FICHIER HTML, CSS OU JAVASCRIPT
+    const applicationFileMatch = path.match(/^\\/api\\/projects\\/([^/]+)\\/application-files\\/([^/]+)$/);
+    if (applicationFileMatch && request.method === "PUT") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureApplicationFilesSchema(env);
+        const projectId = decodeURIComponent(applicationFileMatch[1]);
+        const fileName = decodeURIComponent(applicationFileMatch[2]);
+        if (!["index.html", "style.css", "script.js"].includes(fileName)) {
+          return json({ error: "Nom de fichier non autorisé." }, 400);
+        }
+        const project = await env.DB.prepare(
+          "SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
+        ).bind(projectId, user.id).first();
+        if (!project) return json({ error: "Application introuvable." }, 404);
+        const body = await request.json();
+        const content = typeof body.content === "string" ? body.content : null;
+        if (content === null) return json({ error: "Contenu de fichier invalide." }, 400);
+        const size = new TextEncoder().encode(content).length;
+        if (size > 262144) return json({ error: "Chaque fichier est limité à 256 Ko." }, 413);
+        const usage = await env.DB.prepare(
+          "SELECT COALESCE(SUM(length(CAST(content AS BLOB))), 0) AS total FROM application_files WHERE project_id = ? AND file_name <> ?"
+        ).bind(projectId, fileName).first();
+        if (Number(usage?.total || 0) + size > 1048576) {
+          return json({ error: "L'espace de code de cette application est limité à 1 Mo pour le moment." }, 413);
+        }
+        const mimeType = fileName === "index.html" ? "text/html; charset=utf-8" : fileName === "style.css" ? "text/css" : "text/javascript";
+        await env.DB.prepare(`
+          INSERT INTO application_files (id, project_id, file_name, content, mime_type, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          ON CONFLICT(project_id, file_name) DO UPDATE SET
+            content = excluded.content,
+            mime_type = excluded.mime_type,
+            updated_at = CURRENT_TIMESTAMP
+        `).bind(crypto.randomUUID(), projectId, fileName, content, mimeType).run();
+        return json({ message: "Fichier enregistré.", file_name: fileName, size });
+      } catch (error) {
+        console.error("ERREUR ENREGISTREMENT FICHIER APPLICATION:", error);
+        return json({ error: "Impossible d'enregistrer ce fichier." }, 500);
       }
     }
 
