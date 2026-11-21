@@ -2823,7 +2823,6 @@ async function restoreStorageBackup() {
       const storage = await api("/storage");
       const used = Number(storage.used || 0);
       const limit = Number(storage.limit || STORAGE_LIMIT_BYTES);
-      if (used + totalBytes > limit) throw new Error("Espace insuffisant. Il faut " + formatBytes(totalBytes) + " supplémentaires, mais il ne reste que " + formatBytes(Math.max(0, limit - used)) + ".");
       let existingTrashFiles = [];
       try {
         const trashData = await api("/storage/trash");
@@ -2835,7 +2834,16 @@ async function restoreStorageBackup() {
         ...(Array.isArray(storage.files) ? storage.files : []),
         ...existingTrashFiles
       ];
-      const existingNames = new Set(existingFiles.map(file => String(file.file_name || "").trim().toLocaleLowerCase("fr")).filter(Boolean));
+      const duplicateSignature = file => [
+        String(file.file_name || "").trim().toLocaleLowerCase("fr"),
+        Math.max(0, Number(file.file_size) || 0),
+        String(file.mime_type || "application/octet-stream").trim().toLocaleLowerCase("fr")
+      ].join("|");
+      const existingSignatures = new Map();
+      for (const file of existingFiles) {
+        const signature = duplicateSignature(file);
+        existingSignatures.set(signature, (existingSignatures.get(signature) || 0) + 1);
+      }
       const fileEntries = [];
       const folderMap = new Map(folders.map(folder => [folder.id, folder]));
       const pathCache = new Map();
@@ -2861,26 +2869,47 @@ async function restoreStorageBackup() {
         if (data.length !== Number(file.file_size || 0)) throw new Error("Taille incorrecte pour " + safeName + ". Aucun élément n'a été restauré.");
         fileEntries.push({ metadata: file, data, isTrash: Boolean(file.deleted_at) });
       }
-      const duplicateFiles = fileEntries.filter(item => existingNames.has(String(item.metadata.file_name || "").trim().toLocaleLowerCase("fr")));
+      const importEntries = [];
+      const duplicateFiles = [];
+      for (const item of fileEntries) {
+        const signature = duplicateSignature(item.metadata);
+        const matches = existingSignatures.get(signature) || 0;
+        if (matches > 0) {
+          existingSignatures.set(signature, matches - 1);
+          duplicateFiles.push(item);
+        } else {
+          importEntries.push(item);
+        }
+      }
+      const importBytes = importEntries.reduce((sum, item) => sum + Math.max(0, Number(item.metadata.file_size) || 0), 0);
+      if (used + importBytes > limit) throw new Error("Espace insuffisant pour les fichiers à importer. Il faut " + formatBytes(importBytes) + " supplémentaires, mais il ne reste que " + formatBytes(Math.max(0, limit - used)) + ".");
       const stamp = new Date().toLocaleString("fr-FR").replace(/[/:]/g, "-");
       const rootName = "Restauration 221Cloud - " + stamp;
-      const previewLines = fileEntries.slice(0, 12).map(item =>
-        (item.isTrash ? "🗑 " : "• ") + String(item.metadata.file_name || "Fichier") + " (" + formatBytes(Number(item.metadata.file_size) || 0) + ")"
-      );
+      const previewLines = fileEntries.slice(0, 12).map(item => {
+        const skipped = duplicateFiles.includes(item);
+        return (skipped ? "⏭ " : item.isTrash ? "🗑 " : "• ") +
+          String(item.metadata.file_name || "Fichier") + " (" + formatBytes(Number(item.metadata.file_size) || 0) + ")" +
+          (skipped ? " — doublon ignoré" : "");
+      });
       const moreFiles = fileEntries.length > 12 ? "\n… et " + (fileEntries.length - 12) + " autre(s) fichier(s)" : "";
       const duplicateNames = [...new Set(duplicateFiles.map(item => String(item.metadata.file_name || "Fichier")))];
       const duplicatePreview = duplicateNames.slice(0, 8).join(", ");
       const duplicateMore = duplicateNames.length > 8 ? " et " + (duplicateNames.length - 8) + " autre(s)" : "";
       const duplicateNotice = duplicateFiles.length
-        ? "\n\n⚠️ Doublons potentiels : " + duplicateFiles.length + " fichier(s) portent déjà un nom présent dans votre espace.\n" + duplicatePreview + duplicateMore + "\nIls seront tout de même importés comme copies dans le nouveau dossier, sans remplacer les fichiers existants."
-        : "\n\nAucun nom de fichier identique détecté dans les fichiers actuellement présents ou dans la corbeille.";
+        ? "\n\n⏭ Doublons potentiels ignorés : " + duplicateFiles.length + " fichier(s) ayant le même nom, la même taille et le même type MIME sont déjà présents.\n" + duplicatePreview + duplicateMore + "\nIls ne seront pas réimportés. La comparaison porte sur les métadonnées, pas sur le contenu binaire."
+        : "\n\nAucun doublon potentiel exact détecté (nom, taille et type).";
       const preview = "APERÇU DE LA SAUVEGARDE\n\n" +
-        "Fichiers : " + files.length + " (actifs : " + fileEntries.filter(item => !item.isTrash).length + ", ancienne corbeille : " + fileEntries.filter(item => item.isTrash).length + ")\n" +
-        "Dossiers d'origine : " + folders.length + "\nVolume total : " + formatBytes(totalBytes) +
+        "Fichiers dans le ZIP : " + files.length + " (actifs : " + fileEntries.filter(item => !item.isTrash).length + ", ancienne corbeille : " + fileEntries.filter(item => item.isTrash).length + ")\n" +
+        "Doublons potentiels ignorés : " + duplicateFiles.length + "\nFichiers à importer : " + importEntries.length + "\n" +
+        "Dossiers d'origine : " + folders.length + "\nVolume du ZIP : " + formatBytes(totalBytes) + "\nVolume à importer : " + formatBytes(importBytes) +
         "\n\nContenu (12 premiers fichiers) :\n" + (previewLines.join("\n") || "Aucun fichier") + moreFiles +
         duplicateNotice +
-        "\n\nDestination : « " + rootName + " »\n\nContinuer la restauration ?\nLes originaux et le ZIP resteront inchangés.";
+        "\n\nDestination : « " + rootName + " »\n\nContinuer ? Les originaux et le ZIP resteront inchangés.";
       if (!confirm(preview)) return;
+      if (files.length && !importEntries.length) {
+        alert("Aucun fichier importé : les " + duplicateFiles.length + " fichiers de la sauvegarde correspondent déjà à des fichiers présents (même nom, taille et type). Aucun dossier supplémentaire n'a été créé.");
+        return;
+      }
       if (button) button.textContent = "Création des dossiers...";
       const rootResult = await api("/storage/folders", { method: "POST", body: JSON.stringify({ name: rootName, parent_id: null }) });
       const restoredRootId = rootResult.folder?.id;
@@ -2907,7 +2936,7 @@ async function restoreStorageBackup() {
       }
       if (pending.length) throw new Error("La structure de certains dossiers est invalide. Les éléments déjà créés sont conservés dans « " + rootName + " ».");
       const trashFolderIds = new Map();
-      if (fileEntries.some(item => item.isTrash)) {
+      if (importEntries.some(item => item.isTrash)) {
         const rootFolderNames = new Set(folders.filter(folder => !folder.parent_id).map(folder => String(folder.name || "").toLocaleLowerCase("fr")));
         let trashFolderName = "Corbeille (sauvegarde)";
         let suffix = 2;
@@ -2936,9 +2965,9 @@ async function restoreStorageBackup() {
         if (pendingTrash.length) throw new Error("Structure de la corbeille invalide. Les éléments déjà restaurés sont conservés.");
       }
       let restoredCount = 0;
-      for (let i = 0; i < fileEntries.length; i++) {
-        const item = fileEntries[i];
-        if (button) button.textContent = "Importation " + (i + 1) + "/" + fileEntries.length + "...";
+      for (let i = 0; i < importEntries.length; i++) {
+        const item = importEntries[i];
+        if (button) button.textContent = "Importation " + (i + 1) + "/" + importEntries.length + "...";
         const destinationId = item.isTrash
           ? (item.metadata.folder_id ? trashFolderIds.get(item.metadata.folder_id) : trashFolderIds.get(null))
           : (item.metadata.folder_id ? createdFolders.get(item.metadata.folder_id) : restoredRootId);
@@ -2951,7 +2980,7 @@ async function restoreStorageBackup() {
         restoredCount++;
       }
       await loadStorageFiles();
-      alert("Restauration terminée.\n\nFichiers copiés : " + restoredCount + "\nDossiers recréés : " + (1 + createdFolders.size + trashFolderIds.size) + "\nVolume importé : " + formatBytes(totalBytes) + "\n\nLes originaux et la sauvegarde ZIP sont restés inchangés. Les fichiers de l'ancienne corbeille sont maintenant des copies actives rangées dans le dossier « Corbeille » de la restauration.");
+      alert("Restauration terminée.\n\nFichiers copiés : " + restoredCount + "\nDoublons ignorés : " + duplicateFiles.length + "\nDossiers recréés : " + (1 + createdFolders.size + trashFolderIds.size) + "\nVolume importé : " + formatBytes(importBytes) + "\n\nLes originaux et la sauvegarde ZIP sont restés inchangés. Les fichiers de l'ancienne corbeille importés sont des copies actives rangées dans le dossier « Corbeille » de la restauration.");
     } catch (error) {
       alert("Restauration interrompue : " + error.message + "\n\nLes originaux ne sont pas modifiés. Si l'importation avait déjà commencé, les copies déjà importées restent dans le dossier de restauration.");
       try { await loadStorageFiles(); } catch (e) {}
