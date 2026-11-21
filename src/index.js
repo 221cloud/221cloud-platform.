@@ -1491,6 +1491,96 @@ files: websiteFiles.results || []
         }, 500);
       }
     }
+    
+    // SUPPRIMER UN FICHIER DU SITE HÉBERGÉ
+    const hostingFileDeleteMatch = path.match(
+      /^\/api\/projects\/([^/]+)\/hosting\/files\/([^/]+)$/
+    );
+
+    if (hostingFileDeleteMatch && request.method === "DELETE") {
+      try {
+        const user = await currentUser(request, env);
+
+        if (!user) {
+          return json({ error: "Vous devez être connecté." }, 401);
+        }
+
+        const projectId = decodeURIComponent(hostingFileDeleteMatch[1]);
+        const fileId = decodeURIComponent(hostingFileDeleteMatch[2]);
+
+        const file = await env.DB.prepare(`
+          SELECT
+            website_files.id,
+            website_files.file_path,
+            website_files.b2_file_id,
+            website_files.storage_key,
+            website_files.hosting_id,
+            website_files.deployment_id
+          FROM website_files
+          JOIN website_hostings
+            ON website_hostings.id = website_files.hosting_id
+          JOIN projects
+            ON projects.id = website_hostings.project_id
+          WHERE website_files.id = ?
+            AND projects.id = ?
+            AND projects.user_id = ?
+            AND projects.type = 'website'
+            AND website_hostings.user_id = ?
+            AND website_hostings.active_deployment_id = website_files.deployment_id
+          LIMIT 1
+        `).bind(
+          fileId,
+          projectId,
+          user.id,
+          user.id
+        ).first();
+
+        if (!file) {
+          return json({ error: "Fichier introuvable." }, 404);
+        }
+
+        if (file.file_path === "index.html") {
+          return json({
+            error: "Le fichier index.html ne peut pas être supprimé."
+          }, 400);
+        }
+
+        if (!file.b2_file_id || !file.storage_key) {
+          return json({
+            error: "Informations de stockage introuvables."
+          }, 409);
+        }
+
+        await b2NativeDelete(
+          env,
+          file.b2_file_id,
+          file.storage_key
+        );
+
+        await env.DB.prepare(`
+          DELETE FROM website_files
+          WHERE id = ?
+            AND hosting_id = ?
+            AND deployment_id = ?
+        `).bind(
+          fileId,
+          file.hosting_id,
+          file.deployment_id
+        ).run();
+
+        return json({
+          message: "Fichier supprimé avec succès."
+        });
+
+      } catch (error) {
+        console.error("ERREUR SUPPRESSION FICHIER SITE:", error);
+
+        return json({
+          error: "Impossible de supprimer le fichier du site."
+        }, 500);
+      }
+    }
+
     // HÉBERGEMENT : AFFICHER UN SITE WEB PUBLIÉ
     const siteMatch = path.match(/^\/site\/([^/]+)(?:\/(.*))?$/);
 
