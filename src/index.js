@@ -1458,7 +1458,18 @@ if (path === "/api/subscription" && request.method === "GET") {
           GROUP BY d.id
           ORDER BY d.created_at DESC
         `).bind(projectId).all();
-
+const websiteFiles = hosting?.active_deployment_id
+  ? await env.DB.prepare(`
+      SELECT id, file_path, file_size, mime_type
+      FROM website_files
+      WHERE hosting_id = ?
+        AND deployment_id = ?
+      ORDER BY file_path ASC
+    `).bind(
+      hosting.id,
+      hosting.active_deployment_id
+    ).all()
+  : { results: [] };
         return json({
           project: {
             id: project.id,
@@ -1468,7 +1479,8 @@ if (path === "/api/subscription" && request.method === "GET") {
             ...hosting,
             url: `https://221cloud-platform.elhadjidame-sall.workers.dev/site/${hosting.slug}`
           } : null,
-          deployments: deployments.results || []
+          deployments: deployments.results || [],
+files: websiteFiles.results || []
         });
 
       } catch (error) {
