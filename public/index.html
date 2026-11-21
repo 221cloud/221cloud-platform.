@@ -597,7 +597,9 @@ let projectsCache = [];
 let databasesCache = [];
 let storageFilesCache = [];
 let storageFoldersCache = [];
+let storageTrashCache = [];
 let activeStorageFolderId = null;
+let storageView = "files";
 
 const STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
@@ -1709,11 +1711,14 @@ function renderStoragePage() {
     </div>
 
     <div class="section-head">
-  <h2>Mes fichiers</h2>
-  <button class="secondary" onclick="loadStorageFiles()">Actualiser</button>
+  <h2 id="storageFilesTitle">Mes fichiers</h2>
+  <div class="item-actions" style="margin:0;">
+    <button class="secondary" id="storageTrashButton" onclick="openStorageTrash()">🗑 Corbeille (0)</button>
+    <button class="secondary" onclick="loadStorageFiles()">Actualiser</button>
+  </div>
 </div>
 
-<div class="card" style="margin-bottom:15px;">
+<div class="card" id="storageFoldersCard" style="margin-bottom:15px;">
   <div class="section-head">
     <h3>Dossiers</h3>
     <button class="secondary" onclick="createStorageFolder()">＋ Nouveau dossier</button>
@@ -1722,7 +1727,7 @@ function renderStoragePage() {
   <div id="storageFoldersList"></div>
 </div>
 
-<div class="card form-card" style="margin-bottom:15px;">
+<div class="card form-card" id="storageUploadCard" style="margin-bottom:15px;">
   <h3>＋ Envoyer un fichier</h3>
   <p class="muted" id="storageUploadDestination">Destination : Racine</p>
   <label>Sélectionner un fichier</label>
@@ -1734,7 +1739,7 @@ function renderStoragePage() {
   <div id="uploadMessage"></div>
 </div>
 
-<div class="card" style="margin-bottom:15px;">
+<div class="card" id="storageFiltersCard" style="margin-bottom:15px;">
   <input
     type="search"
     id="storageSearchInput"
@@ -1764,7 +1769,24 @@ function renderStoragePage() {
   loadStorageFiles();
 }
 
+function setStorageView(view) {
+  storageView = view;
+  const inTrash = view === "trash";
+  ["storageFoldersCard", "storageUploadCard", "storageFiltersCard"].forEach(id => {
+    const element = document.getElementById(id);
+    if (element) element.classList.toggle("hidden", inTrash);
+  });
+  const title = document.getElementById("storageFilesTitle");
+  if (title) title.textContent = inTrash ? "Corbeille" : "Mes fichiers";
+  const trashButton = document.getElementById("storageTrashButton");
+  if (trashButton) {
+    trashButton.textContent = inTrash ? "← Mes fichiers" : "🗑 Corbeille (" + trashButton.dataset.count + ")";
+    trashButton.onclick = inTrash ? returnToStorageFiles : openStorageTrash;
+  }
+}
+
 async function loadStorageFiles() {
+  setStorageView("files");
   const list = document.getElementById("storageFilesList");
   if (!list) return;
 
@@ -1774,6 +1796,11 @@ async function loadStorageFiles() {
     const data = await api("/storage");
     storageFilesCache = data.files || [];
     storageFoldersCache = data.folders || [];
+    const trashButton = document.getElementById("storageTrashButton");
+    if (trashButton) {
+      trashButton.dataset.count = String(Number(data.trashCount || 0));
+      trashButton.textContent = "🗑 Corbeille (" + Number(data.trashCount || 0) + ")";
+    }
 
     const used = Number(data.used || 0);
     const limit = Number(data.limit || STORAGE_LIMIT_BYTES);
@@ -2023,6 +2050,76 @@ function renderStorageFiles() {
 
 
 
+async function openStorageTrash() {
+  setStorageView("trash");
+  const list = document.getElementById("storageFilesList");
+  if (list) list.innerHTML = '<div class="empty">Chargement de la corbeille...</div>';
+  try {
+    const data = await api("/storage/trash");
+    storageTrashCache = data.files || [];
+    renderStorageTrash();
+  } catch (error) {
+    if (list) list.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message) + '</div>';
+  }
+}
+
+function returnToStorageFiles() {
+  activeStorageFolderId = null;
+  loadStorageFiles();
+}
+
+function renderStorageTrash() {
+  const list = document.getElementById("storageFilesList");
+  if (!list) return;
+  if (!storageTrashCache.length) {
+    list.innerHTML = '<div class="empty">🗑️<br>La corbeille est vide.</div>';
+    return;
+  }
+  list.innerHTML = storageTrashCache.map(file => {
+    const mimeType = String(file.mime_type || "").toLowerCase();
+    const fileIcon = mimeType.startsWith("image/") ? "🖼️"
+      : mimeType.startsWith("video/") ? "🎬"
+      : mimeType.includes("pdf") ? "📕" : "📄";
+    return `
+      <div class="item-card storage-file-card">
+        <div class="storage-file-heading">
+          <span class="storage-file-icon">${fileIcon}</span>
+          <div class="storage-file-details">
+            <div class="file-name">${escapeHTML(file.file_name || "Fichier sans nom")}</div>
+            <p class="muted">${escapeHTML(formatBytes(file.file_size))} · ${escapeHTML(file.mime_type || "Fichier")}</p>
+            <div class="muted">Mis à la corbeille le : ${escapeHTML(formatDate(file.deleted_at))}</div>
+          </div>
+        </div>
+        <div class="item-actions">
+          <button class="secondary" onclick="restoreStorageFile('${escapeHTML(file.id)}')">Restaurer</button>
+          <button class="danger" onclick="permanentlyDeleteStorageFile('${escapeHTML(file.id)}')">Supprimer définitivement</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function restoreStorageFile(id) {
+  try {
+    await api("/storage/" + encodeURIComponent(id) + "/restore", { method: "PATCH" });
+    await openStorageTrash();
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function permanentlyDeleteStorageFile(id) {
+  const file = storageTrashCache.find(item => item.id === id);
+  const name = file?.file_name || "ce fichier";
+  if (!confirm("Supprimer définitivement « " + name + " » ? Cette action est irréversible.")) return;
+  try {
+    await api("/storage/" + encodeURIComponent(id) + "/permanent", { method: "DELETE" });
+    await openStorageTrash();
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
 async function uploadStorageFile() {
   const input = document.getElementById("storageFileInput");
   const message = document.getElementById("uploadMessage");
@@ -2187,7 +2284,7 @@ async function downloadStorageFile(id) {
 }
 
   async function deleteStorageFile(id) {
-  if (!confirm("Voulez-vous vraiment supprimer ce fichier du cloud ?")) return;
+  if (!confirm("Déplacer ce fichier dans la corbeille ? Vous pourrez le restaurer plus tard.")) return;
 
   try {
     await api("/storage/" + encodeURIComponent(id), {method:"DELETE"});
