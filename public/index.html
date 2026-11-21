@@ -2224,6 +2224,19 @@ function renderStorageStats(used, limit, available) {
   if (!container) return;
 
   const files = storageFilesCache;
+  const rootFiles = files.filter(file => !file.folder_id);
+  const folderFiles = files.filter(file => Boolean(file.folder_id));
+  const trashFiles = storageTrashCache || [];
+  const sumFileBytes = items => items.reduce(
+    (sum, file) => sum + Math.max(0, Number(file.file_size) || 0),
+    0
+  );
+  const locationGroups = [
+    { name: "À la racine", icon: "📄", count: rootFiles.length, bytes: sumFileBytes(rootFiles) },
+    { name: "Dans les dossiers", icon: "📁", count: folderFiles.length, bytes: sumFileBytes(folderFiles) },
+    { name: "Dans la corbeille", icon: "🗑️", count: trashFiles.length, bytes: sumFileBytes(trashFiles) }
+  ];
+  const privateStorageBytes = locationGroups.reduce((sum, item) => sum + item.bytes, 0);
   const getCategory = file => {
     const mime = String(file.mime_type || "").toLowerCase();
     if (mime.startsWith("image/")) return "Images";
@@ -2273,6 +2286,25 @@ function renderStorageStats(used, limit, available) {
         <div class="muted">Espace restant sur le quota</div>
         <div class="stat">${formatBytes(safeAvailable)}</div>
       </div>
+    </div>
+    <h4 style="margin:18px 0 6px;">Répartition par emplacement</h4>
+    <p class="muted" style="margin:0 0 12px;">Comparaison des fichiers actifs à la racine et dans les dossiers, ainsi que des fichiers conservés dans la corbeille. Chaque fichier actif est compté une seule fois. Les sites hébergés sont inclus dans le quota global, mais pas dans cette répartition.</p>
+    <div class="grid" style="margin-bottom:12px;">
+      ${locationGroups.map(item => {
+        const quotaPercent = safeLimit > 0 ? (item.bytes / safeLimit) * 100 : 0;
+        const privatePercent = privateStorageBytes > 0 ? (item.bytes / privateStorageBytes) * 100 : 0;
+        return `
+          <div class="card" style="padding:14px;">
+            <div class="muted">${item.icon} ${item.name}</div>
+            <div class="stat">${formatBytes(item.bytes)}</div>
+            <div class="muted">${item.count} fichier(s) · ${privatePercent.toFixed(1)} % des fichiers cloud personnels</div>
+            <div class="progress" style="margin-top:9px;">
+              <div class="progress-bar" style="width:${Math.min(100, Math.max(0, quotaPercent)).toFixed(2)}%;"></div>
+            </div>
+            <div class="muted" style="font-size:11px;margin-top:5px;">${quotaPercent.toFixed(2)} % du quota total</div>
+          </div>
+        `;
+      }).join("")}
     </div>
     <div class="muted" style="margin-bottom:8px;">Espace restant : ${availablePercent.toFixed(1)} % du quota</div>
     <div class="progress" style="margin-bottom:16px;">
@@ -2362,6 +2394,12 @@ async function loadStorageFiles() {
     const data = await api("/storage");
     storageFilesCache = data.files || [];
     storageFoldersCache = data.folders || [];
+    try {
+      const trashData = await api("/storage/trash");
+      storageTrashCache = trashData.files || [];
+    } catch (trashError) {
+      storageTrashCache = [];
+    }
     const trashButton = document.getElementById("storageTrashButton");
     if (trashButton) {
       trashButton.dataset.count = String(Number(data.trashCount || 0));
