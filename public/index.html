@@ -2297,7 +2297,7 @@ function renderStorageStats(used, limit, available) {
           <div class="card" style="padding:14px;">
             <div class="muted">${item.icon} ${item.name}</div>
             <div class="stat">${formatBytes(item.bytes)}</div>
-            <div class="muted">${item.count} fichier(s) · ${privatePercent.toFixed(1)} % des fichiers cloud personnels</div>
+            <div class="muted">${item.count} fichier(s) · ${privatePercent.toFixed(1)} % du stockage cloud personnel</div>
             <div class="progress" style="margin-top:9px;">
               <div class="progress-bar" style="width:${Math.min(100, Math.max(0, quotaPercent)).toFixed(2)}%;"></div>
             </div>
