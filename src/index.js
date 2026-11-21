@@ -1,6 +1,7 @@
 
 const ITERATIONS = 100000;
 const SESSION_DAYS = 7;
+const SESSION_IDLE_MINUTES = 60;
 const DATABASE_NAME_MAX = 80;
 
 const STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;
@@ -137,18 +138,29 @@ async function currentUser(request, env) {
   if (!token) return null;
 
   const tokenHash = await hashToken(token);
+  const now = new Date();
+  const nowIso = now.toISOString();
 
   const result = await env.DB.prepare(
     `SELECT users.id, users.email, users.full_name, users.role
      FROM sessions
      JOIN users ON users.id = sessions.user_id
      WHERE sessions.token_hash = ?
-AND sessions.expires_at > ?
-AND users.status = 'active'
+       AND sessions.expires_at > ?
+       AND users.status = 'active'
      LIMIT 1`
-  ).bind(tokenHash, new Date().toISOString()).first();
+  ).bind(tokenHash, nowIso).first();
 
-  return result || null;
+  if (!result) return null;
+
+  // Expiration glissante : toute requête authentifiée prolonge la session
+  // d'une heure. Après une heure sans activité, le serveur refuse la session.
+  const nextExpiry = new Date(now.getTime() + SESSION_IDLE_MINUTES * 60000).toISOString();
+  await env.DB.prepare(
+    "UPDATE sessions SET expires_at = ? WHERE token_hash = ? AND expires_at > ?"
+  ).bind(nextExpiry, tokenHash, nowIso).run();
+
+  return result;
 }
 async function generateWebsiteSlug(env, projectName) {
   const base = String(projectName || "site")
