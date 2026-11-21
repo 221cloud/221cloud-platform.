@@ -1181,12 +1181,19 @@ async function startWebsiteDeployment(projectId) {
       const form = new FormData();
 
       form.append("file", file);
-      form.append(
-        "file_path",
-        isFolderUpload
-  ? file.webkitRelativePath
-  : file.name
-      );
+      const folderRoot = isFolderUpload
+  ? folderFiles[0].webkitRelativePath.split("/")[0]
+  : "";
+
+const filePath = isFolderUpload
+  ? (
+      file.webkitRelativePath.startsWith(folderRoot + "/")
+        ? file.webkitRelativePath.slice(folderRoot.length + 1)
+        : file.webkitRelativePath
+    )
+  : file.name;
+
+form.append("file_path", filePath);
 
       await api(
         `/projects/${encodeURIComponent(projectId)}/deployments/${encodeURIComponent(deploymentId)}/files`,
