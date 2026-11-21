@@ -1290,6 +1290,43 @@ if (path === "/api/subscription" && request.method === "GET") {
       }
     }
 
+    // LISTER LES FICHIERS D'UNE ANCIENNE VERSION PUBLIÉE
+    const deploymentFilesHistoryMatch = path.match(
+      /^\\/api\\/projects\\/([^/]+)\\/deployments\\/([^/]+)\\/files$/
+    );
+
+    if (deploymentFilesHistoryMatch && request.method === "GET") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        const projectId = decodeURIComponent(deploymentFilesHistoryMatch[1]);
+        const deploymentId = decodeURIComponent(deploymentFilesHistoryMatch[2]);
+        const deployment = await env.DB.prepare(`
+          SELECT d.id, d.status, h.id AS hosting_id
+          FROM deployments d
+          JOIN projects p ON p.id = d.project_id
+          JOIN website_hostings h ON h.project_id = p.id
+          WHERE d.id = ? AND p.id = ? AND p.user_id = ?
+            AND p.type = 'website' AND h.user_id = ?
+          LIMIT 1
+        `).bind(deploymentId, projectId, user.id, user.id).first();
+        if (!deployment) return json({ error: "Déploiement introuvable." }, 404);
+        if (deployment.status !== "published") {
+          return json({ error: "Seules les versions publiées peuvent être consultées." }, 409);
+        }
+        const result = await env.DB.prepare(`
+          SELECT id, file_path, file_size, mime_type
+          FROM website_files
+          WHERE hosting_id = ? AND deployment_id = ?
+          ORDER BY file_path ASC
+        `).bind(deployment.hosting_id, deploymentId).all();
+        return json({ files: result.results || [] });
+      } catch (error) {
+        console.error("ERREUR LISTE FICHIERS ANCIENNE VERSION:", error);
+        return json({ error: "Impossible de consulter les fichiers de cette version." }, 500);
+      }
+    }
+
     // CLONER LES FICHIERS DU SITE ACTUEL DANS UN DÉPLOIEMENT DE RESTAURATION
     const cloneActiveDeploymentMatch = path.match(
       /^\/api\/projects\/([^/]+)\/deployments\/([^/]+)\/clone-active$/
@@ -1321,18 +1358,27 @@ if (path === "/api/subscription" && request.method === "GET") {
         if (target.status !== "pending") {
           return json({ error: "Le déploiement n'accepte plus de fichiers." }, 409);
         }
-        if (!target.active_deployment_id) return json({ cloned: 0 });
-
         let cloneRequest = {};
         try { cloneRequest = await request.json(); } catch (e) {}
         const additionalBytes = Math.max(0, Number(cloneRequest.additional_bytes) || 0);
+        const sourceDeploymentId = String(cloneRequest.source_deployment_id || target.active_deployment_id || "");
+        if (!sourceDeploymentId) return json({ cloned: 0 });
+        const sourceDeployment = await env.DB.prepare(`
+          SELECT id, status
+          FROM deployments
+          WHERE id = ? AND project_id = ?
+          LIMIT 1
+        `).bind(sourceDeploymentId, projectId).first();
+        if (!sourceDeployment || sourceDeployment.status !== "published") {
+          return json({ error: "La version source doit être une ancienne version publiée de ce site." }, 400);
+        }
 
         const sourceFiles = await env.DB.prepare(`
           SELECT file_path, file_size, mime_type, storage_key, b2_file_id
           FROM website_files
           WHERE hosting_id = ? AND deployment_id = ?
           ORDER BY file_path ASC
-        `).bind(target.hosting_id, target.active_deployment_id).all();
+        `).bind(target.hosting_id, sourceDeploymentId).all();
         const files = sourceFiles.results || [];
         const cloneBytes = files.reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0);
 
