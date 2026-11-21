@@ -1386,13 +1386,13 @@ function renderDashboardNotifications(projects, databases, storageData) {
 
   [...(projects || []).map(item => ({
     type: "Projet créé", name: item.name || "Projet sans nom",
-    date: item.created_at, icon: "▣"
+    date: item.created_at, icon: "▣", page: "projects"
   })), ...(databases || []).map(item => ({
     type: "Base de données créée", name: item.name || "Base sans nom",
-    date: item.created_at, icon: "▤"
+    date: item.created_at, icon: "▤", page: "databases"
   })), ...((storageData?.files || []).map(item => ({
     type: "Fichier ajouté", name: item.file_name || "Fichier sans nom",
-    date: item.created_at, icon: "▧"
+    date: item.created_at, icon: "▧", page: "storage"
   })))]
     .forEach(item => {
       const timestamp = new Date(item.date || 0).getTime();
@@ -1403,7 +1403,8 @@ function renderDashboardNotifications(projects, databases, storageData) {
           date: item.date,
           icon: item.icon,
           level: "info",
-          priority: 1
+          priority: 1,
+          page: item.page
         });
       }
     });
@@ -1451,7 +1452,7 @@ function renderDashboardNotifications(projects, databases, storageData) {
   container.innerHTML = notifications.slice(0, 8).map(item => {
     const dateLabel = item.date ? " · " + formatDate(item.date) : "";
     const action = item.page
-      ? '<button class="secondary" onclick="showPage(\'' + item.page + '\')">Voir</button>'
+      ? '<button class="secondary" onclick="showPage(\\'' + item.page + '\\')">Ouvrir</button>'
       : "";
     const border = item.level === "warning" ? "border-left:4px solid #f59e0b;" : "";
     return `
