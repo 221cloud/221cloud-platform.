@@ -1452,7 +1452,7 @@ function renderDashboardNotifications(projects, databases, storageData) {
   container.innerHTML = notifications.slice(0, 8).map(item => {
     const dateLabel = item.date ? " · " + formatDate(item.date) : "";
     const action = item.page
-      ? '<button class="secondary" onclick="showPage(\\'' + item.page + '\\')">Ouvrir</button>'
+      ? `<button class="secondary" onclick="showPage('${item.page}')">Ouvrir</button>`
       : "";
     const border = item.level === "warning" ? "border-left:4px solid #f59e0b;" : "";
     return `
