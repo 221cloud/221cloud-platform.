@@ -2521,8 +2521,20 @@ const used = Number(usage?.used || 0);
           return json({ error: "Format d'envoi invalide." }, 400);
         }
 
+        await ensureStorageFoldersSchema(env);
         const form = await request.formData();
         const file = form.get("file");
+        const requestedFolderId = String(form.get("folder_id") || "").trim() || null;
+
+        if (requestedFolderId) {
+          const targetFolder = await env.DB.prepare(
+            "SELECT id FROM storage_folders WHERE id = ? AND user_id = ? LIMIT 1"
+          ).bind(requestedFolderId, user.id).first();
+
+          if (!targetFolder) {
+            return json({ error: "Dossier de destination introuvable." }, 404);
+          }
+        }
 
         if (!file || typeof file.arrayBuffer !== "function") {
           return json({ error: "Aucun fichier reçu." }, 400);
