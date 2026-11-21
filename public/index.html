@@ -4563,6 +4563,13 @@ function renderAccount() {
     </div>
 
     <div class="card form-card">
+      <h3>Session actuelle</h3>
+      <p class="muted">Suivi de l'activité et de l'expiration automatique de cette session.</p>
+      <div id="accountSessionInfo" class="muted">Chargement des informations de session...</div>
+      <button class="secondary" type="button" onclick="loadAccountSessionInfo()">Actualiser les informations</button>
+    </div>
+
+    <div class="card form-card">
       <h3>Journal de sécurité</h3>
       <p class="muted">Consulte les 50 dernières activités de sécurité de ton compte. Aucune adresse IP ni aucun mot de passe n'est enregistré ici.</p>
       <div id="accountSecurityLog" class="muted">Chargement des activités...</div>
@@ -4570,6 +4577,30 @@ function renderAccount() {
   `;
 
   loadAccountSecurityLog();
+  loadAccountSessionInfo();
+}
+
+async function loadAccountSessionInfo() {
+  const container = document.getElementById("accountSessionInfo");
+  if (!container) return;
+
+  container.textContent = "Actualisation...";
+  try {
+    const result = await api("/account/session-info");
+    const formatSessionDate = value => {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime())
+        ? "Indisponible"
+        : date.toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" });
+    };
+    container.innerHTML = `
+      <p><strong>Dernière activité enregistrée :</strong><br>${escapeHTML(formatSessionDate(result.last_activity_at))}</p>
+      <p><strong>Expiration estimée :</strong><br>${escapeHTML(formatSessionDate(result.expires_at))}</p>
+      <p class="muted">La session expire après ${Number(result.idle_timeout_minutes) || 60} minutes sans activité.</p>
+    `;
+  } catch (error) {
+    container.innerHTML = '<p class="error-text">' + escapeHTML(error.message || "Impossible de charger la session.") + '</p>';
+  }
 }
 
 async function loadAccountSecurityLog() {
