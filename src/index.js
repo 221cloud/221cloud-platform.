@@ -3710,6 +3710,32 @@ headers.set(
       }
     }
 
+    // INFORMATIONS SUR LA SESSION ACTUELLE
+    if (path === "/api/account/session-info" && request.method === "GET") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+
+        const token = getCookie(request, "221cloud_session");
+        if (!token) return json({ error: "Session introuvable." }, 401);
+        const tokenHash = await hashToken(token);
+        const session = await env.DB.prepare(
+          "SELECT expires_at FROM sessions WHERE token_hash = ? AND user_id = ? LIMIT 1"
+        ).bind(tokenHash, user.id).first();
+
+        if (!session) return json({ error: "Session introuvable." }, 401);
+
+        return json({
+          last_activity_at: new Date().toISOString(),
+          expires_at: session.expires_at,
+          idle_timeout_minutes: SESSION_IDLE_MINUTES
+        });
+      } catch (error) {
+        console.error("ERREUR INFORMATIONS SESSION:", error);
+        return json({ error: "Impossible de charger les informations de session." }, 500);
+      }
+    }
+
     // SÉCURITÉ DU COMPTE : CHANGEMENT DE MOT DE PASSE
     if (path === "/api/account/password" && request.method === "POST") {
       try {
