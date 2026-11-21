@@ -2143,6 +2143,56 @@ function renderStoragePage() {
   loadStorageFiles();
 }
 
+function renderStorageFolderStats() {
+  const folders = storageFoldersCache || [];
+  const filesByFolder = new Map();
+  storageFilesCache.forEach(file => {
+    if (!file.folder_id) return;
+    if (!filesByFolder.has(file.folder_id)) filesByFolder.set(file.folder_id, []);
+    filesByFolder.get(file.folder_id).push(file);
+  });
+  const childrenByParent = new Map();
+  folders.forEach(folder => {
+    const parent = folder.parent_id || null;
+    if (!childrenByParent.has(parent)) childrenByParent.set(parent, []);
+    childrenByParent.get(parent).push(folder);
+  });
+  function measureFolder(folder, visited = new Set()) {
+    if (visited.has(folder.id)) return { count: 0, bytes: 0 };
+    const nextVisited = new Set(visited);
+    nextVisited.add(folder.id);
+    const directFiles = filesByFolder.get(folder.id) || [];
+    let count = directFiles.length;
+    let bytes = directFiles.reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0);
+    (childrenByParent.get(folder.id) || []).forEach(child => {
+      const childStats = measureFolder(child, nextVisited);
+      count += childStats.count;
+      bytes += childStats.bytes;
+    });
+    return { count, bytes };
+  }
+  const ranked = folders.map(folder => ({ ...folder, stats: measureFolder(folder) }))
+    .sort((a, b) => b.stats.bytes - a.stats.bytes || a.name.localeCompare(b.name, "fr"));
+  const filesInFolders = storageFilesCache.filter(file => Boolean(file.folder_id)).length;
+  const bytesInFolders = storageFilesCache.filter(file => Boolean(file.folder_id))
+    .reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0);
+  return "<h4 style=\"margin:22px 0 6px;\">Vue d'ensemble des dossiers</h4>" +
+    "<p class=\"muted\" style=\"margin:0 0 12px;\">Les tailles incluent les sous-dossiers. Les fichiers placés directement à la racine ne sont pas comptés dans les dossiers.</p>" +
+    "<div class=\"grid\" style=\"margin-bottom:14px;\">" +
+      "<div><div class=\"muted\">Dossiers créés</div><div class=\"stat\">" + folders.length + "</div></div>" +
+      "<div><div class=\"muted\">Fichiers rangés</div><div class=\"stat\">" + filesInFolders + "</div></div>" +
+      "<div><div class=\"muted\">Taille rangée</div><div class=\"stat\">" + formatBytes(bytesInFolders) + "</div></div>" +
+    "</div>" +
+    (ranked.length ? ranked.slice(0, 5).map(folder =>
+      "<div style=\"display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--border, rgba(128,128,128,.2));\">" +
+        "<div style=\"min-width:0;flex:1;\"><strong>📁 " + escapeHTML(folder.name) + "</strong>" +
+        "<div class=\"muted\" style=\"font-size:12px;\">" + folder.stats.count + " fichier(s), sous-dossiers inclus · " + formatBytes(folder.stats.bytes) + "</div></div>" +
+        "<button type=\"button\" class=\"secondary\" onclick=\"openStorageFolder('" + escapeHTML(folder.id) + "')\">Ouvrir</button>" +
+      "</div>"
+    ).join("") : "<div class=\"empty\">Aucun dossier créé pour le moment.</div>") +
+    (ranked.length > 5 ? "<p class=\"muted\" style=\"margin-top:10px;\">Les 5 dossiers les plus volumineux sont affichés.</p>" : "");
+}
+
 function renderStorageStats(used, limit, available) {
   const container = document.getElementById("storageStatsBreakdown");
   if (!container) return;
@@ -2252,62 +2302,8 @@ function renderStorageStats(used, limit, available) {
         </div>
       `;
     }).join("")}
-    <h4 style="margin:22px 0 6px;">Vue d'ensemble des dossiers</h4>
-    <p class="muted" style="margin:0 0 12px;">Les tailles incluent les sous-dossiers. Les fichiers placés directement à la racine ne sont pas comptés dans les dossiers.</p>
-    ${(() => {
-      const folders = storageFoldersCache || [];
-      const filesByFolder = new Map();
-      storageFilesCache.forEach(file => {
-        if (!file.folder_id) return;
-        if (!filesByFolder.has(file.folder_id)) filesByFolder.set(file.folder_id, []);
-        filesByFolder.get(file.folder_id).push(file);
-      });
-      const childrenByParent = new Map();
-      folders.forEach(folder => {
-        const parent = folder.parent_id || null;
-        if (!childrenByParent.has(parent)) childrenByParent.set(parent, []);
-        childrenByParent.get(parent).push(folder);
-      });
-      function measureFolder(folder, visited = new Set()) {
-        if (visited.has(folder.id)) return { count: 0, bytes: 0 };
-        const nextVisited = new Set(visited);
-        nextVisited.add(folder.id);
-        const directFiles = filesByFolder.get(folder.id) || [];
-        let count = directFiles.length;
-        let bytes = directFiles.reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0);
-        (childrenByParent.get(folder.id) || []).forEach(child => {
-          const childStats = measureFolder(child, nextVisited);
-          count += childStats.count;
-          bytes += childStats.bytes;
-        });
-        return { count, bytes };
-      }
-      const ranked = folders.map(folder => ({
-        ...folder,
-        stats: measureFolder(folder)
-      })).sort((a, b) => b.stats.bytes - a.stats.bytes || a.name.localeCompare(b.name, "fr"));
-      const filesInFolders = storageFilesCache.filter(file => Boolean(file.folder_id)).length;
-      const bytesInFolders = storageFilesCache
-        .filter(file => Boolean(file.folder_id))
-        .reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0);
-      return `
-        <div class="grid" style="margin-bottom:14px;">
-          <div><div class="muted">Dossiers créés</div><div class="stat">${folders.length}</div></div>
-          <div><div class="muted">Fichiers rangés</div><div class="stat">${filesInFolders}</div></div>
-          <div><div class="muted">Taille rangée</div><div class="stat">${formatBytes(bytesInFolders)}</div></div>
-        </div>
-        ${ranked.length ? ranked.slice(0, 5).map(folder => `
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--border, rgba(128,128,128,.2));">
-            <div style="min-width:0;flex:1;">
-              <strong>📁 ${escapeHTML(folder.name)}</strong>
-              <div class="muted" style="font-size:12px;">${folder.stats.count} fichier(s), sous-dossiers inclus · ${formatBytes(folder.stats.bytes)}</div>
-            </div>
-            <button type="button" class="secondary" onclick="openStorageFolder('${escapeHTML(folder.id)}')">Ouvrir</button>
-          </div>
-        `).join("") : `<div class="empty">Aucun dossier créé pour le moment.</div>`}
-        ${ranked.length > 5 ? `<p class="muted" style="margin-top:10px;">Les 5 dossiers les plus volumineux sont affichés.</p>` : ""}
-      `;
-    })()}
+    ${renderStorageFolderStats()}
+
   `;
 }
 
