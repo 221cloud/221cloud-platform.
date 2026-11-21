@@ -2897,6 +2897,54 @@ const used = Number(usage?.used || 0);
 
 
     // STOCKAGE : TÉLÉCHARGEMENT D'UN FICHIER
+    // STOCKAGE : TÉLÉCHARGEMENT SÉCURISÉ POUR SAUVEGARDE (ACTIFS ET CORBEILLE)
+    const backupDownloadMatch = path.match(
+      /^\/api\/storage\/([^/]+)\/backup-download$/
+    );
+
+    if (backupDownloadMatch && request.method === "GET") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureStorageFoldersSchema(env);
+        if (!storageConfigurationAvailable(env)) {
+          return json({ error: "Le stockage cloud n'est pas configuré." }, 503);
+        }
+
+        const fileId = decodeURIComponent(backupDownloadMatch[1]);
+        const file = await env.DB.prepare(
+          `SELECT id, file_name, mime_type, storage_key, b2_file_id
+           FROM cloud_files
+           WHERE id = ? AND user_id = ?
+           LIMIT 1`
+        ).bind(fileId, user.id).first();
+
+        if (!file) return json({ error: "Fichier introuvable." }, 404);
+
+        let downloadResponse;
+        if (file.b2_file_id) {
+          downloadResponse = await b2NativeDownload(env, file.b2_file_id);
+        } else {
+          downloadResponse = await b2Request(env, "GET", file.storage_key);
+        }
+
+        if (!downloadResponse.ok) {
+          console.error("ERREUR TÉLÉCHARGEMENT SAUVEGARDE B2:", downloadResponse.status);
+          return json({ error: "Impossible de récupérer le fichier " + safeFileName(file.file_name) + "." }, 502);
+        }
+
+        const headers = new Headers();
+        headers.set("Content-Type", file.mime_type || "application/octet-stream");
+        headers.set("Content-Disposition", "attachment; filename*=UTF-8''" + encodeURIComponent(safeFileName(file.file_name)));
+        headers.set("Cache-Control", "private, no-store");
+        headers.set("X-Content-Type-Options", "nosniff");
+        return new Response(downloadResponse.body, { status: 200, headers });
+      } catch (error) {
+        console.error("ERREUR SAUVEGARDE FICHIER STOCKAGE:", error);
+        return json({ error: "Impossible de récupérer un fichier pour la sauvegarde." }, 500);
+      }
+    }
+
     const downloadMatch = path.match(
       /^\/api\/storage\/([^/]+)\/download$/
     );
