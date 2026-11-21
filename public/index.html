@@ -1961,7 +1961,10 @@ async function renderHostingPage() {
 
 ${
   websiteFiles.length
-    ? renderWebsiteFileTree(websiteFiles)
+    ? renderWebsiteFileTree(
+    websiteFiles,
+    hosting?.url || ""
+  )
     : `<p class="muted">Aucun fichier dans le déploiement actif.</p>`
 }
             <div class="section-head">
