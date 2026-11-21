@@ -526,7 +526,64 @@ async function api(path, options = {}) {
 
   return data;
 }
+function renderWebsiteFileTree(files) {
+  const root = {
+    folders: {},
+    files: []
+  };
 
+  (files || []).forEach(file => {
+    const parts = String(file.file_path || "")
+      .split("/")
+      .filter(Boolean);
+
+    if (!parts.length) return;
+
+    let current = root;
+
+    parts.slice(0, -1).forEach(folderName => {
+      if (!current.folders[folderName]) {
+        current.folders[folderName] = {
+          folders: {},
+          files: []
+        };
+      }
+
+      current = current.folders[folderName];
+    });
+
+    current.files.push({
+      name: parts[parts.length - 1],
+      file
+    });
+  });
+
+  function renderNode(node) {
+    const foldersHTML = Object.entries(node.folders)
+      .map(([name, folder]) => `
+        <details class="item-card">
+          <summary>📁 ${escapeHTML(name)}</summary>
+          <div style="margin-left:18px;margin-top:10px">
+            ${renderNode(folder)}
+          </div>
+        </details>
+      `).join("");
+
+    const filesHTML = node.files.map(({ name, file }) => `
+      <div class="item-card">
+        <p><strong>📄 ${escapeHTML(name)}</strong></p>
+        <p class="muted">
+          ${escapeHTML(file.mime_type || "Type inconnu")}
+          · ${Number(file.file_size || 0)} octets
+        </p>
+      </div>
+    `).join("");
+
+    return foldersHTML + filesHTML;
+  }
+
+  return renderNode(root);
+}
 function escapeHTML(value) {
   return String(value ?? "").replace(/[&<>"']/g, char => ({
     "&":"&amp;",
@@ -1881,21 +1938,13 @@ async function renderHostingPage() {
                 `
             }
 <div class="section-head">
-  <h3>Fichiers du site</h3>
+  <h3>Explorateur de fichiers</h3>
   <span class="muted">${websiteFiles.length} fichier(s)</span>
 </div>
 
 ${
   websiteFiles.length
-    ? websiteFiles.map(file => `
-        <div class="item-card">
-          <p><strong>▤ ${escapeHTML(file.file_path)}</strong></p>
-          <p class="muted">
-            ${escapeHTML(file.mime_type || "Type inconnu")}
-            · ${Number(file.file_size || 0)} octets
-          </p>
-        </div>
-      `).join("")
+    ? renderWebsiteFileTree(websiteFiles)
     : `<p class="muted">Aucun fichier dans le déploiement actif.</p>`
 }
             <div class="section-head">
