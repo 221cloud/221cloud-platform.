@@ -2819,6 +2819,7 @@ async function openStorageTrash() {
     const data = await api("/storage/trash");
     storageTrashCache = data.files || [];
     renderStorageTrash();
+    loadStorageHistory();
   } catch (error) {
     if (list) list.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message) + '</div>';
   }
