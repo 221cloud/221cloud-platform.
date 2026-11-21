@@ -4558,7 +4558,13 @@ ${
       <h1 class="page-title">Hébergement web</h1>
       <div class="card">
         <p class="error-text">${escapeHTML(error.message)}</p>
-      </div/* APPLICATIONS */
+      </div>
+    `;
+  }
+}
+/* AUTRES PAGES */
+
+/* APPLICATIONS */
 
 async function renderApplicationsPage() {
   document.getElementById("mainContent").innerHTML = `
@@ -4824,11 +4830,6 @@ function refreshApplicationPreview() {
   if (/<\/body>/i.test(html)) html = html.replace(/<\/body>/i, scriptTag + "</body>");
   else html += scriptTag;
   frame.srcdoc = html;
-}
-
-{
-    alert(error.message);
-  }
 }
 
 function renderPlaceholder(title, description) {
