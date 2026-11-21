@@ -2174,6 +2174,9 @@ function renderStoragePage() {
       <button class="secondary" onclick="loadStorageHistory()">↻ Actualiser</button>
     </div>
     <div class="card" id="storageHistoryCard">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+        <button class="secondary" type="button" onclick="exportStorageHistoryCSV()">⬇ Exporter en CSV</button>
+      </div>
       <label for="storageHistoryFilter">Filtrer les opérations</label>
       <select id="storageHistoryFilter" onchange="applyStorageHistoryFilters()" style="width:100%;margin:8px 0 12px;">
         <option value="all">Toutes les opérations</option>
@@ -2518,6 +2521,77 @@ function changeStorageHistoryPage(direction) {
   const nextPage = storageHistoryPage + Number(direction || 0);
   if (nextPage < 1 || nextPage > storageHistoryPagination.totalPages) return;
   loadStorageHistory(nextPage);
+}
+
+async function exportStorageHistoryCSV() {
+  const filter = document.getElementById("storageHistoryFilter")?.value || "all";
+  const search = (document.getElementById("storageHistorySearch")?.value || "").trim();
+  const button = document.querySelector('#storageHistoryCard button[onclick="exportStorageHistoryCSV()"]');
+  const originalLabel = button?.textContent || "⬇ Exporter en CSV";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Préparation de l’export...";
+  }
+
+  try {
+    const params = new URLSearchParams({ page: "1", action: filter, search });
+    const firstPage = await api("/storage/history?" + params.toString());
+    const pagination = firstPage.pagination || { totalPages: 1, total: (firstPage.activities || []).length };
+    const allActivities = [...(firstPage.activities || [])];
+
+    for (let page = 2; page <= Number(pagination.totalPages || 1); page++) {
+      params.set("page", String(page));
+      const pageData = await api("/storage/history?" + params.toString());
+      allActivities.push(...(pageData.activities || []));
+    }
+
+    if (!allActivities.length) {
+      alert("Aucune opération à exporter pour ce filtre ou cette recherche.");
+      return;
+    }
+
+    const actionLabels = {
+      upload: "Fichier ajouté",
+      move: "Fichier déplacé",
+      trash: "Fichier mis à la corbeille",
+      restore: "Fichier restauré",
+      permanent_delete: "Fichier supprimé définitivement"
+    };
+    const columns = ["Date", "Opération", "Nom du fichier", "Taille (octets)", "Détails"];
+    const safeCell = value => {
+      let text = String(value ?? "");
+      if (/^[=+@\\t\\r]/.test(text) || /^-/.test(text)) text = "'" + text;
+      return '"' + text.replace(/"/g, '""') + '"';
+    };
+    const rows = allActivities.map(item => [
+      item.created_at || "",
+      actionLabels[item.action] || item.action || "",
+      item.file_name || "",
+      Number(item.file_size) || 0,
+      item.details || ""
+    ]);
+    const csv = "\\uFEFF" + [columns, ...rows].map(row => row.map(safeCell).join(";")).join("\\r\\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const now = new Date();
+    const stamp = now.getFullYear() + "-" +
+      String(now.getMonth() + 1).padStart(2, "0") + "-" +
+      String(now.getDate()).padStart(2, "0");
+    link.href = url;
+    link.download = "221Cloud-historique-stockage-" + stamp + ".csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (error) {
+    alert("Impossible d’exporter l’historique : " + error.message);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalLabel;
+    }
+  }
 }
 
 function renderStorageHistory(activities) {
