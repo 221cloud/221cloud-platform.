@@ -597,6 +597,14 @@ const downloadUrl = `${fileUrl}?download=1`;
   file.file_path === "index.html"
     ? ""
     : `<p>
+        : `<p>
+        <button type="button" onclick="renameWebsiteFile('${escapeHTML(projectId)}', '${escapeHTML(file.id)}', '${escapeHTML(name)}')">
+          Renommer
+        </button>
+        <button type="button" onclick="deleteWebsiteFile('${escapeHTML(projectId)}', '${escapeHTML(file.id)}')">
+          Supprimer
+        </button>
+      </p>`
         <button type="button" onclick="deleteWebsiteFile('${escapeHTML(projectId)}', '${escapeHTML(file.id)}')">
           Supprimer
         </button>
@@ -627,6 +635,38 @@ async function deleteWebsiteFile(projectId, fileId) {
     );
 
     alert("Fichier supprimé avec succès.");
+    await renderHostingPage();
+
+  } catch (error) {
+    alert(error.message);
+  }
+}
+async function renameWebsiteFile(projectId, fileId, currentName) {
+  const newName = prompt(
+    "Entrez le nouveau nom du fichier :",
+    currentName
+  );
+
+  if (newName === null || !newName.trim()) {
+    return;
+  }
+
+  if (newName.trim() === currentName) {
+    return;
+  }
+
+  try {
+    await api(
+      `/projects/${encodeURIComponent(projectId)}/hosting/files/${encodeURIComponent(fileId)}/rename`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: newName.trim()
+        })
+      }
+    );
+
+    alert("Fichier renommé avec succès.");
     await renderHostingPage();
 
   } catch (error) {
