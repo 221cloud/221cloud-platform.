@@ -2372,7 +2372,7 @@ hosting
         const body = await request.json();
         const name = String(body.name || "").trim();
         const parentId = String(body.parent_id || "").trim() || null;
-        if (!name || name.length > 80 || /[\\/\\\\\\u0000-\\u001F\\u007F]/.test(name) || name === "." || name === "..") return json({ error: "Nom de dossier invalide." }, 400);
+        if (!name || name.length > 80 || name.includes("/") || name.includes("\\") || /[\u0000-\u001F\u007F]/.test(name) || name === "." || name === "..") return json({ error: "Nom de dossier invalide." }, 400);
         if (parentId) {
           const parent = await env.DB.prepare("SELECT id FROM storage_folders WHERE id = ? AND user_id = ? LIMIT 1").bind(parentId, user.id).first();
           if (!parent) return json({ error: "Dossier parent introuvable." }, 404);
