@@ -1762,6 +1762,28 @@ function renderStoragePage() {
   </select>
 </div>
 
+<div class="card hidden" id="storageTrashFiltersCard" style="margin-bottom:15px;">
+  <input
+    type="search"
+    id="storageTrashSearchInput"
+    placeholder="Rechercher dans la corbeille..."
+    oninput="renderStorageTrash()"
+    style="width:100%; margin-bottom:12px;"
+  >
+  <select
+    id="storageTrashTypeFilter"
+    onchange="renderStorageTrash()"
+    style="width:100%;"
+  >
+    <option value="all">Tous les types</option>
+    <option value="image">Images</option>
+    <option value="video">Vidéos</option>
+    <option value="document">Documents</option>
+    <option value="other">Autres fichiers</option>
+  </select>
+  <p class="muted" id="storageTrashResultCount"></p>
+</div>
+
 <div id="storageFilesList">
       <div class="empty">Chargement des fichiers...</div>
     </div>
@@ -1777,6 +1799,8 @@ function setStorageView(view) {
     const element = document.getElementById(id);
     if (element) element.classList.toggle("hidden", inTrash);
   });
+  const trashFilters = document.getElementById("storageTrashFiltersCard");
+  if (trashFilters) trashFilters.classList.toggle("hidden", !inTrash);
   const title = document.getElementById("storageFilesTitle");
   if (title) title.textContent = inTrash ? "Corbeille" : "Mes fichiers";
   const trashButton = document.getElementById("storageTrashButton");
@@ -2074,9 +2098,39 @@ function renderStorageTrash() {
   if (!list) return;
   if (!storageTrashCache.length) {
     list.innerHTML = '<div class="empty">🗑️<br>La corbeille est vide.</div>';
+    const count = document.getElementById("storageTrashResultCount");
+    if (count) count.textContent = "0 fichier";
     return;
   }
-  list.innerHTML = storageTrashCache.map(file => {
+
+  const search = (document.getElementById("storageTrashSearchInput")?.value || "").trim().toLowerCase();
+  const type = document.getElementById("storageTrashTypeFilter")?.value || "all";
+  const filteredFiles = storageTrashCache.filter(file => {
+    const name = String(file.file_name || "").toLowerCase();
+    const mime = String(file.mime_type || "").toLowerCase();
+    const matchesSearch = !search || name.includes(search) || mime.includes(search);
+    const isImage = mime.startsWith("image/");
+    const isVideo = mime.startsWith("video/");
+    const isDocument = mime.includes("pdf") || mime.startsWith("text/")
+      || mime.includes("word") || mime.includes("excel")
+      || mime.includes("spreadsheet") || mime.includes("presentation");
+    const matchesType = type === "all"
+      || (type === "image" && isImage)
+      || (type === "video" && isVideo)
+      || (type === "document" && isDocument)
+      || (type === "other" && !isImage && !isVideo && !isDocument);
+    return matchesSearch && matchesType;
+  });
+
+  const count = document.getElementById("storageTrashResultCount");
+  if (count) count.textContent = filteredFiles.length + " résultat(s) sur " + storageTrashCache.length + " fichier(s)";
+
+  if (!filteredFiles.length) {
+    list.innerHTML = '<div class="empty">Aucun fichier ne correspond à votre recherche ou à ce filtre.</div>';
+    return;
+  }
+
+  list.innerHTML = filteredFiles.map(file => {
     const mimeType = String(file.mime_type || "").toLowerCase();
     const fileIcon = mimeType.startsWith("image/") ? "🖼️"
       : mimeType.startsWith("video/") ? "🎬"
