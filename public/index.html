@@ -1428,23 +1428,27 @@ function renderDashboardNotificationsFromCache() {
   const container = document.getElementById("overviewNotifications");
   const allContainer = document.getElementById("allNotificationsList");
   if (!container && !allContainer) return;
+
   const readIds = getDashboardReadNotificationIds();
   const unreadCount = dashboardNotificationsCache.filter(item => !readIds.has(item.id)).length;
   const count = document.getElementById("overviewNotificationCount");
-  if (count) count.textContent = unreadCount + " notification(s) non lue(s)";
   const markAllButton = document.getElementById("markAllNotificationsReadButton");
+  const allCount = document.getElementById("allNotificationsCount");
+  const allMarkButton = document.getElementById("allMarkNotificationsReadButton");
+
+  if (count) count.textContent = unreadCount + " notification(s) non lue(s)";
   if (markAllButton) markAllButton.disabled = unreadCount === 0;
+  if (allMarkButton) allMarkButton.disabled = unreadCount === 0;
+  if (allCount) allCount.textContent = dashboardNotificationsCache.length + " notification(s) · " + unreadCount + " non lue(s)";
 
   if (!dashboardNotificationsCache.length) {
     const emptyMessage = '<div class="empty">Aucune notification pour le moment. Les alertes importantes apparaîtront ici.</div>';
     if (container) container.innerHTML = emptyMessage;
-    if (allCount) allCount.textContent = "0 notification · 0 non lue";
-    if (allMarkButton) allMarkButton.disabled = true;
     if (allContainer) allContainer.innerHTML = emptyMessage;
     return;
   }
 
-  container.innerHTML = dashboardNotificationsCache.slice(0, 8).map(item => {
+  const renderItem = item => {
     const isRead = readIds.has(item.id);
     const dateLabel = item.date ? " · " + formatDate(item.date) : "";
     const action = item.page
@@ -1469,41 +1473,13 @@ function renderDashboardNotificationsFromCache() {
         ${action}
       </div>
     `;
-  }).join("");
+  };
 
-  const allCount = document.getElementById("allNotificationsCount");
-  const allMarkButton = document.getElementById("allMarkNotificationsReadButton");
-  if (allMarkButton) allMarkButton.disabled = unreadCount === 0;
+  if (container) {
+    container.innerHTML = dashboardNotificationsCache.slice(0, 8).map(renderItem).join("");
+  }
   if (allContainer) {
-    if (allCount) allCount.textContent = dashboardNotificationsCache.length + " notification(s) · " + unreadCount + " non lue(s)";
-    allContainer.innerHTML = dashboardNotificationsCache.length
-      ? dashboardNotificationsCache.map(item => {
-          const isRead = readIds.has(item.id);
-          const dateLabel = item.date ? " · " + formatDate(item.date) : "";
-          const action = item.page
-            ? `<button class="secondary" onclick="showPage('${item.page}')">Ouvrir</button>`
-            : "";
-          const readAction = isRead
-            ? '<span class="status">✓ Lue</span>'
-            : `<button class="secondary" onclick="markDashboardNotificationRead('${item.id}')">Marquer comme lue</button>`;
-          const border = item.level === "warning"
-            ? "border-left:4px solid #f59e0b;"
-            : (isRead ? "opacity:.72;" : "border-left:4px solid #438cff;");
-          return `
-            <div class="item-card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;${border}">
-              <div style="display:flex;align-items:center;gap:12px;min-width:0">
-                <div class="stat-icon">${item.icon}</div>
-                <div style="min-width:0">
-                  <strong>${escapeHTML(item.title)}</strong>
-                  <div class="muted">${escapeHTML(item.message + dateLabel)}</div>
-                  <div style="margin-top:7px">${readAction}</div>
-                </div>
-              </div>
-              ${action}
-            </div>
-          `;
-        }).join("")
-      : '<div class="empty">Aucune notification pour le moment. Les alertes importantes apparaîtront ici.</div>';
+    allContainer.innerHTML = dashboardNotificationsCache.map(renderItem).join("");
   }
 }
 
