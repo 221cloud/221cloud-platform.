@@ -699,6 +699,20 @@ async function recordStorageActivity(env, userId, action, file, details = "") {
     console.error("ERREUR HISTORIQUE STOCKAGE:", error);
   }
 }
+async function ensureProjectTrashSchema(env) {
+  const columns = await env.DB.prepare("PRAGMA table_info(projects)").all();
+  const hasDeletedAt = (columns.results || []).some(column => column.name === "deleted_at");
+  if (!hasDeletedAt) {
+    try {
+      await env.DB.prepare("ALTER TABLE projects ADD COLUMN deleted_at TEXT").run();
+    } catch (error) {
+      const refreshed = await env.DB.prepare("PRAGMA table_info(projects)").all();
+      const alreadyAdded = (refreshed.results || []).some(column => column.name === "deleted_at");
+      if (!alreadyAdded) throw error;
+    }
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -710,6 +724,15 @@ export default {
         status: "online"
       });
     }
+
+    if (path.startsWith("/api/projects") || path === "/api/databases" || path === "/api/admin/stats") {
+      try {
+        await ensureProjectTrashSchema(env);
+      } catch (error) {
+        console.error("ERREUR INITIALISATION CORBEILLE PROJETS:", error);
+        return json({ error: "Impossible de vérifier le système de projets." }, 500);
+      }
+    }
 if (path === "/api/admin/stats") {
   const auth = await requireAdmin(request, env);
 
@@ -720,7 +743,7 @@ if (path === "/api/admin/stats") {
   ).first();
 
   const projects = await env.DB.prepare(
-    "SELECT COUNT(*) AS total FROM projects"
+    "SELECT COUNT(*) AS total FROM projects WHERE deleted_at IS NULL"
   ).first();
 
   const databases = await env.DB.prepare(
@@ -1091,7 +1114,7 @@ if (path === "/api/subscription" && request.method === "GET") {
         const result = await env.DB.prepare(
           `SELECT id, name, type, status, created_at
            FROM projects
-           WHERE user_id = ?
+           WHERE user_id = ? AND deleted_at IS NULL
            ORDER BY created_at DESC`
         ).bind(user.id).all();
 
@@ -1127,7 +1150,7 @@ if (path === "/api/subscription" && request.method === "GET") {
         const project = await env.DB.prepare(`
           SELECT id, name, type
           FROM projects
-          WHERE id = ? AND user_id = ?
+          WHERE id = ? AND user_id = ? AND deleted_at IS NULL
         `).bind(projectId, user.id).first();
 
         if (!project) {
@@ -1221,6 +1244,7 @@ if (path === "/api/subscription" && request.method === "GET") {
             AND projects.id = ?
             AND projects.user_id = ?
             AND projects.type = 'website'
+            AND projects.deleted_at IS NULL
             AND website_hostings.user_id = ?
           LIMIT 1
         `).bind(
@@ -1480,7 +1504,7 @@ if (path === "/api/subscription" && request.method === "GET") {
           JOIN projects p ON p.id = d.project_id
           JOIN website_hostings h ON h.project_id = p.id
           WHERE d.id = ? AND p.id = ? AND p.user_id = ?
-            AND p.type = 'website' AND h.user_id = ?
+            AND p.type = 'website' AND p.deleted_at IS NULL AND h.user_id = ?
           LIMIT 1
         `).bind(deploymentId, projectId, user.id, user.id).first();
         if (!deployment) return json({ error: "Déploiement introuvable." }, 404);
@@ -1523,7 +1547,7 @@ if (path === "/api/subscription" && request.method === "GET") {
           JOIN projects p ON p.id = d.project_id
           JOIN website_hostings h ON h.project_id = p.id
           WHERE d.id = ? AND p.id = ? AND p.user_id = ?
-            AND p.type = 'website' AND h.user_id = ?
+            AND p.type = 'website' AND p.deleted_at IS NULL AND h.user_id = ?
           LIMIT 1
         `).bind(deploymentId, projectId, user.id, user.id).first();
 
@@ -1696,6 +1720,7 @@ if (path === "/api/subscription" && request.method === "GET") {
             AND projects.id = ?
             AND projects.user_id = ?
             AND projects.type = 'website'
+            AND projects.deleted_at IS NULL
             AND website_hostings.user_id = ?
           LIMIT 1
         `).bind(
@@ -1822,7 +1847,7 @@ if (path === "/api/subscription" && request.method === "GET") {
         const project = await env.DB.prepare(`
           SELECT id, name, type
           FROM projects
-          WHERE id = ? AND user_id = ?
+          WHERE id = ? AND user_id = ? AND deleted_at IS NULL
         `).bind(projectId, user.id).first();
 
         if (!project) {
@@ -1928,6 +1953,7 @@ files: websiteFiles.results || []
             AND projects.id = ?
             AND projects.user_id = ?
             AND projects.type = 'website'
+            AND projects.deleted_at IS NULL
             AND website_hostings.user_id = ?
             AND website_hostings.active_deployment_id = website_files.deployment_id
           LIMIT 1
@@ -2464,7 +2490,7 @@ if (downloadRequested) {
         const projectCount = await env.DB.prepare(`
           SELECT COUNT(*) AS total
           FROM projects
-          WHERE user_id = ?
+          WHERE user_id = ? AND deleted_at IS NULL
         `).bind(user.id).first();
 
         if (Number(projectCount?.total || 0) >= maxProjects) {
@@ -2519,6 +2545,45 @@ hosting
       }
     }
 
+    if (path === "/api/projects/trash" && request.method === "GET") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        const result = await env.DB.prepare(`
+          SELECT id, name, type, status, created_at, deleted_at
+          FROM projects
+          WHERE user_id = ? AND deleted_at IS NOT NULL
+          ORDER BY deleted_at DESC
+        `).bind(user.id).all();
+        return json({ projects: result.results || [] });
+      } catch (error) {
+        console.error("ERREUR CORBEILLE PROJETS:", error);
+        return json({ error: "Impossible de charger la corbeille des projets." }, 500);
+      }
+    }
+
+    const restoreProjectMatch = path.match(/^\/api\/projects\/([^/]+)\/restore$/);
+    if (restoreProjectMatch && request.method === "POST") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        const projectId = decodeURIComponent(restoreProjectMatch[1]);
+        const project = await env.DB.prepare(`
+          SELECT id, name FROM projects
+          WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL
+        `).bind(projectId, user.id).first();
+        if (!project) return json({ error: "Projet introuvable dans la corbeille." }, 404);
+        await env.DB.prepare(`
+          UPDATE projects SET deleted_at = NULL
+          WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL
+        `).bind(projectId, user.id).run();
+        return json({ message: "Projet restauré avec succès.", project });
+      } catch (error) {
+        console.error("ERREUR RESTAURATION PROJET:", error);
+        return json({ error: "Impossible de restaurer ce projet." }, 500);
+      }
+    }
+
     // MODIFICATION ET SUPPRESSION D'UN PROJET
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)$/);
 
@@ -2535,7 +2600,7 @@ hosting
         const existing = await env.DB.prepare(
           `SELECT id, name, type, status, created_at
            FROM projects
-           WHERE id = ? AND user_id = ?`
+           WHERE id = ? AND user_id = ? AND deleted_at IS NULL`
         ).bind(projectId, user.id).first();
 
         if (!existing) {
@@ -2574,7 +2639,7 @@ hosting
           const updated = await env.DB.prepare(
             `SELECT id, name, type, status, created_at
              FROM projects
-             WHERE id = ? AND user_id = ?`
+             WHERE id = ? AND user_id = ? AND deleted_at IS NULL`
           ).bind(projectId, user.id).first();
 
           return json({
@@ -2584,12 +2649,13 @@ hosting
         }
 
         if (request.method === "DELETE") {
-          await env.DB.prepare(
-            "DELETE FROM projects WHERE id = ? AND user_id = ?"
-          ).bind(projectId, user.id).run();
+          await env.DB.prepare(`
+            UPDATE projects SET deleted_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+          `).bind(projectId, user.id).run();
 
           return json({
-            message: "Projet supprimé avec succès."
+            message: "Projet déplacé dans la corbeille. Ses données associées sont conservées."
           });
         }
 
@@ -2663,7 +2729,7 @@ hosting
 
         if (projectId) {
           const project = await env.DB.prepare(
-            "SELECT id FROM projects WHERE id = ? AND user_id = ?"
+            "SELECT id FROM projects WHERE id = ? AND user_id = ? AND deleted_at IS NULL"
           ).bind(projectId, user.id).first();
 
           if (!project) {
@@ -3348,6 +3414,7 @@ const used = Number(usage?.used || 0);
             AND projects.id = ?
             AND projects.user_id = ?
             AND projects.type = 'website'
+            AND projects.deleted_at IS NULL
             AND website_hostings.user_id = ?
             AND website_hostings.active_deployment_id = website_files.deployment_id
           LIMIT 1
