@@ -4528,7 +4528,50 @@ function renderAccount() {
       <button class="secondary" type="button" onclick="revokeOtherSessions()">Déconnecter les autres sessions</button>
       <div id="accountSessionsMessage" aria-live="polite"></div>
     </div>
+
+    <div class="card form-card">
+      <h3>Journal de sécurité</h3>
+      <p class="muted">Consulte les 50 dernières activités de sécurité de ton compte. Aucune adresse IP ni aucun mot de passe n'est enregistré ici.</p>
+      <div id="accountSecurityLog" class="muted">Chargement des activités...</div>
+    </div>
   `;
+
+  loadAccountSecurityLog();
+}
+
+async function loadAccountSecurityLog() {
+  const container = document.getElementById("accountSecurityLog");
+  if (!container) return;
+
+  try {
+    const result = await api("/account/security-log");
+    const events = Array.isArray(result.events) ? result.events : [];
+
+    if (!events.length) {
+      container.innerHTML = "<p>Aucune activité de sécurité enregistrée pour le moment.</p>";
+      return;
+    }
+
+    const labels = {
+      login: "Connexion réussie",
+      logout: "Déconnexion",
+      password_change: "Mot de passe modifié",
+      sessions_revoked: "Autres sessions déconnectées"
+    };
+
+    container.innerHTML = events.map(event => {
+      const title = labels[event.action] || "Activité du compte";
+      return `
+        <div class="activity-item" style="padding:12px 0;border-bottom:1px solid var(--border-color, #e5e7eb)">
+          <strong>${escapeHTML(title)}</strong>
+          <div class="muted">${escapeHTML(event.description || "")}</div>
+          <div class="muted">${escapeHTML(event.device_info || "Navigateur inconnu")} · ${escapeHTML(formatDate(event.created_at))}</div>
+        </div>
+      `;
+    }).join("");
+  } catch (error) {
+    container.innerHTML = '<p class="error-text">' + escapeHTML(error.message || "Impossible de charger les activités.") + '</p>';
+  }
 }
 
 async function changeAccountPassword(event) {
