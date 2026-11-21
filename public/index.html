@@ -1773,13 +1773,25 @@ function renderStoragePage() {
   <select
     id="storageTrashTypeFilter"
     onchange="renderStorageTrash()"
-    style="width:100%;"
+    style="width:100%; margin-bottom:12px;"
   >
     <option value="all">Tous les types</option>
     <option value="image">Images</option>
     <option value="video">Vidéos</option>
     <option value="document">Documents</option>
     <option value="other">Autres fichiers</option>
+  </select>
+  <select
+    id="storageTrashSort"
+    onchange="renderStorageTrash()"
+    style="width:100%; margin-bottom:12px;"
+  >
+    <option value="date_desc">Plus récents d’abord</option>
+    <option value="date_asc">Plus anciens d’abord</option>
+    <option value="name_asc">Nom : A à Z</option>
+    <option value="name_desc">Nom : Z à A</option>
+    <option value="size_desc">Taille : plus volumineux</option>
+    <option value="size_asc">Taille : moins volumineux</option>
   </select>
   <p class="muted" id="storageTrashResultCount"></p>
 </div>
@@ -2120,6 +2132,21 @@ function renderStorageTrash() {
       || (type === "document" && isDocument)
       || (type === "other" && !isImage && !isVideo && !isDocument);
     return matchesSearch && matchesType;
+  });
+
+  const sort = document.getElementById("storageTrashSort")?.value || "date_desc";
+  filteredFiles.sort((a, b) => {
+    if (sort === "name_asc" || sort === "name_desc") {
+      const result = String(a.file_name || "").localeCompare(String(b.file_name || ""), "fr", { sensitivity: "base" });
+      return sort === "name_asc" ? result : -result;
+    }
+    if (sort === "size_asc" || sort === "size_desc") {
+      const result = Number(a.file_size || 0) - Number(b.file_size || 0);
+      return sort === "size_asc" ? result : -result;
+    }
+    const dateA = Date.parse(a.deleted_at || "") || 0;
+    const dateB = Date.parse(b.deleted_at || "") || 0;
+    return sort === "date_asc" ? dateA - dateB : dateB - dateA;
   });
 
   const count = document.getElementById("storageTrashResultCount");
