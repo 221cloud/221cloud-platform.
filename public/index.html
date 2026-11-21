@@ -2624,19 +2624,44 @@ async function downloadStorageMetadataBackup() {
     const backup = await api("/storage/backup");
     const files = backup.contents?.files || [];
     const folders = backup.contents?.folders || [];
-    const totalBytes = files.reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0);
+    const projectsData = await api("/projects");
+    const websiteProjects = (projectsData.projects || []).filter(project => project.type === "website");
+    const hostedSites = [];
+
+    for (const project of websiteProjects) {
+      const hostingData = await api("/projects/" + encodeURIComponent(project.id) + "/hosting");
+      const hosting = hostingData.hosting;
+      const siteFiles = Array.isArray(hostingData.files) ? hostingData.files : [];
+      if (!hosting || !hosting.active_deployment_id || !siteFiles.length) continue;
+      hostedSites.push({
+        project_id: project.id,
+        project_name: project.name || "Site sans nom",
+        hosting_slug: hosting.slug || "",
+        deployment_id: hosting.active_deployment_id,
+        files: siteFiles
+      });
+    }
+
+    const hostedFiles = hostedSites.flatMap(site =>
+      site.files.map(file => ({ ...file, project_id: site.project_id, project_name: site.project_name }))
+    );
+    const personalBytes = files.reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0);
+    const hostedBytes = hostedFiles.reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0);
+    const totalBytes = personalBytes + hostedBytes;
     const maxArchiveBytes = 100 * 1024 * 1024;
 
     if (totalBytes > maxArchiveBytes) {
-      throw new Error("La sauvegarde dépasse la limite de préparation de 100 Mo sur navigateur. Aucun fichier n'a été modifié. Une sauvegarde par lots sera nécessaire.");
+      throw new Error("La sauvegarde complète dépasse la limite de préparation de 100 Mo sur navigateur. Aucun fichier n'a été modifié. Une sauvegarde par lots sera nécessaire.");
     }
 
     if (!confirm(
-      "Créer une archive ZIP contenant les vrais fichiers de votre Stockage cloud, y compris ceux de la corbeille ?\n\n" +
-      "Fichiers : " + files.length + "\n" +
-      "Dossiers : " + folders.length + "\n" +
-      "Volume à télécharger : " + formatBytes(totalBytes) + "\n\n" +
-      "Les originaux resteront inchangés. La préparation peut prendre quelques minutes."
+      "Créer une archive ZIP contenant les fichiers du Stockage cloud (y compris la corbeille) et les fichiers des sites web actuellement publiés ?\n\n" +
+      "Fichiers personnels : " + files.length + "\n" +
+      "Dossiers personnels : " + folders.length + "\n" +
+      "Sites hébergés : " + hostedSites.length + "\n" +
+      "Fichiers des sites : " + hostedFiles.length + "\n" +
+      "Volume total à télécharger : " + formatBytes(totalBytes) + "\n\n" +
+      "Les originaux et les sites publiés resteront inchangés. La préparation peut prendre quelques minutes."
     )) return;
 
     const entries = [];
@@ -2698,8 +2723,63 @@ async function downloadStorageMetadataBackup() {
       entries.push({ name: archivePath + safeName, data: bytes });
     }
 
+    let hostedDownloadIndex = 0;
+    for (const site of hostedSites) {
+      const safeProjectName = String(site.project_name || "Site")
+        .replace(/[\\/\\:*?"<>|]/g, "_")
+        .trim() || "Site";
+      for (const file of site.files) {
+        hostedDownloadIndex++;
+        if (button) {
+          button.textContent = "Sauvegarde sites " + hostedDownloadIndex + "/" + hostedFiles.length + "...";
+        }
+        const response = await fetch(
+          API + "/projects/" + encodeURIComponent(site.project_id) +
+          "/hosting/files/" + encodeURIComponent(file.id) + "/backup-download",
+          { credentials: "same-origin", cache: "no-store" }
+        );
+        if (!response.ok) {
+          let message = "Échec du téléchargement de " + (file.file_path || "un fichier du site") + ".";
+          try {
+            const errorData = await response.json();
+            if (errorData.error) message = errorData.error;
+          } catch (e) {}
+          throw new Error(message + " La sauvegarde ZIP a été annulée.");
+        }
+
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        const expectedSize = Math.max(0, Number(file.file_size) || 0);
+        if (bytes.length !== expectedSize) {
+          throw new Error("Taille incorrecte pour " + file.file_path + " : fichier reçu " +
+            formatBytes(bytes.length) + ", attendu " + formatBytes(expectedSize) +
+            ". La sauvegarde ZIP a été annulée.");
+        }
+
+        const safeFilePath = String(file.file_path || "fichier")
+          .split("/")
+          .map(part => part.replace(/[\\:*?"<>|]/g, "_"))
+          .join("/");
+        entries.push({
+          name: "Sites hébergés/" + safeProjectName + "/" + safeFilePath,
+          data: bytes
+        });
+      }
+    }
+
+    backup.contents.hosted_sites = hostedSites.map(site => ({
+      project_id: site.project_id,
+      project_name: site.project_name,
+      hosting_slug: site.hosting_slug,
+      deployment_id: site.deployment_id,
+      files: site.files.map(file => ({
+        id: file.id,
+        file_path: file.file_path,
+        file_size: file.file_size,
+        mime_type: file.mime_type
+      }))
+    }));
     backup.archive_created_at = new Date().toISOString();
-    backup.note = "Archive contenant les contenus des fichiers et les métadonnées. Les fichiers de la corbeille sont rangés sous Corbeille/.";
+    backup.note = "Archive contenant les fichiers personnels, les fichiers des sites actuellement publiés et les métadonnées. Les fichiers personnels de la corbeille sont rangés sous Corbeille/ ; les sites sous Sites hébergés/.";
     entries.push({
       name: "221Cloud-metadata.json",
       data: new TextEncoder().encode(JSON.stringify(backup, null, 2))
@@ -2722,10 +2802,12 @@ async function downloadStorageMetadataBackup() {
 
     alert(
       "Archive ZIP créée et téléchargée.\n\n" +
-      "Fichiers inclus : " + files.length + "\n" +
-      "Dossiers : " + folders.length + "\n" +
-      "Volume des fichiers : " + formatBytes(totalBytes) + "\n\n" +
-      "Les fichiers actifs et ceux de la corbeille sont inclus. Les originaux n’ont pas été modifiés."
+      "Fichiers personnels : " + files.length + "\n" +
+      "Dossiers personnels : " + folders.length + "\n" +
+      "Sites hébergés : " + hostedSites.length + "\n" +
+      "Fichiers des sites : " + hostedFiles.length + "\n" +
+      "Volume total : " + formatBytes(totalBytes) + "\n\n" +
+      "Les fichiers actifs, ceux de la corbeille et les fichiers des sites publiés sont inclus. Les originaux n’ont pas été modifiés."
     );
   } catch (error) {
     alert("Sauvegarde complète impossible : " + error.message);
