@@ -1436,7 +1436,11 @@ function renderDashboardNotificationsFromCache() {
   if (markAllButton) markAllButton.disabled = unreadCount === 0;
 
   if (!dashboardNotificationsCache.length) {
-    container.innerHTML = '<div class="empty">Aucune notification pour le moment. Les alertes importantes apparaîtront ici.</div>';
+    const emptyMessage = '<div class="empty">Aucune notification pour le moment. Les alertes importantes apparaîtront ici.</div>';
+    if (container) container.innerHTML = emptyMessage;
+    if (allCount) allCount.textContent = "0 notification · 0 non lue";
+    if (allMarkButton) allMarkButton.disabled = true;
+    if (allContainer) allContainer.innerHTML = emptyMessage;
     return;
   }
 
@@ -1525,9 +1529,6 @@ async function renderAllNotificationsPage() {
 }
 
 function renderDashboardNotifications(projects, databases, storageData) {
-  const container = document.getElementById("overviewNotifications");
-  if (!container) return;
-
   const notifications = [];
   const now = Date.now();
   const recentWindow = 7 * 24 * 60 * 60 * 1000;
