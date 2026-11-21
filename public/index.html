@@ -249,6 +249,68 @@ main {
   background: linear-gradient(135deg, #a83250, #7d2639);
   border: 1px solid rgba(255, 120, 150, 0.2);
 }
+/* Présentation améliorée du stockage cloud */
+.storage-folder-card {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  width:100%;
+  padding:14px 16px;
+  margin:0 0 9px;
+  text-align:left;
+  color:var(--text);
+  background:linear-gradient(135deg,#1b2b48,#142039);
+  border:1px solid rgba(105,145,220,.22);
+  border-radius:13px;
+}
+.storage-folder-card:hover {
+  border-color:rgba(105,145,255,.55);
+  background:linear-gradient(135deg,#22385c,#182846);
+}
+.storage-folder-icon,.storage-file-icon {
+  display:grid;
+  place-items:center;
+  flex:0 0 42px;
+  width:42px;
+  height:42px;
+  border-radius:11px;
+  background:rgba(67,140,255,.13);
+  font-size:22px;
+}
+.storage-folder-name {
+  flex:1;
+  min-width:0;
+  overflow-wrap:anywhere;
+  font-weight:700;
+}
+.storage-folder-count {
+  color:var(--muted);
+  font-size:12px;
+  white-space:nowrap;
+}
+.storage-folder-arrow {
+  color:#8eb6ff;
+  font-size:24px;
+  line-height:1;
+}
+.storage-empty-folder { margin-top:8px; line-height:1.9; }
+.storage-file-heading {
+  display:flex;
+  align-items:flex-start;
+  gap:13px;
+}
+.storage-file-icon { flex-shrink:0; }
+.storage-file-details { min-width:0; flex:1; }
+.storage-file-details .file-name {
+  font-weight:700;
+  overflow-wrap:anywhere;
+  line-height:1.45;
+}
+@media (max-width:480px) {
+  .storage-folder-card { gap:9px; padding:12px; }
+  .storage-folder-count { font-size:11px; }
+  .storage-file-card { padding:15px !important; }
+}
 .secondary { background:#26344c; color:#e2e8f0; }
 .danger { background:#7d2639; }
 .success-text { color:var(--green); }
@@ -1735,12 +1797,18 @@ function renderStorageFolders() {
     (folder.parent_id || null) === (activeStorageFolderId || null)
   );
   folderList.innerHTML = folders.length
-    ? folders.map(folder => `
-      <div class="item-card" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-        <button class="secondary" onclick="openStorageFolder('${escapeHTML(folder.id)}')">📁 ${escapeHTML(folder.name)}</button>
-      </div>
-    `).join("")
-    : `<div class="muted">Aucun dossier ici pour le moment.</div>`;
+    ? folders.map(folder => {
+      const fileCount = storageFilesCache.filter(file => file.folder_id === folder.id).length;
+      return `
+        <button class="storage-folder-card" onclick="openStorageFolder('${escapeHTML(folder.id)}')">
+          <span class="storage-folder-icon">📁</span>
+          <span class="storage-folder-name">${escapeHTML(folder.name)}</span>
+          <span class="storage-folder-count">${fileCount} ${fileCount === 1 ? "fichier" : "fichiers"}</span>
+          <span class="storage-folder-arrow">›</span>
+        </button>
+      `;
+    }).join("")
+    : `<div class="empty storage-empty-folder">📂<br>Aucun dossier ici pour le moment.</div>`;
 }
 
 function openStorageFolder(folderId) {
@@ -1837,11 +1905,23 @@ function renderStorageFiles() {
     return;
   }
 
-  list.innerHTML = filteredFiles.map(file => `
-    <div class="item-card">
-      <div class="file-name">${escapeHTML(file.file_name || "Fichier sans nom")}</div>
-      <p class="muted">${escapeHTML(formatBytes(file.file_size))} · ${escapeHTML(file.mime_type || "Fichier")}</p>
-      <div class="muted">Ajouté le : ${escapeHTML(formatDate(file.created_at))}</div>
+  list.innerHTML = filteredFiles.map(file => {
+    const mimeType = String(file.mime_type || "").toLowerCase();
+    const fileIcon = mimeType.startsWith("image/") ? "🖼️"
+      : mimeType.startsWith("video/") ? "🎬"
+      : mimeType.includes("pdf") ? "📕"
+      : mimeType.startsWith("text/") || mimeType.includes("document") ? "📄"
+      : "📦";
+    return `
+    <div class="item-card storage-file-card">
+      <div class="storage-file-heading">
+        <span class="storage-file-icon">${fileIcon}</span>
+        <div class="storage-file-details">
+          <div class="file-name">${escapeHTML(file.file_name || "Fichier sans nom")}</div>
+          <p class="muted">${escapeHTML(formatBytes(file.file_size))} · ${escapeHTML(file.mime_type || "Fichier")}</p>
+          <div class="muted">Ajouté le : ${escapeHTML(formatDate(file.created_at))}</div>
+        </div>
+      </div>
       <div class="item-actions">
         ${String(file.mime_type || "").toLowerCase().startsWith("image/") ? `<button class="secondary" onclick="previewStorageImage('${escapeHTML(file.id)}')">Aperçu</button>` : ""}
 <button class="secondary" onclick="renameStorageFile('${escapeHTML(file.id)}', '${escapeHTML(file.file_name || "")}')">Renommer</button>
@@ -1850,7 +1930,8 @@ function renderStorageFiles() {
         <button class="danger" onclick="deleteStorageFile('${escapeHTML(file.id)}')">Supprimer</button>
       </div>
     </div>
-  `).join("");
+  `;
+  }).join("");
 }
 
 
