@@ -2179,6 +2179,7 @@ function renderStoragePage() {
         <button class="secondary" type="button" onclick="exportStorageHistoryPDF()">📄 Créer un PDF</button>
         <button class="secondary" type="button" onclick="downloadStorageMetadataBackup()">🗂 Sauvegarde complète</button>
         <button class="secondary" type="button" onclick="restoreStorageBackup()">↥ Restaurer une sauvegarde ZIP</button>
+        <button class="secondary" type="button" onclick="restoreHostedSitesFromBackup()">🌐 Restaurer les sites depuis ZIP</button>
       </div>
       <label for="storageHistoryFilter">Filtrer les opérations</label>
       <select id="storageHistoryFilter" onchange="applyStorageHistoryFilters()" style="width:100%;margin:8px 0 12px;">
@@ -3072,6 +3073,209 @@ async function restoreStorageBackup() {
       if (button) { button.disabled = false; button.textContent = originalLabel; }
     }
   };
+  picker.click();
+}
+
+async function restoreHostedSitesFromBackup() {
+  const button = document.querySelector('#storageHistoryCard button[onclick="restoreHostedSitesFromBackup()"]');
+  const originalLabel = button?.textContent || "🌐 Restaurer les sites depuis ZIP";
+  const picker = document.createElement("input");
+  picker.type = "file";
+  picker.accept = ".zip,application/zip";
+  picker.style.display = "none";
+  document.body.appendChild(picker);
+
+  picker.onchange = async () => {
+    const archiveFile = picker.files?.[0];
+    picker.remove();
+    if (!archiveFile) return;
+    if (archiveFile.size > 110 * 1024 * 1024) {
+      alert("Cette archive dépasse la limite de restauration de 110 Mo.");
+      return;
+    }
+    if (button) { button.disabled = true; button.textContent = "Analyse des sites..."; }
+
+    try {
+      const entries = read221ZipArchive(await archiveFile.arrayBuffer());
+      const metadataBytes = entries.get("221Cloud-metadata.json")?.[0];
+      if (!metadataBytes) throw new Error("Métadonnées 221Cloud introuvables dans cette archive.");
+      let backup;
+      try { backup = JSON.parse(new TextDecoder("utf-8").decode(metadataBytes)); }
+      catch (e) { throw new Error("Les métadonnées de l'archive sont illisibles."); }
+      if (backup.product !== "221Cloud" || !backup.contents) {
+        throw new Error("Cette archive ne correspond pas au format 221Cloud.");
+      }
+      const archivedSites = Array.isArray(backup.contents.hosted_sites) ? backup.contents.hosted_sites : [];
+      if (!archivedSites.length) {
+        alert("Cette archive ne contient aucun fichier de site hébergé.");
+        return;
+      }
+
+      const projectsData = await api("/projects");
+      const projects = Array.isArray(projectsData.projects) ? projectsData.projects : [];
+      const plans = [];
+      const unavailable = [];
+      let alreadyPresent = 0;
+      let archivedFileCount = 0;
+      let missingBytes = 0;
+
+      const safeProjectFolder = value => String(value || "Site")
+        .replace(/[\\/:*?"<>|]/g, "_").trim() || "Site";
+      const safeArchivedPath = value => String(value || "fichier")
+        .split("/")
+        .map(part => part.replace(/[\\:*?"<>|]/g, "_"))
+        .join("/");
+
+      for (const archivedSite of archivedSites) {
+        const archivedFiles = Array.isArray(archivedSite.files) ? archivedSite.files : [];
+        archivedFileCount += archivedFiles.length;
+        const project = projects.find(item => item.id === archivedSite.project_id);
+        if (!project) {
+          unavailable.push((archivedSite.project_name || "Site") + " : projet introuvable dans ce compte");
+          continue;
+        }
+
+        const hostingData = await api("/projects/" + encodeURIComponent(project.id) + "/hosting");
+        const hosting = hostingData.hosting;
+        if (!hosting) {
+          unavailable.push((project.name || archivedSite.project_name || "Site") + " : aucun hébergement associé");
+          continue;
+        }
+
+        const currentFiles = Array.isArray(hostingData.files) ? hostingData.files : [];
+        const currentByPath = new Map(currentFiles.map(file => [String(file.file_path || ""), file]));
+        const safeFolder = safeProjectFolder(archivedSite.project_name || project.name);
+        const missingFiles = [];
+
+        for (const archivedFile of archivedFiles) {
+          const filePath = safeArchivedPath(archivedFile.file_path);
+          if (!filePath || filePath.startsWith("/") || filePath.split("/").some(part => !part || part === "." || part === "..")) {
+            throw new Error("Chemin invalide dans la sauvegarde du site " + (project.name || "") + ".");
+          }
+          const zipPath = "Sites hébergés/" + safeFolder + "/" + filePath;
+          const data = entries.get(zipPath)?.[0];
+          if (!data) throw new Error("Fichier de site absent de l'archive : " + zipPath);
+          if (data.length !== Number(archivedFile.file_size || 0)) {
+            throw new Error("Taille incorrecte pour le fichier du site : " + filePath);
+          }
+
+          if (currentByPath.has(filePath)) {
+            alreadyPresent++;
+            continue;
+          }
+          missingFiles.push({
+            file_path: filePath,
+            file_size: Number(archivedFile.file_size || 0),
+            mime_type: archivedFile.mime_type || "application/octet-stream",
+            data
+          });
+        }
+
+        if (missingFiles.length) {
+          const finalPaths = new Set(currentFiles.map(file => String(file.file_path || "")));
+          missingFiles.forEach(file => finalPaths.add(file.file_path));
+          if (!finalPaths.has("index.html")) {
+            unavailable.push((project.name || "Site") + " : index.html absent, restauration refusée");
+            continue;
+          }
+          const bytes = missingFiles.reduce((sum, file) => sum + file.file_size, 0);
+          missingBytes += bytes;
+          plans.push({
+            project,
+            hosting,
+            currentFiles,
+            missingFiles,
+            bytes
+          });
+        }
+      }
+
+      const missingCount = plans.reduce((sum, plan) => sum + plan.missingFiles.length, 0);
+      const missingList = plans.flatMap(plan =>
+        plan.missingFiles.map(file => (plan.project.name || "Site") + " / " + file.file_path)
+      );
+      const preview =
+        "APERÇU — RESTAURATION DES SITES HÉBERGÉS\n\n" +
+        "Sites dans l'archive : " + archivedSites.length + "\n" +
+        "Fichiers de sites dans le ZIP : " + archivedFileCount + "\n" +
+        "Fichiers déjà présents (conservés) : " + alreadyPresent + "\n" +
+        "Fichiers manquants à ajouter : " + missingCount + "\n" +
+        "Volume supplémentaire : " + formatBytes(missingBytes) + "\n" +
+        "Sites concernés : " + plans.length +
+        (missingList.length ? "\n\nFichiers à ajouter :\n• " + missingList.slice(0, 10).join("\n• ") +
+          (missingList.length > 10 ? "\n… et " + (missingList.length - 10) + " autre(s)" : "") : "") +
+        (unavailable.length ? "\n\nÉléments non restaurables :\n• " + unavailable.join("\n• ") : "") +
+        "\n\nLes fichiers actuels ayant le même chemin seront conservés, même si leur taille diffère. Les autres fichiers du site actuel seront copiés dans la nouvelle version. L'ancienne version restera disponible dans l'historique des déploiements.";
+
+      if (!missingCount) {
+        alert(preview + "\n\nAucun fichier de site manquant : aucun déploiement ne sera créé et aucun site ne sera modifié.");
+        return;
+      }
+      if (!confirm(preview + "\n\nContinuer la préparation ?")) return;
+      if (!confirm(
+        "CONFIRMATION DE PUBLICATION\n\n" +
+        "221Cloud va créer une nouvelle version pour " + plans.length + " site(s), y copier les fichiers actuellement publiés, ajouter " +
+        missingCount + " fichier(s) manquant(s), puis publier cette version.\n\n" +
+        "Le site actuellement en ligne restera actif jusqu'à la publication finale. Confirmer ?"
+      )) return;
+
+      let publishedSites = 0;
+      let uploadedMissing = 0;
+      for (let planIndex = 0; planIndex < plans.length; planIndex++) {
+        const plan = plans[planIndex];
+        if (button) button.textContent = "Préparation site " + (planIndex + 1) + "/" + plans.length + "...";
+        const deploymentResult = await api(
+          "/projects/" + encodeURIComponent(plan.project.id) + "/deployments",
+          { method: "POST" }
+        );
+        const deploymentId = deploymentResult.deployment?.id;
+        if (!deploymentId) throw new Error("Impossible de créer une nouvelle version pour " + plan.project.name + ".");
+
+        await api(
+          "/projects/" + encodeURIComponent(plan.project.id) + "/deployments/" +
+          encodeURIComponent(deploymentId) + "/clone-active",
+          { method: "POST" }
+        );
+
+        for (let fileIndex = 0; fileIndex < plan.missingFiles.length; fileIndex++) {
+          const file = plan.missingFiles[fileIndex];
+          if (button) button.textContent = "Ajout " + (fileIndex + 1) + "/" + plan.missingFiles.length + " · " + plan.project.name;
+          const form = new FormData();
+          const basename = file.file_path.split("/").pop() || "fichier";
+          form.append("file", new Blob([file.data], { type: file.mime_type }), basename);
+          form.append("file_path", file.file_path);
+          await api(
+            "/projects/" + encodeURIComponent(plan.project.id) + "/deployments/" +
+            encodeURIComponent(deploymentId) + "/files",
+            { method: "POST", body: form }
+          );
+          uploadedMissing++;
+        }
+
+        if (button) button.textContent = "Publication · " + plan.project.name;
+        await api(
+          "/projects/" + encodeURIComponent(plan.project.id) + "/deployments/" +
+          encodeURIComponent(deploymentId) + "/publish",
+          { method: "POST" }
+        );
+        publishedSites++;
+      }
+
+      alert(
+        "Restauration des sites terminée.\n\n" +
+        "Sites publiés en nouvelle version : " + publishedSites + "\n" +
+        "Fichiers manquants ajoutés : " + uploadedMissing + "\n" +
+        "Fichiers déjà présents conservés : " + alreadyPresent + "\n\n" +
+        "Les versions précédentes restent dans l'historique des déploiements."
+      );
+    } catch (error) {
+      alert("Restauration des sites interrompue : " + error.message +
+        "\n\nLes sites déjà publiés avant cette opération restent inchangés. Si un problème est survenu pendant la préparation, une version en attente peut rester non publiée.");
+    } finally {
+      if (button) { button.disabled = false; button.textContent = originalLabel; }
+    }
+  };
+
   picker.click();
 }
 
