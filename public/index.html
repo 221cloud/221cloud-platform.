@@ -1016,6 +1016,14 @@ function renderOverview() {
     </div>
 
     <div class="section-head">
+      <h2>Activités récentes</h2>
+      <span class="muted">Vos dernières opérations</span>
+    </div>
+    <div class="card" id="overviewRecentActivities">
+      <div class="muted">Chargement de vos activités...</div>
+    </div>
+
+    <div class="section-head">
       <h2>Accès rapides</h2>
     </div>
 
@@ -1290,6 +1298,56 @@ async function loadOverviewStats() {
     if (fileElement) fileElement.textContent = "—";
     if (usedElement) usedElement.textContent = "—";
   }
+}
+
+function renderRecentActivities(projects, databases, files) {
+  const container = document.getElementById("overviewRecentActivities");
+  if (!container) return;
+
+  const activities = [
+    ...(projects || []).map(item => ({
+      type: "Projet créé", name: item.name || "Projet sans nom",
+      date: item.created_at, page: "projects", icon: "▣"
+    })),
+    ...(databases || []).map(item => ({
+      type: "Base de données créée", name: item.name || "Base sans nom",
+      date: item.created_at, page: "databases", icon: "▤"
+    })),
+    ...(files || []).map(item => ({
+      type: "Fichier ajouté", name: item.file_name || "Fichier sans nom",
+      date: item.created_at, page: "storage", icon: "▧"
+    }))
+  ];
+
+  activities.sort((a, b) => {
+    const dateA = new Date(a.date || 0).getTime();
+    const dateB = new Date(b.date || 0).getTime();
+    return (Number.isNaN(dateB) ? 0 : dateB) - (Number.isNaN(dateA) ? 0 : dateA);
+  });
+
+  const recent = activities.slice(0, 8);
+  if (!recent.length) {
+    container.innerHTML = '<div class="empty">Aucune activité récente pour le moment. Vos prochaines opérations apparaîtront ici.</div>';
+    return;
+  }
+
+  container.innerHTML = recent.map(activity => `
+    <div class="item-card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:12px;min-width:0">
+        <div class="stat-icon">${activity.icon}</div>
+        <div style="min-width:0">
+          <strong>${escapeHTML(activity.name)}</strong>
+          <div class="muted">${escapeHTML(activity.type)} · ${escapeHTML(formatDate(activity.date))}</div>
+        </div>
+      </div>
+      <button class="secondary" onclick="showPage('${activity.page}')">Ouvrir</button>
+    </div>
+  `).join("");
+  renderRecentActivities(
+    results[0].status === "fulfilled" ? projectsCache : [],
+    results[1].status === "fulfilled" ? databasesCache : [],
+    results[2].status === "fulfilled" ? (results[2].value.files || []) : []
+  );
 }
 
 /* PROJETS */
