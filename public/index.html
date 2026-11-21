@@ -1448,6 +1448,16 @@ function renderDashboardNotificationsFromCache() {
     return;
   }
 
+  const statusFilter = document.getElementById("allNotificationsStatusFilter")?.value || "all";
+  const categoryFilter = document.getElementById("allNotificationsCategoryFilter")?.value || "all";
+  const visibleNotifications = dashboardNotificationsCache.filter(item => {
+    const isRead = readIds.has(item.id);
+    const statusMatches = statusFilter === "all" || (statusFilter === "read" ? isRead : !isRead);
+    const categoryMatches = categoryFilter === "all" || item.category === categoryFilter;
+    return statusMatches && categoryMatches;
+  });
+  if (allCount) allCount.textContent = visibleNotifications.length + " affichée(s) sur " + dashboardNotificationsCache.length + " · " + unreadCount + " non lue(s)";
+
   const renderItem = item => {
     const isRead = readIds.has(item.id);
     const dateLabel = item.date ? " · " + formatDate(item.date) : "";
@@ -1479,7 +1489,9 @@ function renderDashboardNotificationsFromCache() {
     container.innerHTML = dashboardNotificationsCache.slice(0, 8).map(renderItem).join("");
   }
   if (allContainer) {
-    allContainer.innerHTML = dashboardNotificationsCache.map(renderItem).join("");
+    allContainer.innerHTML = visibleNotifications.length
+      ? visibleNotifications.map(renderItem).join("")
+      : '<div class="empty">Aucune notification ne correspond à ces filtres.</div>';
   }
 }
 
@@ -1496,6 +1508,30 @@ async function renderAllNotificationsPage() {
       <span class="muted" id="allNotificationsCount">Chargement...</span>
       <button class="secondary" id="allMarkNotificationsReadButton" onclick="markAllDashboardNotificationsRead()">Tout marquer comme lu</button>
     </div>
+    <div class="card" style="margin-bottom:14px">
+      <div class="grid storage-grid">
+        <div>
+          <label for="allNotificationsStatusFilter">État</label>
+          <select id="allNotificationsStatusFilter" onchange="renderDashboardNotificationsFromCache()">
+            <option value="all">Toutes</option>
+            <option value="unread">Non lues</option>
+            <option value="read">Lues</option>
+          </select>
+        </div>
+        <div>
+          <label for="allNotificationsCategoryFilter">Catégorie</label>
+          <select id="allNotificationsCategoryFilter" onchange="renderDashboardNotificationsFromCache()">
+            <option value="all">Toutes les catégories</option>
+            <option value="storage">Stockage et corbeille</option>
+            <option value="website">Sites web</option>
+            <option value="application">Applications</option>
+            <option value="database">Bases de données</option>
+            <option value="other_project">Autres projets</option>
+            <option value="files">Fichiers</option>
+          </select>
+        </div>
+      </div>
+    </div>
     <div class="card" id="allNotificationsList">
       <div class="muted">Chargement des notifications...</div>
     </div>
@@ -1510,14 +1546,18 @@ function renderDashboardNotifications(projects, databases, storageData) {
   const recentWindow = 7 * 24 * 60 * 60 * 1000;
 
   [...(projects || []).map(item => ({
-    type: "Projet créé", name: item.name || "Projet sans nom",
-    date: item.created_at, icon: "▣", page: "projects"
+    type: "Projet créé",
+    name: item.name || "Projet sans nom",
+    date: item.created_at,
+    icon: item.type === "website" ? "🌐" : (item.type === "application" ? "📱" : (item.type === "database" ? "▤" : "▣")),
+    page: "projects",
+    category: item.type === "website" ? "website" : (item.type === "application" ? "application" : (item.type === "database" ? "database" : "other_project"))
   })), ...(databases || []).map(item => ({
     type: "Base de données créée", name: item.name || "Base sans nom",
-    date: item.created_at, icon: "▤", page: "databases"
+    date: item.created_at, icon: "▤", page: "databases", category: "database"
   })), ...((storageData?.files || []).map(item => ({
     type: "Fichier ajouté", name: item.file_name || "Fichier sans nom",
-    date: item.created_at, icon: "▧", page: "storage"
+    date: item.created_at, icon: "▧", page: "storage", category: "files"
   })))]
     .forEach(item => {
       const timestamp = new Date(item.date || 0).getTime();
@@ -1529,7 +1569,8 @@ function renderDashboardNotifications(projects, databases, storageData) {
           icon: item.icon,
           level: "info",
           priority: 1,
-          page: item.page
+          page: item.page,
+          category: item.category || "other_project"
         });
       }
     });
@@ -1544,7 +1585,8 @@ function renderDashboardNotifications(projects, databases, storageData) {
         message: formatBytes(used) + " utilisés sur " + formatBytes(limit) + " (" + percent.toFixed(1) + " %)",
         icon: "⚠",
         level: percent >= 95 ? "warning" : "info",
-        priority: 3
+        priority: 3,
+        category: "storage"
       });
     }
 
@@ -1556,7 +1598,8 @@ function renderDashboardNotifications(projects, databases, storageData) {
         icon: "🗑",
         level: "info",
         priority: 2,
-        page: "storage"
+        page: "storage",
+        category: "storage"
       });
     }
   }
