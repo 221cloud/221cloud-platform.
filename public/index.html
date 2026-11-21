@@ -2783,7 +2783,8 @@ function read221ZipArchive(buffer) {
     if (dataEnd > bytes.length) throw new Error("Fichier tronqué dans l'archive ZIP.");
     const data = bytes.slice(dataStart, dataEnd);
     if (zip221Crc32(data) !== crc) throw new Error("Vérification d'intégrité échouée pour : " + name);
-    entries.set(name, data);
+    if (!entries.has(name)) entries.set(name, []);
+    entries.get(name).push(data);
   }
   return entries;
 }
@@ -2842,7 +2843,8 @@ async function restoreStorageBackup() {
         const prefix = file.deleted_at ? "Corbeille/" : "";
         const safeName = String(file.file_name || "fichier").replace(/[\\/]/g, "_");
         const expectedPath = prefix + (originalPath ? originalPath + "/" : "") + safeName;
-        const data = entries.get(expectedPath);
+        const matchingEntries = entries.get(expectedPath);
+        const data = matchingEntries?.shift();
         if (!data) throw new Error("Fichier manquant dans l'archive : " + expectedPath + ". Aucun élément n'a été restauré.");
         if (data.length !== Number(file.file_size || 0)) throw new Error("Taille incorrecte pour " + safeName + ". Aucun élément n'a été restauré.");
         fileEntries.push({ metadata: file, data, isTrash: Boolean(file.deleted_at) });
@@ -2881,7 +2883,14 @@ async function restoreStorageBackup() {
       if (pending.length) throw new Error("La structure de certains dossiers est invalide. Les éléments déjà créés sont conservés dans « " + rootName + " ».");
       const trashFolderIds = new Map();
       if (fileEntries.some(item => item.isTrash)) {
-        const result = await api("/storage/folders", { method: "POST", body: JSON.stringify({ name: "Corbeille", parent_id: restoredRootId }) });
+        const rootFolderNames = new Set(folders.filter(folder => !folder.parent_id).map(folder => String(folder.name || "").toLocaleLowerCase("fr")));
+        let trashFolderName = "Corbeille (sauvegarde)";
+        let suffix = 2;
+        while (rootFolderNames.has(trashFolderName.toLocaleLowerCase("fr"))) {
+          trashFolderName = "Corbeille (sauvegarde " + suffix + ")";
+          suffix++;
+        }
+        const result = await api("/storage/folders", { method: "POST", body: JSON.stringify({ name: trashFolderName, parent_id: restoredRootId }) });
         trashFolderIds.set(null, result.folder.id);
         const pendingTrash = [...folders];
         let trashPasses = 0;
