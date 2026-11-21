@@ -594,21 +594,16 @@ const downloadUrl = `${fileUrl}?download=1`;
       }
       <p><a href="${escapeHTML(downloadUrl)}">Télécharger</a></p>
       ${
-  file.file_path === "index.html"
-    ? ""
-    : `<p>
+        file.file_path === "index.html"
+        ? ""
         : `<p>
-        <button type="button" onclick="renameWebsiteFile('${escapeHTML(projectId)}', '${escapeHTML(file.id)}', '${escapeHTML(name)}')">
-          Renommer
-        </button>
-        <button type="button" onclick="deleteWebsiteFile('${escapeHTML(projectId)}', '${escapeHTML(file.id)}')">
-          Supprimer
-        </button>
-      </p>`
-        <button type="button" onclick="deleteWebsiteFile('${escapeHTML(projectId)}', '${escapeHTML(file.id)}')">
-          Supprimer
-        </button>
-      </p>`
+            <button type="button" onclick="renameWebsiteFile('${escapeHTML(projectId)}', '${escapeHTML(file.id)}', '${escapeHTML(name)}')">
+              Renommer
+            </button>
+            <button type="button" onclick="deleteWebsiteFile('${escapeHTML(projectId)}', '${escapeHTML(file.id)}')">
+              Supprimer
+            </button>
+          </p>`
 }
     </div>
   `;
