@@ -1825,7 +1825,7 @@ async function renderHostingPage() {
 
         const hosting = result.hosting;
         const deployments = result.deployments || [];
-
+        const websiteFiles = result.files || [];
         return `
           <div class="card">
             <h3>${escapeHTML(project.name)}</h3>
@@ -1880,7 +1880,24 @@ async function renderHostingPage() {
                   <p class="muted">L'hébergement n'est pas encore associé à ce projet.</p>
                 `
             }
+<div class="section-head">
+  <h3>Fichiers du site</h3>
+  <span class="muted">${websiteFiles.length} fichier(s)</span>
+</div>
 
+${
+  websiteFiles.length
+    ? websiteFiles.map(file => `
+        <div class="item-card">
+          <p><strong>▤ ${escapeHTML(file.file_path)}</strong></p>
+          <p class="muted">
+            ${escapeHTML(file.mime_type || "Type inconnu")}
+            · ${Number(file.file_size || 0)} octets
+          </p>
+        </div>
+      `).join("")
+    : `<p class="muted">Aucun fichier dans le déploiement actif.</p>`
+}
             <div class="section-head">
               <h3>Déploiements</h3>
               <span class="muted">${deployments.length} au total</span>
