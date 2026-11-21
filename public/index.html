@@ -612,7 +612,11 @@ const downloadUrl = `${fileUrl}?download=1`;
   return renderNode(root);
 }
 async function deleteWebsiteFile(projectId, fileId) {
-  if (!confirm("Voulez-vous vraiment supprimer ce fichier du site ?")) {
+  const confirmation = prompt(
+    "Pour confirmer la suppression, tapez SUPPRIMER."
+  );
+
+  if (confirmation !== "SUPPRIMER") {
     return;
   }
 
