@@ -1765,7 +1765,8 @@ function renderStorageFiles() {
       <div class="muted">Ajouté le : ${escapeHTML(formatDate(file.created_at))}</div>
       <div class="item-actions">
         ${String(file.mime_type || "").toLowerCase().startsWith("image/") ? `<button class="secondary" onclick="previewStorageImage('${escapeHTML(file.id)}')">Aperçu</button>` : ""}
-<button class="secondary" onclick="downloadStorageFile('${escapeHTML(file.id)}')">Télécharger</button>
+<button class="secondary" onclick="renameStorageFile('${escapeHTML(file.id)}', '${escapeHTML(file.file_name || "")}')">Renommer</button>
+        <button class="secondary" onclick="downloadStorageFile('${escapeHTML(file.id)}')">Télécharger</button>
         <button class="danger" onclick="deleteStorageFile('${escapeHTML(file.id)}')">Supprimer</button>
       </div>
     </div>
@@ -1942,6 +1943,40 @@ async function downloadStorageFile(id) {
     alert(error.message);
   }
 }
+
+async function renameStorageFile(id, currentName) {
+  const newName = prompt(
+    "Entrez le nouveau nom du fichier, avec son extension :",
+    currentName
+  );
+
+  if (newName === null || !newName.trim()) {
+    return;
+  }
+
+  if (newName.trim() === currentName) {
+    return;
+  }
+
+  try {
+    await api(
+      "/storage/" + encodeURIComponent(id) + "/rename",
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: newName.trim()
+        })
+      }
+    );
+
+    alert("Fichier renommé avec succès.");
+    await loadStorageFiles();
+
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
 async function renderHostingPage() {
   const main = document.getElementById("mainContent");
 
