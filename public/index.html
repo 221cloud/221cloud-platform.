@@ -2824,6 +2824,18 @@ async function restoreStorageBackup() {
       const used = Number(storage.used || 0);
       const limit = Number(storage.limit || STORAGE_LIMIT_BYTES);
       if (used + totalBytes > limit) throw new Error("Espace insuffisant. Il faut " + formatBytes(totalBytes) + " supplémentaires, mais il ne reste que " + formatBytes(Math.max(0, limit - used)) + ".");
+      let existingTrashFiles = [];
+      try {
+        const trashData = await api("/storage/trash");
+        existingTrashFiles = Array.isArray(trashData.files) ? trashData.files : [];
+      } catch (trashError) {
+        existingTrashFiles = [];
+      }
+      const existingFiles = [
+        ...(Array.isArray(storage.files) ? storage.files : []),
+        ...existingTrashFiles
+      ];
+      const existingNames = new Set(existingFiles.map(file => String(file.file_name || "").trim().toLocaleLowerCase("fr")).filter(Boolean));
       const fileEntries = [];
       const folderMap = new Map(folders.map(folder => [folder.id, folder]));
       const pathCache = new Map();
@@ -2849,13 +2861,26 @@ async function restoreStorageBackup() {
         if (data.length !== Number(file.file_size || 0)) throw new Error("Taille incorrecte pour " + safeName + ". Aucun élément n'a été restauré.");
         fileEntries.push({ metadata: file, data, isTrash: Boolean(file.deleted_at) });
       }
+      const duplicateFiles = fileEntries.filter(item => existingNames.has(String(item.metadata.file_name || "").trim().toLocaleLowerCase("fr")));
       const stamp = new Date().toLocaleString("fr-FR").replace(/[/:]/g, "-");
       const rootName = "Restauration 221Cloud - " + stamp;
-      if (!confirm(
-        "Restaurer cette sauvegarde dans un nouveau dossier « " + rootName + " » ?\n\n" +
-        "Fichiers : " + files.length + "\nDossiers d'origine : " + folders.length + "\nVolume : " + formatBytes(totalBytes) +
-        "\n\nLes fichiers de la sauvegarde seront ajoutés comme copies. Les originaux ne seront ni remplacés ni supprimés. Les éléments de l'ancienne corbeille seront réimportés dans un sous-dossier « Corbeille »."
-      )) return;
+      const previewLines = fileEntries.slice(0, 12).map(item =>
+        (item.isTrash ? "🗑 " : "• ") + String(item.metadata.file_name || "Fichier") + " (" + formatBytes(Number(item.metadata.file_size) || 0) + ")"
+      );
+      const moreFiles = fileEntries.length > 12 ? "\n… et " + (fileEntries.length - 12) + " autre(s) fichier(s)" : "";
+      const duplicateNames = [...new Set(duplicateFiles.map(item => String(item.metadata.file_name || "Fichier")))];
+      const duplicatePreview = duplicateNames.slice(0, 8).join(", ");
+      const duplicateMore = duplicateNames.length > 8 ? " et " + (duplicateNames.length - 8) + " autre(s)" : "";
+      const duplicateNotice = duplicateFiles.length
+        ? "\n\n⚠️ Doublons potentiels : " + duplicateFiles.length + " fichier(s) portent déjà un nom présent dans votre espace.\n" + duplicatePreview + duplicateMore + "\nIls seront tout de même importés comme copies dans le nouveau dossier, sans remplacer les fichiers existants."
+        : "\n\nAucun nom de fichier identique détecté dans les fichiers actuellement présents ou dans la corbeille.";
+      const preview = "APERÇU DE LA SAUVEGARDE\n\n" +
+        "Fichiers : " + files.length + " (actifs : " + fileEntries.filter(item => !item.isTrash).length + ", ancienne corbeille : " + fileEntries.filter(item => item.isTrash).length + ")\n" +
+        "Dossiers d'origine : " + folders.length + "\nVolume total : " + formatBytes(totalBytes) +
+        "\n\nContenu (12 premiers fichiers) :\n" + (previewLines.join("\n") || "Aucun fichier") + moreFiles +
+        duplicateNotice +
+        "\n\nDestination : « " + rootName + " »\n\nContinuer la restauration ?\nLes originaux et le ZIP resteront inchangés.";
+      if (!confirm(preview)) return;
       if (button) button.textContent = "Création des dossiers...";
       const rootResult = await api("/storage/folders", { method: "POST", body: JSON.stringify({ name: rootName, parent_id: null }) });
       const restoredRootId = rootResult.folder?.id;
