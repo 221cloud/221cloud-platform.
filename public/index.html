@@ -624,6 +624,9 @@ let storageFilesCache = [];
 let storageFoldersCache = [];
 let storageTrashCache = [];
 let storageHistoryCache = [];
+let storageHistoryPage = 1;
+let storageHistoryPagination = { page: 1, pageSize: 20, total: 0, totalPages: 1 };
+let storageHistorySearchTimer = null;
 let dashboardNotificationsCache = [];
 let activeStorageFolderId = null;
 let storageView = "files";
@@ -2172,7 +2175,7 @@ function renderStoragePage() {
     </div>
     <div class="card" id="storageHistoryCard">
       <label for="storageHistoryFilter">Filtrer les opérations</label>
-      <select id="storageHistoryFilter" onchange="renderStorageHistory(storageHistoryCache)" style="width:100%;margin:8px 0 12px;">
+      <select id="storageHistoryFilter" onchange="applyStorageHistoryFilters()" style="width:100%;margin:8px 0 12px;">
         <option value="all">Toutes les opérations</option>
         <option value="upload">Fichiers ajoutés</option>
         <option value="move">Fichiers déplacés</option>
@@ -2185,11 +2188,16 @@ function renderStoragePage() {
         type="search"
         id="storageHistorySearch"
         placeholder="Ex. : IMG_6877.png"
-        oninput="renderStorageHistory(storageHistoryCache)"
+        oninput="searchStorageHistory()"
         style="width:100%;margin:8px 0 12px;"
       />
       <div id="storageHistoryResultCount" class="muted" style="margin-bottom:10px;"></div>
-      <div id="storageHistoryList" class="muted">Chargement de l'historique...</div>
+      <div id="storageHistoryList" class="muted">Chargement de l’historique...</div>
+      <div id="storageHistoryPagination" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:14px;">
+        <button class="secondary" id="storageHistoryPrevious" onclick="changeStorageHistoryPage(-1)" disabled>← Précédent</button>
+        <span id="storageHistoryPageLabel" class="muted">Page 1 sur 1</span>
+        <button class="secondary" id="storageHistoryNext" onclick="changeStorageHistoryPage(1)" disabled>Suivant →</button>
+      </div>
     </div>
   `;
 
@@ -2478,40 +2486,64 @@ if (noticeElement) {
 
 
 
-async function loadStorageHistory() {
+async function loadStorageHistory(page = storageHistoryPage) {
   const container = document.getElementById("storageHistoryList");
   if (container) container.innerHTML = '<div class="muted">Chargement de l’historique...</div>';
+  storageHistoryPage = Math.max(1, Number(page) || 1);
   try {
-    const data = await api("/storage/history");
+    const filter = document.getElementById("storageHistoryFilter")?.value || "all";
+    const search = (document.getElementById("storageHistorySearch")?.value || "").trim();
+    const params = new URLSearchParams({ page: String(storageHistoryPage), action: filter, search });
+    const data = await api("/storage/history?" + params.toString());
     storageHistoryCache = data.activities || [];
+    storageHistoryPagination = data.pagination || { page: storageHistoryPage, pageSize: 20, total: storageHistoryCache.length, totalPages: 1 };
+    storageHistoryPage = storageHistoryPagination.page || 1;
     renderStorageHistory(storageHistoryCache);
   } catch (error) {
-    if (container) {
-      container.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message) + '</div>';
-    }
+    if (container) container.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message) + '</div>';
   }
+}
+
+function applyStorageHistoryFilters() {
+  storageHistoryPage = 1;
+  loadStorageHistory(1);
+}
+
+function searchStorageHistory() {
+  if (storageHistorySearchTimer) clearTimeout(storageHistorySearchTimer);
+  storageHistorySearchTimer = setTimeout(() => applyStorageHistoryFilters(), 300);
+}
+
+function changeStorageHistoryPage(direction) {
+  const nextPage = storageHistoryPage + Number(direction || 0);
+  if (nextPage < 1 || nextPage > storageHistoryPagination.totalPages) return;
+  loadStorageHistory(nextPage);
 }
 
 function renderStorageHistory(activities) {
   const container = document.getElementById("storageHistoryList");
   if (!container) return;
-  const filter = document.getElementById("storageHistoryFilter")?.value || "all";
-  const search = (document.getElementById("storageHistorySearch")?.value || "").trim().toLocaleLowerCase("fr");
-  const filteredActivities = activities.filter(item => {
-    const matchesAction = filter === "all" || item.action === filter;
-    const fileName = String(item.file_name || "").toLocaleLowerCase("fr");
-    return matchesAction && (!search || fileName.includes(search));
-  });
+  const pagination = storageHistoryPagination || { page: 1, pageSize: 20, total: activities.length, totalPages: 1 };
+  const total = Number(pagination.total || 0);
+  const page = Number(pagination.page || 1);
+  const pageSize = Number(pagination.pageSize || 20);
+  const totalPages = Math.max(1, Number(pagination.totalPages || 1));
+  const firstItem = total ? ((page - 1) * pageSize) + 1 : 0;
+  const lastItem = Math.min(page * pageSize, total);
   const count = document.getElementById("storageHistoryResultCount");
-  if (count) {
-    count.textContent = filteredActivities.length + " opération(s) affichée(s) sur " + activities.length;
-  }
+  if (count) count.textContent = total ? firstItem + "–" + lastItem + " sur " + total + " opération(s)" : "0 opération";
+  const pageLabel = document.getElementById("storageHistoryPageLabel");
+  if (pageLabel) pageLabel.textContent = "Page " + page + " sur " + totalPages;
+  const previous = document.getElementById("storageHistoryPrevious");
+  if (previous) previous.disabled = page <= 1;
+  const next = document.getElementById("storageHistoryNext");
+  if (next) next.disabled = page >= totalPages;
   if (!activities.length) {
-    container.innerHTML = '<div class="empty">Aucune activité enregistrée pour le moment. Les prochaines opérations de stockage apparaîtront ici.</div>';
-    return;
-  }
-  if (!filteredActivities.length) {
-    container.innerHTML = '<div class="empty">Aucune opération ne correspond à ce filtre.</div>';
+    const filter = document.getElementById("storageHistoryFilter")?.value || "all";
+    const search = (document.getElementById("storageHistorySearch")?.value || "").trim();
+    container.innerHTML = total === 0 && (filter !== "all" || search)
+      ? '<div class="empty">Aucune opération ne correspond à ce filtre ou à cette recherche.</div>'
+      : '<div class="empty">Aucune activité enregistrée pour le moment. Les prochaines opérations de stockage apparaîtront ici.</div>';
     return;
   }
   const labels = {
@@ -2521,28 +2553,20 @@ function renderStorageHistory(activities) {
     restore: { icon: "♻️", title: "Fichier restauré" },
     permanent_delete: { icon: "❌", title: "Fichier supprimé définitivement" }
   };
-  container.innerHTML = filteredActivities.map(item => {
+  container.innerHTML = activities.map(item => {
     const info = labels[item.action] || { icon: "📁", title: "Activité de stockage" };
     const date = item.created_at ? new Date(item.created_at.replace(" ", "T") + "Z") : null;
     const dateLabel = date && !Number.isNaN(date.getTime())
       ? date.toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" })
       : "Date indisponible";
-    return `
-      <div class="item-card" style="margin-bottom:10px;">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
-          <div style="min-width:0;flex:1;">
-            <div style="font-weight:700;">${info.icon} ${info.title}</div>
-            <div style="overflow-wrap:anywhere;">${escapeHTML(item.file_name || "Fichier")}</div>
-            <div class="muted">${escapeHTML(item.details || "")}</div>
-            <div class="muted">${dateLabel}</div>
-          </div>
-          <div class="muted" style="white-space:nowrap;">${formatBytes(Number(item.file_size) || 0)}</div>
-        </div>
-      </div>
-    `;
+    return '<div class="item-card" style="margin-bottom:10px;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">' +
+      '<div style="min-width:0;flex:1;"><div style="font-weight:700;">' + info.icon + " " + info.title + '</div>' +
+      '<div style="overflow-wrap:anywhere;">' + escapeHTML(item.file_name || "Fichier") + '</div>' +
+      '<div class="muted">' + escapeHTML(item.details || "") + '</div><div class="muted">' + dateLabel + '</div></div>' +
+      '<div class="muted" style="white-space:nowrap;">' + formatBytes(Number(item.file_size) || 0) + '</div></div></div>';
   }).join("");
 }
-
 function renderStorageFolders() {
   const folderList = document.getElementById("storageFoldersList");
   const breadcrumb = document.getElementById("storageFolderBreadcrumb");
