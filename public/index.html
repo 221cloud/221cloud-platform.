@@ -4229,23 +4229,23 @@ async function restoreWebsiteDeployment(projectId, sourceDeploymentId) {
     const totalBytes = files.reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0);
     const fileList = files.slice(0, 20).map(file =>
       "• " + file.file_path + " (" + formatBytes(Number(file.file_size) || 0) + ")"
-    ).join("\\n");
-    const moreFiles = files.length > 20 ? "\\n… et " + (files.length - 20) + " autre(s)" : "";
+    ).join("\n");
+    const moreFiles = files.length > 20 ? "\n… et " + (files.length - 20) + " autre(s)" : "";
     const createdLabel = formatDate(sourceDeployment.created_at);
     const preview =
-      "APERÇU — RESTAURATION D'UNE ANCIENNE VERSION\\n\\n" +
-      "Version sélectionnée : " + sourceDeploymentId + "\\n" +
-      "Créée le : " + createdLabel + "\\n" +
-      "Fichiers à restaurer : " + files.length + "\\n" +
-      "Volume à recopier : " + formatBytes(totalBytes) + "\\n\\n" +
-      "FICHIERS DE CETTE VERSION :\\n" + fileList + moreFiles + "\\n\\n" +
+      "APERÇU — RESTAURATION D'UNE ANCIENNE VERSION\n\n" +
+      "Version sélectionnée : " + sourceDeploymentId + "\n" +
+      "Créée le : " + createdLabel + "\n" +
+      "Fichiers à restaurer : " + files.length + "\n" +
+      "Volume à recopier : " + formatBytes(totalBytes) + "\n\n" +
+      "FICHIERS DE CETTE VERSION :\n" + fileList + moreFiles + "\n\n" +
       "Cette restauration remettra exactement les fichiers de la version sélectionnée en ligne. " +
       "La version actuellement publiée sera conservée dans l'historique et ne sera remplacée qu'au moment de la publication.";
-    if (!confirm(preview + "\\n\\nContinuer la préparation ?")) return;
+    if (!confirm(preview + "\n\nContinuer la préparation ?")) return;
     if (!confirm(
-      "CONFIRMATION FINALE\\n\\n" +
+      "CONFIRMATION FINALE\n\n" +
       "221Cloud va créer une nouvelle version, recopier les " + files.length +
-      " fichiers de la version choisie, puis la publier.\\n\\n" +
+      " fichiers de la version choisie, puis la publier.\n\n" +
       "Le site actuel restera en ligne jusqu'à la publication finale. Confirmer la restauration ?"
     )) return;
 
@@ -4276,10 +4276,10 @@ async function restoreWebsiteDeployment(projectId, sourceDeploymentId) {
     );
     pendingDeploymentId = null;
     alert(
-      "Ancienne version restaurée avec succès.\\n\\n" +
-      "Fichiers restaurés : " + files.length + "\\n" +
-      "Volume recopié : " + formatBytes(totalBytes) + "\\n" +
-      "Nouvelle version publiée : " + published.deployment.id + "\\n\\n" +
+      "Ancienne version restaurée avec succès.\n\n" +
+      "Fichiers restaurés : " + files.length + "\n" +
+      "Volume recopié : " + formatBytes(totalBytes) + "\n" +
+      "Nouvelle version publiée : " + published.deployment.id + "\n\n" +
       "Les versions précédentes sont conservées dans l'historique."
     );
     await renderHostingPage();
@@ -4289,17 +4289,17 @@ async function restoreWebsiteDeployment(projectId, sourceDeploymentId) {
       try {
         const currentHosting = await api("/projects/" + encodeURIComponent(projectId) + "/hosting");
         if (currentHosting.hosting?.active_deployment_id === pendingDeploymentId) {
-          cleanup = "\\nLa nouvelle version a bien été publiée.";
+          cleanup = "\nLa nouvelle version a bien été publiée.";
         } else {
           await api(
             "/projects/" + encodeURIComponent(projectId) + "/deployments/" +
             encodeURIComponent(pendingDeploymentId),
             { method: "DELETE" }
           );
-          cleanup = "\\nLa préparation incomplète a été annulée automatiquement.";
+          cleanup = "\nLa préparation incomplète a été annulée automatiquement.";
         }
       } catch (cleanupError) {
-        cleanup = "\\nLa préparation n'a pas pu être nettoyée automatiquement. Le site actuellement publié reste prioritaire.";
+        cleanup = "\nLa préparation n'a pas pu être nettoyée automatiquement. Le site actuellement publié reste prioritaire.";
       }
     }
     alert("Restauration impossible : " + error.message + cleanup);
@@ -4456,7 +4456,7 @@ ${
                         Créé le : ${escapeHTML(formatDate(deployment.created_at))}
                       </p>
                       ${deployment.status === "published" && deployment.id !== hosting?.active_deployment_id
-                        ? `<button class="secondary-btn" onclick="restoreWebsiteDeployment('${escapeHTML(project.id)}','${escapeHTML(deployment.id)}')">Restaurer cette version</button>`
+                        ? `<button class="primary-btn" onclick="restoreWebsiteDeployment('${escapeHTML(project.id)}','${escapeHTML(deployment.id)}')">Restaurer cette version</button>`
                         : deployment.id === hosting?.active_deployment_id
                           ? `<p class="muted">Version actuellement publiée</p>`
                           : ""}
