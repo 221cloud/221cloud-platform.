@@ -1016,6 +1016,14 @@ function renderOverview() {
     </div>
 
     <div class="section-head">
+      <h2>Centre de notifications</h2>
+      <span class="muted">Alertes de votre espace</span>
+    </div>
+    <div class="card" id="overviewNotifications">
+      <div class="muted">Chargement des notifications...</div>
+    </div>
+
+    <div class="section-head">
       <h2>Activités récentes</h2>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span class="muted" id="overviewRefreshStatus" aria-live="polite"></span>
@@ -1310,6 +1318,12 @@ async function loadOverviewStats() {
     results[2].status === "fulfilled" ? (results[2].value.files || []) : []
   );
 
+  renderDashboardNotifications(
+    results[0].status === "fulfilled" ? projectsCache : [],
+    results[1].status === "fulfilled" ? databasesCache : [],
+    results[2].status === "fulfilled" ? results[2].value : null
+  );
+
   if (refreshStatus) {
     const failed = results.some(result => result.status === "rejected");
     const time = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
@@ -1360,6 +1374,94 @@ function renderRecentActivities(projects, databases, files) {
       <button class="secondary" onclick="showPage('${activity.page}')">Ouvrir</button>
     </div>
   `).join("");
+}
+
+function renderDashboardNotifications(projects, databases, storageData) {
+  const container = document.getElementById("overviewNotifications");
+  if (!container) return;
+
+  const notifications = [];
+  const now = Date.now();
+  const recentWindow = 7 * 24 * 60 * 60 * 1000;
+
+  [...(projects || []).map(item => ({
+    type: "Projet créé", name: item.name || "Projet sans nom",
+    date: item.created_at, icon: "▣"
+  })), ...(databases || []).map(item => ({
+    type: "Base de données créée", name: item.name || "Base sans nom",
+    date: item.created_at, icon: "▤"
+  })), ...((storageData?.files || []).map(item => ({
+    type: "Fichier ajouté", name: item.file_name || "Fichier sans nom",
+    date: item.created_at, icon: "▧"
+  })))]
+    .forEach(item => {
+      const timestamp = new Date(item.date || 0).getTime();
+      if (Number.isFinite(timestamp) && timestamp > 0 && now - timestamp <= recentWindow) {
+        notifications.push({
+          title: item.type,
+          message: item.name,
+          date: item.date,
+          icon: item.icon,
+          level: "info"
+        });
+      }
+    });
+
+  if (storageData) {
+    const used = Number(storageData.used || 0);
+    const limit = Number(storageData.limit || STORAGE_LIMIT_BYTES);
+    const percent = limit > 0 ? used / limit * 100 : 0;
+    if (percent >= 80) {
+      notifications.push({
+        title: percent >= 95 ? "Stockage presque plein" : "Stockage bientôt plein",
+        message: formatBytes(used) + " utilisés sur " + formatBytes(limit) + " (" + percent.toFixed(1) + " %)",
+        icon: "⚠",
+        level: percent >= 95 ? "warning" : "info"
+      });
+    }
+
+    const trashCount = Number(storageData.trashCount || 0);
+    if (trashCount > 0) {
+      notifications.push({
+        title: "Fichiers dans la corbeille",
+        message: trashCount + " fichier(s) en attente de restauration ou de suppression",
+        icon: "🗑",
+        level: "info",
+        page: "storage"
+      });
+    }
+  }
+
+  notifications.sort((a, b) => {
+    const dateA = new Date(a.date || 0).getTime();
+    const dateB = new Date(b.date || 0).getTime();
+    return (Number.isNaN(dateB) ? 0 : dateB) - (Number.isNaN(dateA) ? 0 : dateA);
+  });
+
+  if (!notifications.length) {
+    container.innerHTML = '<div class="empty">Aucune notification pour le moment. Les alertes importantes apparaîtront ici.</div>';
+    return;
+  }
+
+  container.innerHTML = notifications.slice(0, 8).map(item => {
+    const dateLabel = item.date ? " · " + formatDate(item.date) : "";
+    const action = item.page
+      ? '<button class="secondary" onclick="showPage(\'' + item.page + '\')">Voir</button>'
+      : "";
+    const border = item.level === "warning" ? "border-left:4px solid #f59e0b;" : "";
+    return `
+      <div class="item-card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;${border}">
+        <div style="display:flex;align-items:center;gap:12px;min-width:0">
+          <div class="stat-icon">${item.icon}</div>
+          <div style="min-width:0">
+            <strong>${escapeHTML(item.title)}</strong>
+            <div class="muted">${escapeHTML(item.message + dateLabel)}</div>
+          </div>
+        </div>
+        ${action}
+      </div>
+    `;
+  }).join("");
 }
 
 /* PROJETS */
