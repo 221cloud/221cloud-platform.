@@ -2628,7 +2628,7 @@ hosting
     }
 
     // APPLICATIONS : LISTER LES FICHIERS DU PROJET
-    const applicationFilesMatch = path.match(/^\\/api\\/projects\\/([^/]+)\\/application-files$/);
+    const applicationFilesMatch = path.match(/^\/api\/projects\/([^/]+)\/application-files$/);
     if (applicationFilesMatch && request.method === "GET") {
       try {
         const user = await currentUser(request, env);
@@ -2646,9 +2646,58 @@ hosting
 
         if (!(files.results || []).length) {
           const starterFiles = [
-            ["index.html", "<!doctype html>\\n<html lang=\\\"fr\\\">\\n<head>\\n  <meta charset=\\\"utf-8\\\">\\n  <meta name=\\\"viewport\\\" content=\\\"width=device-width, initial-scale=1\\\">\\n  <title>Ma première application</title>\\n  <link rel=\\\"stylesheet\\\" href=\\\"style.css\\\">\\n</head>\\n<body>\\n  <main>\\n    <h1>Bienvenue dans 221Cloud !</h1>\\n    <p>Votre application web commence ici.</p>\\n    <button id=\\\"helloButton\\\">Cliquez ici</button>\\n    <p id=\\\"message\\\"></p>\\n  </main>\\n  <script src=\\\"script.js\\\"></script>\\n</body>\\n</html>", "text/html; charset=utf-8"],
-            ["style.css", "body {\\n  margin: 0;\\n  min-height: 100vh;\\n  display: grid;\\n  place-items: center;\\n  font-family: Arial, sans-serif;\\n  background: #f3f5f9;\\n  color: #172033;\\n}\\nmain {\\n  max-width: 560px;\\n  padding: 40px;\\n  text-align: center;\\n  background: white;\\n  border-radius: 18px;\\n  box-shadow: 0 12px 36px rgba(0,0,0,.08);\\n}\\nbutton {\\n  padding: 12px 18px;\\n  border: 0;\\n  border-radius: 8px;\\n  background: #2457d6;\\n  color: white;\\n  cursor: pointer;\\n}", "text/css"],
-            ["script.js", "document.getElementById(\\\"helloButton\\\").addEventListener(\\\"click\\\", () => {\\n  document.getElementById(\\\"message\\\").textContent = \\\"Bravo ! Votre JavaScript fonctionne.\\\";\\n});", "text/javascript"]
+            ["index.html", [
+              "<!doctype html>",
+              "<html lang=\"fr\">",
+              "<head>",
+              "  <meta charset=\"utf-8\">",
+              "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+              "  <title>Ma première application</title>",
+              "  <link rel=\"stylesheet\" href=\"style.css\">",
+              "</head>",
+              "<body>",
+              "  <main>",
+              "    <h1>Bienvenue dans 221Cloud !</h1>",
+              "    <p>Votre application web commence ici.</p>",
+              "    <button id=\"helloButton\">Cliquez ici</button>",
+              "    <p id=\"message\"></p>",
+              "  </main>",
+              "  <script src=\"script.js\"></script>",
+              "</body>",
+              "</html>"
+            ].join("\n"), "text/html; charset=utf-8"],
+            ["style.css", [
+              "body {",
+              "  margin: 0;",
+              "  min-height: 100vh;",
+              "  display: grid;",
+              "  place-items: center;",
+              "  font-family: Arial, sans-serif;",
+              "  background: #f3f5f9;",
+              "  color: #172033;",
+              "}",
+              "main {",
+              "  max-width: 560px;",
+              "  padding: 40px;",
+              "  text-align: center;",
+              "  background: white;",
+              "  border-radius: 18px;",
+              "  box-shadow: 0 12px 36px rgba(0,0,0,.08);",
+              "}",
+              "button {",
+              "  padding: 12px 18px;",
+              "  border: 0;",
+              "  border-radius: 8px;",
+              "  background: #2457d6;",
+              "  color: white;",
+              "  cursor: pointer;",
+              "}"
+            ].join("\n"), "text/css"],
+            ["script.js", [
+              "document.getElementById(\"helloButton\").addEventListener(\"click\", () => {",
+              "  document.getElementById(\"message\").textContent = \"Bravo ! Votre JavaScript fonctionne.\";",
+              "});"
+            ].join("\n"), "text/javascript"]
           ];
           for (const [fileName, content, mimeType] of starterFiles) {
             await env.DB.prepare(
@@ -2667,7 +2716,7 @@ hosting
     }
 
     // APPLICATIONS : ENREGISTRER UN FICHIER HTML, CSS OU JAVASCRIPT
-    const applicationFileMatch = path.match(/^\\/api\\/projects\\/([^/]+)\\/application-files\\/([^/]+)$/);
+    const applicationFileMatch = path.match(/^\/api\/projects\/([^/]+)\/application-files\/([^/]+)$/);
     if (applicationFileMatch && request.method === "PUT") {
       try {
         const user = await currentUser(request, env);
@@ -2694,14 +2743,9 @@ hosting
           return json({ error: "L'espace de code de cette application est limité à 1 Mo pour le moment." }, 413);
         }
         const mimeType = fileName === "index.html" ? "text/html; charset=utf-8" : fileName === "style.css" ? "text/css" : "text/javascript";
-        await env.DB.prepare(`
-          INSERT INTO application_files (id, project_id, file_name, content, mime_type, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-          ON CONFLICT(project_id, file_name) DO UPDATE SET
-            content = excluded.content,
-            mime_type = excluded.mime_type,
-            updated_at = CURRENT_TIMESTAMP
-        `).bind(crypto.randomUUID(), projectId, fileName, content, mimeType).run();
+        await env.DB.prepare(
+          "INSERT INTO application_files (id, project_id, file_name, content, mime_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) ON CONFLICT(project_id, file_name) DO UPDATE SET content = excluded.content, mime_type = excluded.mime_type, updated_at = CURRENT_TIMESTAMP"
+        ).bind(crypto.randomUUID(), projectId, fileName, content, mimeType).run();
         return json({ message: "Fichier enregistré.", file_name: fileName, size });
       } catch (error) {
         console.error("ERREUR ENREGISTREMENT FICHIER APPLICATION:", error);
