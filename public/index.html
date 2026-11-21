@@ -2180,6 +2180,14 @@ function renderStoragePage() {
         <option value="restore">Fichiers restaurés</option>
         <option value="permanent_delete">Suppressions définitives</option>
       </select>
+      <label for="storageHistorySearch">Rechercher un fichier</label>
+      <input
+        type="search"
+        id="storageHistorySearch"
+        placeholder="Ex. : IMG_6877.png"
+        oninput="renderStorageHistory(storageHistoryCache)"
+        style="width:100%;margin:8px 0 12px;"
+      />
       <div id="storageHistoryResultCount" class="muted" style="margin-bottom:10px;"></div>
       <div id="storageHistoryList" class="muted">Chargement de l'historique...</div>
     </div>
@@ -2488,9 +2496,12 @@ function renderStorageHistory(activities) {
   const container = document.getElementById("storageHistoryList");
   if (!container) return;
   const filter = document.getElementById("storageHistoryFilter")?.value || "all";
-  const filteredActivities = filter === "all"
-    ? activities
-    : activities.filter(item => item.action === filter);
+  const search = (document.getElementById("storageHistorySearch")?.value || "").trim().toLocaleLowerCase("fr");
+  const filteredActivities = activities.filter(item => {
+    const matchesAction = filter === "all" || item.action === filter;
+    const fileName = String(item.file_name || "").toLocaleLowerCase("fr");
+    return matchesAction && (!search || fileName.includes(search));
+  });
   const count = document.getElementById("storageHistoryResultCount");
   if (count) {
     count.textContent = filteredActivities.length + " opération(s) affichée(s) sur " + activities.length;
