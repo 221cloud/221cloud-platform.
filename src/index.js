@@ -3616,6 +3616,83 @@ headers.set(
       }
     }
 
+    // SÉCURITÉ DU COMPTE : CHANGEMENT DE MOT DE PASSE
+    if (path === "/api/account/password" && request.method === "POST") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+
+        const body = await request.json();
+        const currentPassword = String(body.current_password || "");
+        const newPassword = String(body.new_password || "");
+
+        if (newPassword.length < 12 || newPassword.length > 128) {
+          return json({
+            error: "Le nouveau mot de passe doit contenir entre 12 et 128 caractères."
+          }, 400);
+        }
+
+        const account = await env.DB.prepare(
+          "SELECT password_hash FROM users WHERE id = ? LIMIT 1"
+        ).bind(user.id).first();
+
+        if (!account?.password_hash || !(await verifyPassword(currentPassword, account.password_hash))) {
+          return json({ error: "Le mot de passe actuel est incorrect." }, 401);
+        }
+
+        if (await verifyPassword(newPassword, account.password_hash)) {
+          return json({
+            error: "Choisis un nouveau mot de passe différent de l'ancien."
+          }, 400);
+        }
+
+        const newPasswordHash = await hashPassword(newPassword);
+        const token = getCookie(request, "221cloud_session");
+        if (!token) return json({ error: "Session introuvable. Reconnecte-toi." }, 401);
+        const tokenHash = await hashToken(token);
+
+        await env.DB.batch([
+          env.DB.prepare(
+            "UPDATE users SET password_hash = ? WHERE id = ?"
+          ).bind(newPasswordHash, user.id),
+          env.DB.prepare(
+            "DELETE FROM sessions WHERE user_id = ? AND token_hash != ?"
+          ).bind(user.id, tokenHash)
+        ]);
+
+        return json({
+          message: "Mot de passe modifié. Les autres sessions ont été déconnectées."
+        });
+      } catch (error) {
+        console.error("ERREUR CHANGEMENT MOT DE PASSE:", error);
+        return json({ error: "Impossible de modifier le mot de passe." }, 500);
+      }
+    }
+
+    // SÉCURITÉ DU COMPTE : RÉVOCATION DES AUTRES SESSIONS
+    if (path === "/api/account/revoke-sessions" && request.method === "POST") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+
+        const token = getCookie(request, "221cloud_session");
+        if (!token) return json({ error: "Session introuvable. Reconnecte-toi." }, 401);
+        const tokenHash = await hashToken(token);
+
+        const result = await env.DB.prepare(
+          "DELETE FROM sessions WHERE user_id = ? AND token_hash != ?"
+        ).bind(user.id, tokenHash).run();
+
+        return json({
+          message: "Les autres sessions ont été déconnectées.",
+          revoked: Number(result.meta?.changes || 0)
+        });
+      } catch (error) {
+        console.error("ERREUR RÉVOCATION DES SESSIONS:", error);
+        return json({ error: "Impossible de déconnecter les autres sessions." }, 500);
+      }
+    }
+
     // DÉCONNEXION
     if (path === "/api/logout" && request.method === "POST") {
       try {
