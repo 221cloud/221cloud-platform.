@@ -981,8 +981,17 @@ if (
         }
 
         await clearLoginFailures(env, protectionKeys);
+        await ensureAccountSecuritySchema(env);
+        const currentDeviceInfo = getGeneralDeviceInfo(request);
+        const knownEnvironment = await env.DB.prepare(
+          "SELECT id FROM account_security_events WHERE user_id = ? AND action IN ('login', 'new_environment_login') AND device_info = ? LIMIT 1"
+        ).bind(user.id, currentDeviceInfo).first();
+        const loginAction = knownEnvironment ? "login" : "new_environment_login";
+        const loginDescription = knownEnvironment
+          ? "Connexion réussie"
+          : "Connexion depuis un nouvel environnement détecté";
         const token = await createSession(env, user.id);
-        await recordSecurityEvent(env, user.id, "login", "Connexion réussie", request);
+        await recordSecurityEvent(env, user.id, loginAction, loginDescription, request);
 
         return json({
           message: "Connexion réussie.",
