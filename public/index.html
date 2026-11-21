@@ -1426,7 +1426,8 @@ function markAllDashboardNotificationsRead() {
 
 function renderDashboardNotificationsFromCache() {
   const container = document.getElementById("overviewNotifications");
-  if (!container) return;
+  const allContainer = document.getElementById("allNotificationsList");
+  if (!container && !allContainer) return;
   const readIds = getDashboardReadNotificationIds();
   const unreadCount = dashboardNotificationsCache.filter(item => !readIds.has(item.id)).length;
   const count = document.getElementById("overviewNotificationCount");
@@ -1466,8 +1467,9 @@ function renderDashboardNotificationsFromCache() {
     `;
   }).join("");
 
-  const allContainer = document.getElementById("allNotificationsList");
   const allCount = document.getElementById("allNotificationsCount");
+  const allMarkButton = document.getElementById("allMarkNotificationsReadButton");
+  if (allMarkButton) allMarkButton.disabled = unreadCount === 0;
   if (allContainer) {
     if (allCount) allCount.textContent = dashboardNotificationsCache.length + " notification(s) · " + unreadCount + " non lue(s)";
     allContainer.innerHTML = dashboardNotificationsCache.length
