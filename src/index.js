@@ -1426,12 +1426,7 @@ if (path === "/api/subscription" && request.method === "GET") {
         for (const file of filesResult.results || []) {
           if (file.b2_file_id) {
             try {
-              const auth = await b2NativeAuthorize(env);
-              const info = await b2NativeJson(auth, "b2_list_file_versions", {
-                startFileName: file.storage_key, startFileId: null, maxFileCount: 1
-              });
-              const version = (info.files || []).find(item => item.fileId === file.b2_file_id);
-              if (version) await b2NativeDelete(env, file.b2_file_id, version.fileName);
+              await b2NativeDelete(env, file.b2_file_id, file.storage_key);
             } catch (cleanupError) {
               console.error("ERREUR SUPPRESSION FICHIER DÉPLOIEMENT ANNULÉ:", cleanupError);
             }
