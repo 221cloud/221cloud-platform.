@@ -630,6 +630,7 @@ let storageHistorySearchTimer = null;
 let dashboardNotificationsCache = [];
 let activeStorageFolderId = null;
 let storageView = "files";
+let applicationEditorState = null;
 
 const STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;
 let storageQuotaLimit = STORAGE_LIMIT_BYTES;
@@ -4557,13 +4558,7 @@ ${
       <h1 class="page-title">Hébergement web</h1>
       <div class="card">
         <p class="error-text">${escapeHTML(error.message)}</p>
-      </div>
-    `;
-  }
-}
-/* AUTRES PAGES */
-
-/* APPLICATIONS */
+      </div/* APPLICATIONS */
 
 async function renderApplicationsPage() {
   document.getElementById("mainContent").innerHTML = `
@@ -4648,6 +4643,7 @@ function renderApplications(applications) {
         <p><span class="status">${escapeHTML(status)}</span></p>
         <div class="muted">Créée le : ${escapeHTML(formatDate(application.created_at))}</div>
         <div class="item-actions">
+          <button type="button" onclick="openApplicationEditor('${escapeHTML(application.id)}')">Ouvrir l'éditeur</button>
           <button class="secondary" type="button" onclick="renameApplication('${escapeHTML(application.id)}')">Modifier le nom</button>
           <button class="danger" type="button" onclick="moveApplicationToTrash('${escapeHTML(application.id)}')">Mettre à la corbeille</button>
         </div>
@@ -4719,6 +4715,118 @@ async function moveApplicationToTrash(id) {
     alert(result.message || "Application placée dans la corbeille.");
     await loadApplications();
   } catch (error) {
+    alert(error.message);
+  }
+}
+
+
+async function openApplicationEditor(projectId) {
+  const application = projectsCache.find(item => item.id === projectId && item.type === "application");
+  if (!application) {
+    alert("Application introuvable. Actualisez la liste.");
+    return;
+  }
+  const main = document.getElementById("mainContent");
+  main.innerHTML =
+    "<div class=\"section-head\"><div><h1 class=\"page-title\">" + escapeHTML(application.name) + "</h1><p class=\"page-subtitle\">Éditeur de code · Application web</p></div>" +
+    "<button class=\"secondary\" type=\"button\" onclick=\"renderApplicationsPage()\">← Mes applications</button></div>" +
+    "<div class=\"card\"><div class=\"section-head\"><h2>Fichiers du projet</h2><span class=\"muted\">HTML · CSS · JavaScript</span></div>" +
+    "<div id=\"applicationFileTabs\" class=\"item-actions\"></div>" +
+    "<label for=\"applicationCodeEditor\">Code du fichier sélectionné</label>" +
+    "<textarea id=\"applicationCodeEditor\" spellcheck=\"false\" autocapitalize=\"off\" autocomplete=\"off\" style=\"width:100%;min-height:320px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.5;white-space:pre;overflow:auto\" placeholder=\"Chargement du code...\"></textarea>" +
+    "<div class=\"item-actions\" style=\"margin-top:12px\"><button id=\"saveApplicationFilesButton\" type=\"button\" onclick=\"saveApplicationFiles()\">Enregistrer tous les fichiers</button>" +
+    "<button class=\"secondary\" type=\"button\" onclick=\"refreshApplicationPreview()\">Actualiser l'aperçu</button><span id=\"applicationSaveStatus\" class=\"muted\" aria-live=\"polite\"></span></div>" +
+    "<p class=\"muted\">Les modifications restent dans votre espace 221Cloud. Enregistrez-les avant de quitter cette page.</p></div>" +
+    "<div class=\"section-head\"><h2>Aperçu de l'application</h2><span class=\"muted\">Exécution isolée</span></div>" +
+    "<div class=\"card\" style=\"padding:8px\"><iframe id=\"applicationPreviewFrame\" title=\"Aperçu de l'application\" sandbox=\"allow-scripts\" style=\"display:block;width:100%;min-height:420px;border:1px solid var(--border-color,#d8deea);border-radius:10px;background:white\"></iframe></div>" +
+    "<div class=\"notice\">Limites initiales : trois fichiers (index.html, style.css, script.js), 256 Ko par fichier et 1 Mo au total. Les versions et la publication seront ajoutées dans les prochaines étapes.</div>";
+
+  const status = document.getElementById("applicationSaveStatus");
+  status.textContent = "Chargement des fichiers...";
+  try {
+    const data = await api("/projects/" + encodeURIComponent(projectId) + "/application-files");
+    const files = {};
+    (data.files || []).forEach(file => { files[file.file_name] = file.content || ""; });
+    applicationEditorState = { projectId: projectId, files: files, activeFile: "index.html" };
+    renderApplicationEditorFile();
+    refreshApplicationPreview();
+    status.textContent = "Fichiers chargés.";
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+function renderApplicationEditorFile() {
+  if (!applicationEditorState) return;
+  const tabs = document.getElementById("applicationFileTabs");
+  const editor = document.getElementById("applicationCodeEditor");
+  if (!tabs || !editor) return;
+  const fileNames = ["index.html", "style.css", "script.js"];
+  tabs.innerHTML = fileNames.map(name =>
+    "<button type=\"button\" class=\"" + (applicationEditorState.activeFile === name ? "primary-btn" : "secondary") +
+    "\" onclick=\"selectApplicationEditorFile('" + name + "')\">" + name + "</button>"
+  ).join("");
+  editor.value = applicationEditorState.files[applicationEditorState.activeFile] || "";
+}
+
+function selectApplicationEditorFile(fileName) {
+  if (!applicationEditorState || !["index.html", "style.css", "script.js"].includes(fileName)) return;
+  const editor = document.getElementById("applicationCodeEditor");
+  if (editor) applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
+  applicationEditorState.activeFile = fileName;
+  renderApplicationEditorFile();
+}
+
+async function saveApplicationFiles() {
+  if (!applicationEditorState) return;
+  const editor = document.getElementById("applicationCodeEditor");
+  const button = document.getElementById("saveApplicationFilesButton");
+  const status = document.getElementById("applicationSaveStatus");
+  if (editor) applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Enregistrement...";
+  }
+  if (status) status.textContent = "Sauvegarde en cours...";
+  try {
+    for (const fileName of ["index.html", "style.css", "script.js"]) {
+      await api("/projects/" + encodeURIComponent(applicationEditorState.projectId) + "/application-files/" + encodeURIComponent(fileName), {
+        method: "PUT",
+        body: JSON.stringify({ content: applicationEditorState.files[fileName] || "" })
+      });
+    }
+    if (status) status.textContent = "Tous les fichiers sont enregistrés.";
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Enregistrer tous les fichiers";
+    }
+  }
+}
+
+function refreshApplicationPreview() {
+  if (!applicationEditorState) return;
+  const editor = document.getElementById("applicationCodeEditor");
+  if (editor) applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
+  const frame = document.getElementById("applicationPreviewFrame");
+  if (!frame) return;
+  let html = applicationEditorState.files["index.html"] || "";
+  const css = (applicationEditorState.files["style.css"] || "").replace(/<\/style/gi, "<\\/style");
+  const js = (applicationEditorState.files["script.js"] || "").replace(/<\/script/gi, "<\\/script");
+  html = html.replace(/<link\b[^>]*href=["']style\.css["'][^>]*>/i, "");
+  html = html.replace(/<script\b[^>]*src=["']script\.js["'][^>]*>\s*<\/script>/i, "");
+  const styleTag = "<style>" + css + "</style>";
+  const scriptTag = "<script>" + js + "<\/script>";
+  if (/<\/head>/i.test(html)) html = html.replace(/<\/head>/i, styleTag + "</head>");
+  else html = styleTag + html;
+  if (/<\/body>/i.test(html)) html = html.replace(/<\/body>/i, scriptTag + "</body>");
+  else html += scriptTag;
+  frame.srcdoc = html;
+}
+
+{
     alert(error.message);
   }
 }
