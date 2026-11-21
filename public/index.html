@@ -2778,6 +2778,8 @@ async function downloadStorageMetadataBackup() {
         mime_type: file.mime_type
       }))
     }));
+    backup.counts.hosted_sites = hostedSites.length;
+    backup.counts.hosted_files = hostedFiles.length;
     backup.archive_created_at = new Date().toISOString();
     backup.note = "Archive contenant les fichiers personnels, les fichiers des sites actuellement publiés et les métadonnées. Les fichiers personnels de la corbeille sont rangés sous Corbeille/ ; les sites sous Sites hébergés/.";
     entries.push({
