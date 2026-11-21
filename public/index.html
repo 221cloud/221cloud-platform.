@@ -1017,7 +1017,10 @@ function renderOverview() {
 
     <div class="section-head">
       <h2>Activités récentes</h2>
-      <button class="secondary" onclick="loadOverviewStats()">↻ Actualiser</button>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span class="muted" id="overviewRefreshStatus" aria-live="polite"></span>
+        <button class="secondary" onclick="loadOverviewStats()">↻ Actualiser</button>
+      </div>
     </div>
     <div class="card" id="overviewRecentActivities">
       <div class="muted">Chargement de vos activités...</div>
@@ -1251,6 +1254,8 @@ async function renderAdmin() {
 
 }
 async function loadOverviewStats() {
+  const refreshStatus = document.getElementById("overviewRefreshStatus");
+  if (refreshStatus) refreshStatus.textContent = "Actualisation...";
   const projectElement = document.getElementById("projectCount");
   const databaseElement = document.getElementById("databaseCount");
   const fileElement = document.getElementById("overviewFileCount");
@@ -1304,6 +1309,12 @@ async function loadOverviewStats() {
     results[1].status === "fulfilled" ? databasesCache : [],
     results[2].status === "fulfilled" ? (results[2].value.files || []) : []
   );
+
+  if (refreshStatus) {
+    const failed = results.some(result => result.status === "rejected");
+    const time = new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    refreshStatus.textContent = (failed ? "Actualisation partielle · " : "Mis à jour à ") + time;
+  }
 }
 
 function renderRecentActivities(projects, databases, files) {
