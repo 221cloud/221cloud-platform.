@@ -2390,7 +2390,7 @@ hosting
     }
 
     // STOCKAGE : RENOMMAGE ET SUPPRESSION SÉCURISÉE D'UN DOSSIER
-    const storageFolderActionMatch = path.match(/^\\/api\\/storage\\/folders\\/([^/]+)\\/(rename|delete)$/);
+    const storageFolderActionMatch = path.match(/^\/api\/storage\/folders\/([^/]+)\/(rename|delete)$/);
     if (storageFolderActionMatch) {
       const action = storageFolderActionMatch[2];
       const expectedMethod = action === "rename" ? "PATCH" : "DELETE";
@@ -2408,7 +2408,7 @@ hosting
         if (action === "rename") {
           const body = await request.json();
           const name = String(body.name || "").trim();
-          if (!name || name.length > 80 || name.includes("/") || name.includes("\\\\") || /[\\u0000-\\u001F\\u007F]/.test(name) || name === "." || name === "..") {
+          if (!name || name.length > 80 || name.includes("/") || name.includes("\\") || /[\u0000-\u001F\u007F]/.test(name) || name === "." || name === "..") {
             return json({ error: "Nom de dossier invalide." }, 400);
           }
           const duplicate = await env.DB.prepare(
