@@ -2496,6 +2496,57 @@ hosting
       }
     }
 
+    // STOCKAGE : EXPORT COMPLET DES MÉTADONNÉES
+    if (path === "/api/storage/backup" && request.method === "GET") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureStorageFoldersSchema(env);
+
+        const [filesResult, foldersResult, historyResult] = await Promise.all([
+          env.DB.prepare(
+            `SELECT id, file_name, file_size, mime_type, created_at, folder_id, deleted_at
+             FROM cloud_files
+             WHERE user_id = ?
+             ORDER BY created_at DESC`
+          ).bind(user.id).all(),
+          env.DB.prepare(
+            `SELECT id, name, parent_id, created_at
+             FROM storage_folders
+             WHERE user_id = ?
+             ORDER BY name COLLATE NOCASE ASC`
+          ).bind(user.id).all(),
+          env.DB.prepare(
+            `SELECT id, action, file_name, file_size, details, created_at
+             FROM storage_activity_log
+             WHERE user_id = ?
+             ORDER BY created_at DESC, rowid DESC`
+          ).bind(user.id).all()
+        ]);
+
+        return json({
+          product: "221Cloud",
+          backup_type: "storage_metadata",
+          schema_version: 1,
+          exported_at: new Date().toISOString(),
+          contents: {
+            files: filesResult.results || [],
+            folders: foldersResult.results || [],
+            activity_history: historyResult.results || []
+          },
+          counts: {
+            files: (filesResult.results || []).length,
+            folders: (foldersResult.results || []).length,
+            activities: (historyResult.results || []).length
+          },
+          note: "Cette sauvegarde contient uniquement les métadonnées. Les contenus des fichiers ne sont pas inclus."
+        });
+      } catch (error) {
+        console.error("ERREUR SAUVEGARDE MÉTADONNÉES STOCKAGE:", error);
+        return json({ error: "Impossible de préparer la sauvegarde du stockage." }, 500);
+      }
+    }
+
     // STOCKAGE : HISTORIQUE DES ACTIVITÉS
     if (path === "/api/storage/history" && request.method === "GET") {
       try {
