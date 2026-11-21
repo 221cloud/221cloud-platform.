@@ -570,6 +570,7 @@ function renderWebsiteFileTree(files, baseUrl = "") {
       `).join("");
 
     const filesHTML = node.files.map(({ name, file }) => {
+      const downloadUrl = `${fileUrl}?download=1`;
   const fileUrl = `${baseUrl}/${file.file_path.split("/").map(encodeURIComponent).join("/")}`;
 
   const canPreview = Boolean(baseUrl) && [
@@ -592,6 +593,7 @@ function renderWebsiteFileTree(files, baseUrl = "") {
           ? `<p><a href="${escapeHTML(fileUrl)}" target="_blank" rel="noopener noreferrer">Prévisualiser</a></p>`
           : ""
       }
+      <p><a href="${escapeHTML(downloadUrl)}">Télécharger</a></p>
     </div>
   `;
 }).join("");
