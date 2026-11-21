@@ -1710,6 +1710,12 @@ async function renderProjectsPage() {
       <span class="muted" id="projectTotal">Chargement...</span>
     </div>
     <div id="projectsList"></div>
+
+    <div class="section-head">
+      <h2>Corbeille des projets</h2>
+      <button class="secondary" type="button" onclick="loadProjectTrash()">Afficher la corbeille</button>
+    </div>
+    <div id="projectTrashList" style="display:none"></div>
   `;
 
   await loadProjects();
@@ -1753,7 +1759,7 @@ function renderProjects() {
   ${project.type === "website" ? `
     <button onclick="enableProjectHosting('${escapeHTML(project.id)}')">Activer l'hébergement</button>
   ` : ""}
-  <button class="danger" onclick="deleteProject('${escapeHTML(project.id)}')">Supprimer</button>
+  <button class="danger" onclick="deleteProject('${escapeHTML(project.id)}')">Mettre à la corbeille</button>
 </div>
     </div>
   `).join("");
@@ -1932,11 +1938,55 @@ async function editProject(id) {
 }
 
 async function deleteProject(id) {
-  if (!confirm("Voulez-vous vraiment supprimer ce projet ?")) return;
+  if (!confirm("Placer ce projet dans la corbeille ? Ses bases, son hébergement, ses déploiements et ses fichiers associés seront conservés. Vous pourrez le restaurer.")) return;
 
   try {
-    await api("/projects/" + encodeURIComponent(id), {method:"DELETE"});
+    const result = await api("/projects/" + encodeURIComponent(id), {method:"DELETE"});
+    alert(result.message || "Projet déplacé dans la corbeille.");
     await loadProjects();
+    const trash = document.getElementById("projectTrashList");
+    if (trash && trash.style.display !== "none") await loadProjectTrash();
+  } catch(error) {
+    alert(error.message);
+  }
+}
+
+async function loadProjectTrash() {
+  const container = document.getElementById("projectTrashList");
+  if (!container) return;
+  container.style.display = "block";
+  container.innerHTML = `<div class="empty">Chargement de la corbeille...</div>`;
+
+  try {
+    const data = await api("/projects/trash");
+    const projects = data.projects || [];
+    if (!projects.length) {
+      container.innerHTML = `<div class="empty">La corbeille des projets est vide.</div>`;
+      return;
+    }
+
+    container.innerHTML = projects.map(project => `
+      <div class="item-card">
+        <h3>${escapeHTML(project.name)}</h3>
+        <div class="muted">${escapeHTML(projectTypeLabel(project.type))}</div>
+        <div class="muted">Mis à la corbeille le : ${escapeHTML(formatDate(project.deleted_at))}</div>
+        <div class="item-actions">
+          <button class="secondary" type="button" onclick="restoreProject('${escapeHTML(project.id)}')">Restaurer le projet</button>
+        </div>
+      </div>
+    `).join("");
+  } catch(error) {
+    container.innerHTML = `<div class="notice error-text">${escapeHTML(error.message)}</div>`;
+  }
+}
+
+async function restoreProject(id) {
+  if (!confirm("Restaurer ce projet et retrouver ses éléments associés ?")) return;
+  try {
+    const result = await api("/projects/" + encodeURIComponent(id) + "/restore", {method:"POST",body:"{}"});
+    alert(result.message || "Projet restauré.");
+    await loadProjects();
+    await loadProjectTrash();
   } catch(error) {
     alert(error.message);
   }
