@@ -2174,8 +2174,9 @@ function renderStoragePage() {
       <button class="secondary" onclick="loadStorageHistory()">↻ Actualiser</button>
     </div>
     <div class="card" id="storageHistoryCard">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+      <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
         <button class="secondary" type="button" onclick="exportStorageHistoryCSV()">⬇ Exporter en CSV</button>
+        <button class="secondary" type="button" onclick="exportStorageHistoryPDF()">📄 Créer un PDF</button>
       </div>
       <label for="storageHistoryFilter">Filtrer les opérations</label>
       <select id="storageHistoryFilter" onchange="applyStorageHistoryFilters()" style="width:100%;margin:8px 0 12px;">
@@ -2521,6 +2522,128 @@ function changeStorageHistoryPage(direction) {
   const nextPage = storageHistoryPage + Number(direction || 0);
   if (nextPage < 1 || nextPage > storageHistoryPagination.totalPages) return;
   loadStorageHistory(nextPage);
+}
+
+async function exportStorageHistoryPDF() {
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) {
+    alert("Le navigateur a bloqué la fenêtre PDF. Autorisez les fenêtres surgissantes pour 221Cloud, puis réessayez.");
+    return;
+  }
+
+  const filter = document.getElementById("storageHistoryFilter")?.value || "all";
+  const search = (document.getElementById("storageHistorySearch")?.value || "").trim();
+  const button = document.querySelector('#storageHistoryCard button[onclick="exportStorageHistoryPDF()"]');
+  const originalLabel = button?.textContent || "📄 Créer un PDF";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Préparation du PDF...";
+  }
+
+  try {
+    const params = new URLSearchParams({ page: "1", action: filter, search });
+    const firstPage = await api("/storage/history?" + params.toString());
+    const pagination = firstPage.pagination || { totalPages: 1, total: (firstPage.activities || []).length };
+    const allActivities = [...(firstPage.activities || [])];
+
+    for (let page = 2; page <= Number(pagination.totalPages || 1); page++) {
+      params.set("page", String(page));
+      const pageData = await api("/storage/history?" + params.toString());
+      allActivities.push(...(pageData.activities || []));
+    }
+
+    if (!allActivities.length) {
+      printWindow.close();
+      alert("Aucune opération à inclure dans le PDF pour ce filtre ou cette recherche.");
+      return;
+    }
+
+    const actionLabels = {
+      upload: "Fichier ajouté",
+      move: "Fichier déplacé",
+      trash: "Fichier mis à la corbeille",
+      restore: "Fichier restauré",
+      permanent_delete: "Fichier supprimé définitivement"
+    };
+    const generatedAt = new Date().toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short" });
+    const filterLabels = {
+      all: "Toutes les opérations",
+      upload: "Fichiers ajoutés",
+      move: "Fichiers déplacés",
+      trash: "Fichiers mis à la corbeille",
+      restore: "Fichiers restaurés",
+      permanent_delete: "Suppressions définitives"
+    };
+    const rows = allActivities.map(item => {
+      const date = item.created_at ? new Date(item.created_at.replace(" ", "T") + "Z") : null;
+      const dateLabel = date && !Number.isNaN(date.getTime())
+        ? date.toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" })
+        : "Date indisponible";
+      return "<tr><td>" + escapeHTML(dateLabel) + "</td><td>" +
+        escapeHTML(actionLabels[item.action] || item.action || "") + "</td><td>" +
+        escapeHTML(item.file_name || "Fichier") + "</td><td class=\"size\">" +
+        escapeHTML(formatBytes(Number(item.file_size) || 0)) + "</td><td>" +
+        escapeHTML(item.details || "") + "</td></tr>";
+    }).join("");
+
+    const documentHTML = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>221Cloud - Historique du stockage</title>
+<style>
+  @page { size: A4 landscape; margin: 14mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; color: #172033; margin: 0; font-size: 10pt; }
+  header { border-bottom: 3px solid #397fff; padding-bottom: 12px; margin-bottom: 18px; }
+  .brand { color: #245fc2; font-size: 23pt; font-weight: 800; letter-spacing: .3px; }
+  h1 { font-size: 16pt; margin: 8px 0 4px; }
+  .meta { color: #596579; font-size: 9pt; line-height: 1.6; }
+  .summary { margin: 12px 0; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th { background: #eaf0fb; color: #1b3156; text-align: left; }
+  th, td { border: 1px solid #cbd5e1; padding: 7px; vertical-align: top; overflow-wrap: anywhere; }
+  tbody tr:nth-child(even) { background: #f7f9fc; }
+  th:nth-child(1) { width: 17%; }
+  th:nth-child(2) { width: 19%; }
+  th:nth-child(3) { width: 22%; }
+  th:nth-child(4) { width: 10%; }
+  th:nth-child(5) { width: 32%; }
+  .size { white-space: nowrap; }
+  footer { margin-top: 16px; color: #64748b; font-size: 8pt; text-align: right; }
+  @media screen { body { padding: 22px; } .print-note { margin: 12px 0; color: #245fc2; } }
+  @media print { .print-note { display: none; } tr { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">221Cloud</div>
+  <h1>Historique du stockage</h1>
+  <div class="meta">Document généré le ${escapeHTML(generatedAt)}<br>Filtre : ${escapeHTML(filterLabels[filter] || filter)}<br>Recherche : ${escapeHTML(search || "Aucune")}</div>
+</header>
+<div class="summary">${allActivities.length} opération(s) répertoriée(s)</div>
+<div class="print-note">Choisissez « Imprimer » puis « Enregistrer au format PDF » pour conserver ce document.</div>
+<table>
+<thead><tr><th>Date</th><th>Opération</th><th>Nom du fichier</th><th>Taille</th><th>Détails</th></tr></thead>
+<tbody>${rows}</tbody>
+</table>
+<footer>221Cloud — Votre espace numérique · Historique du stockage</footer>
+<script>window.addEventListener("load", function () { setTimeout(function () { window.print(); }, 350); });<\/script>
+</body>
+</html>`;
+    printWindow.document.open();
+    printWindow.document.write(documentHTML);
+    printWindow.document.close();
+  } catch (error) {
+    printWindow.close();
+    alert("Impossible de préparer le PDF : " + error.message);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalLabel;
+    }
+  }
 }
 
 async function exportStorageHistoryCSV() {
