@@ -4203,6 +4203,110 @@ async function renameStorageFile(id, currentName) {
   }
 }
 
+async function restoreWebsiteDeployment(projectId, sourceDeploymentId) {
+  let pendingDeploymentId = null;
+  try {
+    const hostingData = await api("/projects/" + encodeURIComponent(projectId) + "/hosting");
+    const sourceDeployment = (hostingData.deployments || []).find(item => item.id === sourceDeploymentId);
+    if (!sourceDeployment || sourceDeployment.status !== "published") {
+      throw new Error("Cette ancienne version n'est plus disponible pour restauration.");
+    }
+    if (hostingData.hosting?.active_deployment_id === sourceDeploymentId) {
+      alert("Cette version est déjà celle qui est publiée actuellement.");
+      return;
+    }
+
+    const fileData = await api(
+      "/projects/" + encodeURIComponent(projectId) + "/deployments/" +
+      encodeURIComponent(sourceDeploymentId) + "/files"
+    );
+    const files = Array.isArray(fileData.files) ? fileData.files : [];
+    if (!files.length) throw new Error("Cette ancienne version ne contient aucun fichier.");
+    if (!files.some(file => String(file.file_path || "") === "index.html")) {
+      throw new Error("Cette ancienne version ne contient pas index.html à la racine. Elle ne peut pas être restaurée.");
+    }
+
+    const totalBytes = files.reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0);
+    const fileList = files.slice(0, 20).map(file =>
+      "• " + file.file_path + " (" + formatBytes(Number(file.file_size) || 0) + ")"
+    ).join("\\n");
+    const moreFiles = files.length > 20 ? "\\n… et " + (files.length - 20) + " autre(s)" : "";
+    const createdLabel = formatDate(sourceDeployment.created_at);
+    const preview =
+      "APERÇU — RESTAURATION D'UNE ANCIENNE VERSION\\n\\n" +
+      "Version sélectionnée : " + sourceDeploymentId + "\\n" +
+      "Créée le : " + createdLabel + "\\n" +
+      "Fichiers à restaurer : " + files.length + "\\n" +
+      "Volume à recopier : " + formatBytes(totalBytes) + "\\n\\n" +
+      "FICHIERS DE CETTE VERSION :\\n" + fileList + moreFiles + "\\n\\n" +
+      "Cette restauration remettra exactement les fichiers de la version sélectionnée en ligne. " +
+      "La version actuellement publiée sera conservée dans l'historique et ne sera remplacée qu'au moment de la publication.";
+    if (!confirm(preview + "\\n\\nContinuer la préparation ?")) return;
+    if (!confirm(
+      "CONFIRMATION FINALE\\n\\n" +
+      "221Cloud va créer une nouvelle version, recopier les " + files.length +
+      " fichiers de la version choisie, puis la publier.\\n\\n" +
+      "Le site actuel restera en ligne jusqu'à la publication finale. Confirmer la restauration ?"
+    )) return;
+
+    const created = await api(
+      "/projects/" + encodeURIComponent(projectId) + "/deployments",
+      { method: "POST" }
+    );
+    pendingDeploymentId = created.deployment?.id;
+    if (!pendingDeploymentId) throw new Error("Impossible de préparer la nouvelle version.");
+
+    const cloned = await api(
+      "/projects/" + encodeURIComponent(projectId) + "/deployments/" +
+      encodeURIComponent(pendingDeploymentId) + "/clone-active",
+      {
+        method: "POST",
+        body: JSON.stringify({ source_deployment_id: sourceDeploymentId })
+      }
+    );
+    if (Number(cloned.cloned) !== files.length) {
+      throw new Error("La copie des fichiers est incomplète (" + Number(cloned.cloned || 0) +
+        "/" + files.length + "). La version actuelle n'a pas été remplacée.");
+    }
+
+    const published = await api(
+      "/projects/" + encodeURIComponent(projectId) + "/deployments/" +
+      encodeURIComponent(pendingDeploymentId) + "/publish",
+      { method: "POST" }
+    );
+    pendingDeploymentId = null;
+    alert(
+      "Ancienne version restaurée avec succès.\\n\\n" +
+      "Fichiers restaurés : " + files.length + "\\n" +
+      "Volume recopié : " + formatBytes(totalBytes) + "\\n" +
+      "Nouvelle version publiée : " + published.deployment.id + "\\n\\n" +
+      "Les versions précédentes sont conservées dans l'historique."
+    );
+    await renderHostingPage();
+  } catch (error) {
+    let cleanup = "";
+    if (pendingDeploymentId) {
+      try {
+        const currentHosting = await api("/projects/" + encodeURIComponent(projectId) + "/hosting");
+        if (currentHosting.hosting?.active_deployment_id === pendingDeploymentId) {
+          cleanup = "\\nLa nouvelle version a bien été publiée.";
+        } else {
+          await api(
+            "/projects/" + encodeURIComponent(projectId) + "/deployments/" +
+            encodeURIComponent(pendingDeploymentId),
+            { method: "DELETE" }
+          );
+          cleanup = "\\nLa préparation incomplète a été annulée automatiquement.";
+        }
+      } catch (cleanupError) {
+        cleanup = "\\nLa préparation n'a pas pu être nettoyée automatiquement. Le site actuellement publié reste prioritaire.";
+      }
+    }
+    alert("Restauration impossible : " + error.message + cleanup);
+    await renderHostingPage();
+  }
+}
+
 async function renderHostingPage() {
   const main = document.getElementById("mainContent");
 
@@ -4351,6 +4455,11 @@ ${
                       <p class="muted">
                         Créé le : ${escapeHTML(formatDate(deployment.created_at))}
                       </p>
+                      ${deployment.status === "published" && deployment.id !== hosting?.active_deployment_id
+                        ? `<button class="secondary-btn" onclick="restoreWebsiteDeployment('${escapeHTML(project.id)}','${escapeHTML(deployment.id)}')">Restaurer cette version</button>`
+                        : deployment.id === hosting?.active_deployment_id
+                          ? `<p class="muted">Version actuellement publiée</p>`
+                          : ""}
                     </div>
                   `).join("")
                 : `<p class="muted">Aucun déploiement pour le moment.</p>`
