@@ -598,12 +598,15 @@ const downloadUrl = `${fileUrl}?download=1`;
         ? ""
         : `<p>
             <button type="button" onclick="renameWebsiteFile('${escapeHTML(projectId)}', '${escapeHTML(file.id)}', '${escapeHTML(name)}')">
-              Renommer
-            </button>
-            <button type="button" onclick="deleteWebsiteFile('${escapeHTML(projectId)}', '${escapeHTML(file.id)}')">
-              Supprimer
-            </button>
-          </p>`
+  Renommer
+</button>
+<button type="button" onclick="moveWebsiteFile('${escapeHTML(projectId)}', '${escapeHTML(file.id)}', '${escapeHTML(file.file_path)}')">
+  Déplacer
+</button>
+<button type="button" onclick="deleteWebsiteFile('${escapeHTML(projectId)}', '${escapeHTML(file.id)}')">
+  Supprimer
+</button>
+</p>`
 }
     </div>
   `;
@@ -662,6 +665,39 @@ async function renameWebsiteFile(projectId, fileId, currentName) {
     );
 
     alert("Fichier renommé avec succès.");
+    await renderHostingPage();
+
+  } catch (error) {
+    alert(error.message);
+  }
+}
+async function moveWebsiteFile(projectId, fileId, currentPath) {
+  const lastSlash = currentPath.lastIndexOf("/");
+  const currentFolder = lastSlash >= 0
+    ? currentPath.slice(0, lastSlash)
+    : "";
+
+  const folder = prompt(
+    "Entrez le dossier de destination (ex. images). Laissez vide pour déplacer à la racine :",
+    currentFolder
+  );
+
+  if (folder === null || folder.trim() === currentFolder) {
+    return;
+  }
+
+  try {
+    await api(
+      `/projects/${encodeURIComponent(projectId)}/hosting/files/${encodeURIComponent(fileId)}/move`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          folder: folder.trim()
+        })
+      }
+    );
+
+    alert("Fichier déplacé avec succès.");
     await renderHostingPage();
 
   } catch (error) {
