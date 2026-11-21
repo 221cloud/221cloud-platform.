@@ -2164,6 +2164,14 @@ function renderStoragePage() {
 <div id="storageFilesList">
       <div class="empty">Chargement des fichiers...</div>
     </div>
+
+    <div class="section-head" style="margin-top:22px;">
+      <h2>Historique du stockage</h2>
+      <button class="secondary" onclick="loadStorageHistory()">↻ Actualiser</button>
+    </div>
+    <div class="card" id="storageHistoryCard">
+      <div id="storageHistoryList" class="muted">Chargement de l'historique...</div>
+    </div>
   `;
 
   loadStorageFiles();
@@ -2443,12 +2451,62 @@ if (noticeElement) {
 
     renderStorageStats(used, limit, available);
     renderStorageFiles();
+    loadStorageHistory();
   } catch(error) {
     list.innerHTML = `<div class="notice error-text">${escapeHTML(error.message)}</div>`;
   }
 }
 
 
+
+async function loadStorageHistory() {
+  const container = document.getElementById("storageHistoryList");
+  if (container) container.innerHTML = '<div class="muted">Chargement de l’historique...</div>';
+  try {
+    const data = await api("/storage/history");
+    renderStorageHistory(data.activities || []);
+  } catch (error) {
+    if (container) {
+      container.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message) + '</div>';
+    }
+  }
+}
+
+function renderStorageHistory(activities) {
+  const container = document.getElementById("storageHistoryList");
+  if (!container) return;
+  if (!activities.length) {
+    container.innerHTML = '<div class="empty">Aucune activité enregistrée pour le moment. Les prochaines opérations de stockage apparaîtront ici.</div>';
+    return;
+  }
+  const labels = {
+    upload: { icon: "⬆️", title: "Fichier ajouté" },
+    move: { icon: "↔️", title: "Fichier déplacé" },
+    trash: { icon: "🗑️", title: "Fichier mis à la corbeille" },
+    restore: { icon: "♻️", title: "Fichier restauré" },
+    permanent_delete: { icon: "❌", title: "Fichier supprimé définitivement" }
+  };
+  container.innerHTML = activities.map(item => {
+    const info = labels[item.action] || { icon: "📁", title: "Activité de stockage" };
+    const date = item.created_at ? new Date(item.created_at.replace(" ", "T") + "Z") : null;
+    const dateLabel = date && !Number.isNaN(date.getTime())
+      ? date.toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" })
+      : "Date indisponible";
+    return `
+      <div class="item-card" style="margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+          <div style="min-width:0;flex:1;">
+            <div style="font-weight:700;">${info.icon} ${info.title}</div>
+            <div style="overflow-wrap:anywhere;">${escapeHTML(item.file_name || "Fichier")}</div>
+            <div class="muted">${escapeHTML(item.details || "")}</div>
+            <div class="muted">${dateLabel}</div>
+          </div>
+          <div class="muted" style="white-space:nowrap;">${formatBytes(Number(item.file_size) || 0)}</div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
 
 function renderStorageFolders() {
   const folderList = document.getElementById("storageFoldersList");
