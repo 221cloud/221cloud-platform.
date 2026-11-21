@@ -1252,7 +1252,8 @@ if (path === "/api/subscription" && request.method === "GET") {
             id,
             file_path: filePath,
             file_size: file.size,
-            mime_type: mimeType
+            mime_type: mimeType,
+            folder_id: requestedFolderId
           }
         }, 201);
 
@@ -2647,6 +2648,19 @@ const used = Number(usage?.used || 0);
             uploadedFile.fileId,
             requestedFolderId
           ).run();
+
+          // Réappliquer explicitement le dossier puis vérifier la valeur persistée.
+          await env.DB.prepare(
+            "UPDATE cloud_files SET folder_id = ? WHERE id = ? AND user_id = ?"
+          ).bind(requestedFolderId, id, user.id).run();
+
+          const savedFile = await env.DB.prepare(
+            "SELECT folder_id FROM cloud_files WHERE id = ? AND user_id = ? LIMIT 1"
+          ).bind(id, user.id).first();
+
+          if ((savedFile?.folder_id || null) !== requestedFolderId) {
+            throw new Error("Le dossier du fichier n'a pas été enregistré correctement.");
+          }
         } catch (databaseError) {
           console.error(
             "ERREUR ENREGISTREMENT FICHIER:",
