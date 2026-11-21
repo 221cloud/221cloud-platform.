@@ -1129,13 +1129,29 @@ async function enableProjectHosting(projectId) {
 }
 
 async function startWebsiteDeployment(projectId) {
-  const input = document.getElementById(
+    const filesInput = document.getElementById(
     `websiteFiles-${projectId}`
   );
 
-  const files = Array.from(input?.files || []);
+  const folderInput = document.getElementById(
+    `websiteFolder-${projectId}`
+  );
+
+  const selectedFiles = Array.from(filesInput?.files || []);
+  const folderFiles = Array.from(folderInput?.files || []);
+
+  if (selectedFiles.length && folderFiles.length) {
+    alert("Choisissez soit des fichiers, soit un dossier complet.");
+    return;
+  }
+
+  const isFolderUpload = folderFiles.length > 0;
+  const files = isFolderUpload ? folderFiles : selectedFiles;
 
   if (!files.length) {
+    alert("Sélectionnez d'abord les fichiers ou le dossier de votre site.");
+    return;
+  }
     alert("Sélectionnez d'abord les fichiers de votre site.");
     return;
   }
@@ -1170,7 +1186,9 @@ async function startWebsiteDeployment(projectId) {
       form.append("file", file);
       form.append(
         "file_path",
-        file.webkitRelativePath || file.name
+        isFolderUpload
+  ? file.webkitRelativePath
+  : file.name
       );
 
       await api(
@@ -1819,6 +1837,17 @@ async function renderHostingPage() {
     accept=".html,.css,.js,.json,.png,.jpg,.jpeg,.gif,.svg,.webp,.ico,.woff,.woff2,.ttf"
     style="display:block;margin-top:10px"
   />
+  <label for="websiteFolder-${escapeHTML(project.id)}" style="display:block;margin-top:16px">
+  Ou sélectionner un dossier complet
+</label>
+
+<input
+  type="file"
+  id="websiteFolder-${escapeHTML(project.id)}"
+  webkitdirectory
+  multiple
+  style="display:block;margin-top:10px"
+/>
 </div>
 
 <button
