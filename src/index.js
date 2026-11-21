@@ -1657,7 +1657,7 @@ if (path === "/api/subscription" && request.method === "GET") {
         const projectId = decodeURIComponent(abortDeploymentMatch[1]);
         const deploymentId = decodeURIComponent(abortDeploymentMatch[2]);
         const deployment = await env.DB.prepare(
-          "SELECT d.id, d.status FROM deployments d JOIN projects p ON p.id = d.project_id WHERE d.id = ? AND p.id = ? AND p.user_id = ? AND p.type = 'website' LIMIT 1"
+          "SELECT d.id, d.status FROM deployments d JOIN projects p ON p.id = d.project_id WHERE d.id = ? AND p.id = ? AND p.user_id = ? AND p.type = 'website' AND p.deleted_at IS NULL LIMIT 1"
         ).bind(deploymentId, projectId, user.id).first();
         if (!deployment) return json({ error: "Déploiement introuvable." }, 404);
         if (deployment.status !== "pending") {
@@ -2053,6 +2053,7 @@ if (hostingFileRenameMatch && request.method === "PATCH") {
         AND projects.id = ?
         AND projects.user_id = ?
         AND projects.type = 'website'
+        AND projects.deleted_at IS NULL
         AND website_hostings.user_id = ?
         AND website_hostings.active_deployment_id = website_files.deployment_id
       LIMIT 1
@@ -2176,6 +2177,7 @@ if (hostingFileMoveMatch && request.method === "PATCH") {
         AND projects.id = ?
         AND projects.user_id = ?
         AND projects.type = 'website'
+        AND projects.deleted_at IS NULL
         AND website_hostings.user_id = ?
         AND website_hostings.active_deployment_id = website_files.deployment_id
       LIMIT 1
@@ -2389,7 +2391,7 @@ if (downloadRequested) {
         const project = await env.DB.prepare(
           `SELECT id, name, type
            FROM projects
-           WHERE id = ? AND user_id = ?`
+           WHERE id = ? AND user_id = ? AND deleted_at IS NULL`
         ).bind(projectId, user.id).first();
 
         if (!project) {
