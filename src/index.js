@@ -1290,6 +1290,114 @@ if (path === "/api/subscription" && request.method === "GET") {
       }
     }
 
+    // CLONER LES FICHIERS DU SITE ACTUEL DANS UN DÉPLOIEMENT DE RESTAURATION
+    const cloneActiveDeploymentMatch = path.match(
+      /^\/api\/projects\/([^/]+)\/deployments\/([^/]+)\/clone-active$/
+    );
+
+    if (cloneActiveDeploymentMatch && request.method === "POST") {
+      const uploadedCopies = [];
+      const insertedIds = [];
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        if (!storageConfigurationAvailable(env)) {
+          return json({ error: "Le stockage cloud n'est pas configuré." }, 503);
+        }
+
+        const projectId = decodeURIComponent(cloneActiveDeploymentMatch[1]);
+        const deploymentId = decodeURIComponent(cloneActiveDeploymentMatch[2]);
+        const target = await env.DB.prepare(`
+          SELECT d.id, d.status, h.id AS hosting_id, h.active_deployment_id
+          FROM deployments d
+          JOIN projects p ON p.id = d.project_id
+          JOIN website_hostings h ON h.project_id = p.id
+          WHERE d.id = ? AND p.id = ? AND p.user_id = ?
+            AND p.type = 'website' AND h.user_id = ?
+          LIMIT 1
+        `).bind(deploymentId, projectId, user.id, user.id).first();
+
+        if (!target) return json({ error: "Déploiement introuvable." }, 404);
+        if (target.status !== "pending") {
+          return json({ error: "Le déploiement n'accepte plus de fichiers." }, 409);
+        }
+        if (!target.active_deployment_id) return json({ cloned: 0 });
+
+        const sourceFiles = await env.DB.prepare(`
+          SELECT file_path, file_size, mime_type, storage_key, b2_file_id
+          FROM website_files
+          WHERE hosting_id = ? AND deployment_id = ?
+          ORDER BY file_path ASC
+        `).bind(target.hosting_id, target.active_deployment_id).all();
+        const files = sourceFiles.results || [];
+        const cloneBytes = files.reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0);
+
+        const subscription = await env.DB.prepare(`
+          SELECT plan, status FROM subscriptions
+          WHERE user_id = ? ORDER BY created_at DESC LIMIT 1
+        `).bind(user.id).first();
+        const plan = subscription?.status === "active" ? subscription.plan : "free";
+        const storageLimits = {
+          free: 1024 * 1024 * 1024,
+          starter: 5 * 1024 * 1024 * 1024,
+          pro: 20 * 1024 * 1024 * 1024
+        };
+        const maxStorage = storageLimits[plan] ?? storageLimits.free;
+        const usage = await env.DB.prepare(`
+          SELECT
+            COALESCE((SELECT SUM(file_size) FROM cloud_files WHERE user_id = ?), 0) +
+            COALESCE((SELECT SUM(wf.file_size) FROM website_files wf
+              JOIN website_hostings wh ON wh.id = wf.hosting_id
+              WHERE wh.user_id = ?), 0) AS used
+        `).bind(user.id, user.id).first();
+        const used = Number(usage?.used || 0);
+        if (used + cloneBytes > maxStorage) {
+          return json({ error: "Espace insuffisant pour préparer la nouvelle version du site. Il faut " +
+            formatBytes(cloneBytes) + " supplémentaires." }, 413);
+        }
+
+        for (const file of files) {
+          let sourceResponse;
+          if (file.b2_file_id) {
+            sourceResponse = await b2NativeDownload(env, file.b2_file_id);
+          } else {
+            sourceResponse = await b2Request(env, "GET", file.storage_key);
+          }
+          if (!sourceResponse.ok) throw new Error("Impossible de copier le fichier actuel : " + file.file_path);
+          const bytes = new Uint8Array(await sourceResponse.arrayBuffer());
+          if (bytes.length !== Number(file.file_size || 0)) {
+            throw new Error("Taille incohérente pour le fichier actuel : " + file.file_path);
+          }
+
+          const newKey = `websites/${user.id}/${target.hosting_id}/${deploymentId}/${file.file_path}`;
+          const uploaded = await b2NativeUpload(env, newKey, bytes, file.mime_type || "application/octet-stream");
+          uploadedCopies.push({ fileId: uploaded.fileId, fileName: uploaded.fileName || newKey });
+          const newId = crypto.randomUUID();
+          await env.DB.prepare(`
+            INSERT INTO website_files (
+              id, hosting_id, deployment_id, file_path, file_size,
+              mime_type, storage_key, b2_file_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(
+            newId, target.hosting_id, deploymentId, file.file_path,
+            file.file_size, file.mime_type, newKey, uploaded.fileId
+          ).run();
+          insertedIds.push(newId);
+        }
+
+        return json({ cloned: insertedIds.length, bytes: cloneBytes });
+      } catch (error) {
+        console.error("ERREUR COPIE FICHIERS SITE ACTUEL:", error);
+        for (const id of insertedIds) {
+          try { await env.DB.prepare("DELETE FROM website_files WHERE id = ?").bind(id).run(); } catch (cleanupError) {}
+        }
+        for (const copy of uploadedCopies) {
+          try { await b2NativeDelete(env, copy.fileId, copy.fileName); } catch (cleanupError) {}
+        }
+        return json({ error: error.message || "Impossible de copier les fichiers du site actuel." }, 500);
+      }
+    }
+
     // PUBLIER UN DÉPLOIEMENT
     const publishDeploymentMatch = path.match(
       /^\/api\/projects\/([^/]+)\/deployments\/([^/]+)\/publish$/
