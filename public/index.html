@@ -2450,17 +2450,23 @@ function renderStorageFolders() {
     : `<div class="empty storage-empty-folder">📂<br>Aucun dossier ici pour le moment.</div>`;
 }
 
-function getStorageFolderStats(folderId) {
+function getStorageFolderStats(folderId, visited = new Set()) {
+  if (visited.has(folderId)) {
+    return { count: 0, bytes: 0, directCount: 0, directBytes: 0, children: [] };
+  }
+  const nextVisited = new Set(visited);
+  nextVisited.add(folderId);
   const children = storageFoldersCache.filter(folder => folder.parent_id === folderId);
   const directFiles = storageFilesCache.filter(file => file.folder_id === folderId);
+  const directBytes = directFiles.reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0);
   let count = directFiles.length;
-  let bytes = directFiles.reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0);
+  let bytes = directBytes;
   children.forEach(child => {
-    const childStats = getStorageFolderStats(child.id);
+    const childStats = getStorageFolderStats(child.id, nextVisited);
     count += childStats.count;
     bytes += childStats.bytes;
   });
-  return { count, bytes, directCount: directFiles.length, directBytes: directFiles.reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0), children };
+  return { count, bytes, directCount: directFiles.length, directBytes, children };
 }
 
 function toggleStorageFolderDetails(folderId) {
