@@ -1604,18 +1604,6 @@ function renderStoragePage() {
       </div>
     </div>
 
-    <div class="card form-card">
-      <h3>＋ Envoyer un fichier</h3>
-      <p class="muted">Choisissez un fichier à enregistrer dans votre espace cloud.</p>
-      <label>Sélectionner un fichier</label>
-      <input id="storageFileInput" type="file">
-      <div class="notice" id="storageUploadNotice">
-  Limite : 20 Mo par fichier. Votre espace personnel dépend de votre forfait.
-</div>
-      <button id="uploadButton" onclick="uploadStorageFile()">Envoyer dans le cloud</button>
-      <div id="uploadMessage"></div>
-    </div>
-
     <div class="section-head">
   <h2>Mes fichiers</h2>
   <button class="secondary" onclick="loadStorageFiles()">Actualiser</button>
@@ -1628,6 +1616,18 @@ function renderStoragePage() {
   </div>
   <div id="storageFolderBreadcrumb" class="muted" style="margin-bottom:12px;"></div>
   <div id="storageFoldersList"></div>
+</div>
+
+<div class="card form-card" style="margin-bottom:15px;">
+  <h3>＋ Envoyer un fichier</h3>
+  <p class="muted" id="storageUploadDestination">Destination : Racine</p>
+  <label>Sélectionner un fichier</label>
+  <input id="storageFileInput" type="file">
+  <div class="notice" id="storageUploadNotice">
+    Limite : 20 Mo par fichier. Votre espace personnel dépend de votre forfait.
+  </div>
+  <button id="uploadButton" onclick="uploadStorageFile()">Envoyer dans le cloud</button>
+  <div id="uploadMessage"></div>
 </div>
 
 <div class="card" style="margin-bottom:15px;">
@@ -1719,6 +1719,12 @@ function renderStorageFolders() {
   if (!folderList) return;
 
   const currentFolder = storageFoldersCache.find(folder => folder.id === activeStorageFolderId);
+  const uploadDestination = document.getElementById("storageUploadDestination");
+  if (uploadDestination) {
+    uploadDestination.textContent = activeStorageFolderId
+      ? "Destination : " + (currentFolder?.name || "Dossier sélectionné")
+      : "Destination : Racine";
+  }
   if (breadcrumb) {
     breadcrumb.innerHTML = activeStorageFolderId
       ? `<button class="secondary" onclick="openStorageFolder('${escapeHTML(currentFolder?.parent_id || "")}')">← Retour</button> <span style="margin-left:8px;">Dossier : ${escapeHTML(currentFolder?.name || "")}</span> <button class="secondary" onclick="openStorageFolder('')" style="margin-left:8px;">Racine</button>`
