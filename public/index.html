@@ -2111,7 +2111,19 @@ async function restoreStorageFile(id) {
 async function permanentlyDeleteStorageFile(id) {
   const file = storageTrashCache.find(item => item.id === id);
   const name = file?.file_name || "ce fichier";
-  if (!confirm("Supprimer définitivement « " + name + " » ? Cette action est irréversible.")) return;
+  if (!confirm(
+    "ATTENTION : vous allez supprimer définitivement le fichier « " + name +
+    " » de votre espace 221Cloud.\n\nLe fichier sera effacé du stockage cloud, ne pourra plus être restauré et cette action est irréversible.\n\nVoulez-vous continuer ?"
+  )) return;
+
+  const confirmation = prompt(
+    "Pour confirmer la suppression définitive de « " + name + " », saisissez exactement : SUPPRIMER"
+  );
+  if (confirmation !== "SUPPRIMER") {
+    alert("Suppression annulée. Le fichier reste dans la corbeille.");
+    return;
+  }
+
   try {
     await api("/storage/" + encodeURIComponent(id) + "/permanent", { method: "DELETE" });
     await openStorageTrash();
