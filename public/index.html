@@ -947,6 +947,7 @@ function showPage(page) {
   else if (page === "projects") renderProjectsPage();
   else if (page === "databases") renderDatabasesPage();
   else if (page === "storage") renderStoragePage();
+  else if (page === "notifications") renderAllNotificationsPage();
     else if (page === "subscription") renderSubscriptionPage();
   else if (page === "hosting") renderHostingPage();
   else if (page === "applications") renderPlaceholder("Applications", "La gestion de vos applications sera ajoutée prochainement.");
@@ -1021,6 +1022,7 @@ function renderOverview() {
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span class="muted" id="overviewNotificationCount" aria-live="polite">Calcul des notifications...</span>
         <button class="secondary" id="markAllNotificationsReadButton" onclick="markAllDashboardNotificationsRead()">Tout marquer comme lu</button>
+        <button class="secondary" onclick="showPage('notifications')">Toutes les notifications</button>
       </div>
     </div>
     <div class="card" id="overviewNotifications">
@@ -1437,7 +1439,7 @@ function renderDashboardNotificationsFromCache() {
     return;
   }
 
-  container.innerHTML = dashboardNotificationsCache.map(item => {
+  container.innerHTML = dashboardNotificationsCache.slice(0, 8).map(item => {
     const isRead = readIds.has(item.id);
     const dateLabel = item.date ? " · " + formatDate(item.date) : "";
     const action = item.page
@@ -1463,6 +1465,61 @@ function renderDashboardNotificationsFromCache() {
       </div>
     `;
   }).join("");
+
+  const allContainer = document.getElementById("allNotificationsList");
+  const allCount = document.getElementById("allNotificationsCount");
+  if (allContainer) {
+    if (allCount) allCount.textContent = dashboardNotificationsCache.length + " notification(s) · " + unreadCount + " non lue(s)";
+    allContainer.innerHTML = dashboardNotificationsCache.length
+      ? dashboardNotificationsCache.map(item => {
+          const isRead = readIds.has(item.id);
+          const dateLabel = item.date ? " · " + formatDate(item.date) : "";
+          const action = item.page
+            ? `<button class="secondary" onclick="showPage('${item.page}')">Ouvrir</button>`
+            : "";
+          const readAction = isRead
+            ? '<span class="status">✓ Lue</span>'
+            : `<button class="secondary" onclick="markDashboardNotificationRead('${item.id}')">Marquer comme lue</button>`;
+          const border = item.level === "warning"
+            ? "border-left:4px solid #f59e0b;"
+            : (isRead ? "opacity:.72;" : "border-left:4px solid #438cff;");
+          return `
+            <div class="item-card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;${border}">
+              <div style="display:flex;align-items:center;gap:12px;min-width:0">
+                <div class="stat-icon">${item.icon}</div>
+                <div style="min-width:0">
+                  <strong>${escapeHTML(item.title)}</strong>
+                  <div class="muted">${escapeHTML(item.message + dateLabel)}</div>
+                  <div style="margin-top:7px">${readAction}</div>
+                </div>
+              </div>
+              ${action}
+            </div>
+          `;
+        }).join("")
+      : '<div class="empty">Aucune notification pour le moment. Les alertes importantes apparaîtront ici.</div>';
+  }
+}
+
+async function renderAllNotificationsPage() {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="section-head">
+      <div>
+        <h1 class="page-title">Toutes les notifications</h1>
+        <p class="page-subtitle">Retrouvez les alertes et activités récentes de votre espace.</p>
+      </div>
+      <button class="secondary" onclick="showPage('overview')">← Retour au tableau de bord</button>
+    </div>
+    <div class="section-head">
+      <span class="muted" id="allNotificationsCount">Chargement...</span>
+      <button class="secondary" id="allMarkNotificationsReadButton" onclick="markAllDashboardNotificationsRead()">Tout marquer comme lu</button>
+    </div>
+    <div class="card" id="allNotificationsList">
+      <div class="muted">Chargement des notifications...</div>
+    </div>
+  `;
+  if (!dashboardNotificationsCache.length) await loadOverviewStats();
+  renderDashboardNotificationsFromCache();
 }
 
 function renderDashboardNotifications(projects, databases, storageData) {
@@ -1533,7 +1590,7 @@ function renderDashboardNotifications(projects, databases, storageData) {
     return (Number.isNaN(dateB) ? 0 : dateB) - (Number.isNaN(dateA) ? 0 : dateA);
   });
 
-  dashboardNotificationsCache = notifications.slice(0, 8).map(item => ({
+  dashboardNotificationsCache = notifications.map(item => ({
     ...item,
     id: encodeURIComponent([item.title, item.message, item.date || ""].join("|"))
   }));
