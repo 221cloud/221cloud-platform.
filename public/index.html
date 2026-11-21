@@ -2808,7 +2808,7 @@ async function restoreStorageBackup() {
     if (button) { button.disabled = true; button.textContent = "Analyse de l’archive..."; }
     try {
       const entries = read221ZipArchive(await archiveFile.arrayBuffer());
-      const metadataBytes = entries.get("221Cloud-metadata.json");
+      const metadataBytes = entries.get("221Cloud-metadata.json")?.[0];
       if (!metadataBytes) throw new Error("Fichier 221Cloud-metadata.json introuvable. Sélectionnez une sauvegarde complète créée par 221Cloud.");
       let backup;
       try { backup = JSON.parse(new TextDecoder("utf-8").decode(metadataBytes)); }
