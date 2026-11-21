@@ -1292,7 +1292,7 @@ if (path === "/api/subscription" && request.method === "GET") {
 
     // LISTER LES FICHIERS D'UNE ANCIENNE VERSION PUBLIÉE
     const deploymentFilesHistoryMatch = path.match(
-      /^\\/api\\/projects\\/([^/]+)\\/deployments\\/([^/]+)\\/files$/
+      /^\/api\/projects\/([^/]+)\/deployments\/([^/]+)\/files$/
     );
 
     if (deploymentFilesHistoryMatch && request.method === "GET") {
