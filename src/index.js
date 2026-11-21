@@ -2389,6 +2389,55 @@ hosting
       }
     }
 
+    // STOCKAGE : RENOMMAGE ET SUPPRESSION SÉCURISÉE D'UN DOSSIER
+    const storageFolderActionMatch = path.match(/^\\/api\\/storage\\/folders\\/([^/]+)\\/(rename|delete)$/);
+    if (storageFolderActionMatch) {
+      const action = storageFolderActionMatch[2];
+      const expectedMethod = action === "rename" ? "PATCH" : "DELETE";
+      if (request.method !== expectedMethod) return json({ error: "Méthode non autorisée." }, 405);
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureStorageFoldersSchema(env);
+        const folderId = decodeURIComponent(storageFolderActionMatch[1]);
+        const folder = await env.DB.prepare(
+          "SELECT id, name, parent_id FROM storage_folders WHERE id = ? AND user_id = ? LIMIT 1"
+        ).bind(folderId, user.id).first();
+        if (!folder) return json({ error: "Dossier introuvable." }, 404);
+
+        if (action === "rename") {
+          const body = await request.json();
+          const name = String(body.name || "").trim();
+          if (!name || name.length > 80 || name.includes("/") || name.includes("\\\\") || /[\\u0000-\\u001F\\u007F]/.test(name) || name === "." || name === "..") {
+            return json({ error: "Nom de dossier invalide." }, 400);
+          }
+          const duplicate = await env.DB.prepare(
+            "SELECT id FROM storage_folders WHERE user_id = ? AND parent_id IS ? AND name = ? COLLATE NOCASE AND id != ? LIMIT 1"
+          ).bind(user.id, folder.parent_id, name, folderId).first();
+          if (duplicate) return json({ error: "Un dossier porte déjà ce nom à cet emplacement." }, 409);
+          await env.DB.prepare(
+            "UPDATE storage_folders SET name = ? WHERE id = ? AND user_id = ?"
+          ).bind(name, folderId, user.id).run();
+          return json({ message: "Dossier renommé avec succès.", folder: { id: folderId, name } });
+        }
+
+        const [fileCount, childCount] = await Promise.all([
+          env.DB.prepare("SELECT COUNT(*) AS total FROM cloud_files WHERE user_id = ? AND folder_id = ?").bind(user.id, folderId).first(),
+          env.DB.prepare("SELECT COUNT(*) AS total FROM storage_folders WHERE user_id = ? AND parent_id = ?").bind(user.id, folderId).first()
+        ]);
+        if (Number(fileCount?.total || 0) > 0 || Number(childCount?.total || 0) > 0) {
+          return json({ error: "Ce dossier n'est pas vide. Déplacez d'abord ses fichiers et supprimez ou déplacez ses sous-dossiers." }, 409);
+        }
+        await env.DB.prepare(
+          "DELETE FROM storage_folders WHERE id = ? AND user_id = ?"
+        ).bind(folderId, user.id).run();
+        return json({ message: "Dossier supprimé avec succès." });
+      } catch (error) {
+        console.error("ERREUR GESTION DOSSIER STOCKAGE:", error);
+        return json({ error: "Impossible de modifier ce dossier." }, 500);
+      }
+    }
+
     // STOCKAGE : DÉPLACEMENT D'UN FICHIER
     const storageMoveMatch = path.match(/^\/api\/storage\/([^/]+)\/move$/);
     if (storageMoveMatch) {
