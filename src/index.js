@@ -617,6 +617,60 @@ async function clearLoginFailures(env, keys) {
   ).bind(keys[0], keys[1]).run();
 }
 
+
+async function ensureAccountSecuritySchema(env) {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS account_security_events (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      description TEXT NOT NULL,
+      device_info TEXT NOT NULL DEFAULT 'Navigateur inconnu',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_account_security_user_date ON account_security_events(user_id, created_at DESC)"
+  ).run();
+}
+
+function getGeneralDeviceInfo(request) {
+  const ua = request.headers.get("User-Agent") || "";
+  let browser = "Navigateur inconnu";
+  let system = "Système inconnu";
+
+  if (/Edg\//i.test(ua)) browser = "Edge";
+  else if (/OPR\//i.test(ua)) browser = "Opera";
+  else if (/CriOS|Chrome\//i.test(ua)) browser = "Chrome";
+  else if (/FxiOS|Firefox\//i.test(ua)) browser = "Firefox";
+  else if (/Safari\//i.test(ua)) browser = "Safari";
+
+  if (/iPhone|iPad|iPod/i.test(ua)) system = "iOS";
+  else if (/Android/i.test(ua)) system = "Android";
+  else if (/Windows/i.test(ua)) system = "Windows";
+  else if (/Macintosh|Mac OS/i.test(ua)) system = "macOS";
+  else if (/Linux/i.test(ua)) system = "Linux";
+
+  return browser + " · " + system;
+}
+
+async function recordSecurityEvent(env, userId, action, description, request) {
+  try {
+    await ensureAccountSecuritySchema(env);
+    await env.DB.prepare(
+      "INSERT INTO account_security_events (id, user_id, action, description, device_info) VALUES (?, ?, ?, ?, ?)"
+    ).bind(
+      crypto.randomUUID(),
+      userId,
+      String(action || "account"),
+      String(description || "Activité du compte"),
+      getGeneralDeviceInfo(request)
+    ).run();
+  } catch (error) {
+    console.error("ERREUR JOURNAL DE SÉCURITÉ:", error);
+  }
+}
+
 async function recordStorageActivity(env, userId, action, file, details = "") {
   try {
     await env.DB.prepare(
@@ -928,6 +982,7 @@ if (
 
         await clearLoginFailures(env, protectionKeys);
         const token = await createSession(env, user.id);
+        await recordSecurityEvent(env, user.id, "login", "Connexion réussie", request);
 
         return json({
           message: "Connexion réussie.",
@@ -3616,6 +3671,24 @@ headers.set(
       }
     }
 
+    // JOURNAL DE SÉCURITÉ DU COMPTE
+    if (path === "/api/account/security-log" && request.method === "GET") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+
+        await ensureAccountSecuritySchema(env);
+        const result = await env.DB.prepare(
+          "SELECT id, action, description, device_info, created_at FROM account_security_events WHERE user_id = ? ORDER BY created_at DESC LIMIT 50"
+        ).bind(user.id).all();
+
+        return json({ events: result.results || [] });
+      } catch (error) {
+        console.error("ERREUR LECTURE JOURNAL DE SÉCURITÉ:", error);
+        return json({ error: "Impossible de charger le journal de sécurité." }, 500);
+      }
+    }
+
     // SÉCURITÉ DU COMPTE : CHANGEMENT DE MOT DE PASSE
     if (path === "/api/account/password" && request.method === "POST") {
       try {
@@ -3659,6 +3732,7 @@ headers.set(
             "DELETE FROM sessions WHERE user_id = ? AND token_hash != ?"
           ).bind(user.id, tokenHash)
         ]);
+        await recordSecurityEvent(env, user.id, "password_change", "Mot de passe modifié", request);
 
         return json({
           message: "Mot de passe modifié. Les autres sessions ont été déconnectées."
@@ -3682,6 +3756,14 @@ headers.set(
         const result = await env.DB.prepare(
           "DELETE FROM sessions WHERE user_id = ? AND token_hash != ?"
         ).bind(user.id, tokenHash).run();
+        const revoked = Number(result.meta?.changes || 0);
+        await recordSecurityEvent(
+          env,
+          user.id,
+          "sessions_revoked",
+          revoked + " autre(s) session(s) déconnectée(s)",
+          request
+        );
 
         return json({
           message: "Les autres sessions ont été déconnectées.",
@@ -3699,6 +3781,10 @@ headers.set(
         const token = getCookie(request, "221cloud_session");
 
         if (token) {
+          const user = await currentUser(request, env);
+          if (user) {
+            await recordSecurityEvent(env, user.id, "logout", "Déconnexion du compte", request);
+          }
           const tokenHash = await hashToken(token);
 
           await env.DB.prepare(
