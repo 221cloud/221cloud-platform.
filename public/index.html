@@ -1521,13 +1521,14 @@ async function renderAllNotificationsPage() {
         <div>
           <label for="allNotificationsCategoryFilter">Catégorie</label>
           <select id="allNotificationsCategoryFilter" onchange="renderDashboardNotificationsFromCache()">
-            <option value="all">Toutes les catégories</option>
-            <option value="storage">Stockage et corbeille</option>
-            <option value="website">Sites web</option>
-            <option value="application">Applications</option>
-            <option value="database">Bases de données</option>
-            <option value="other_project">Autres projets</option>
-            <option value="files">Fichiers</option>
+            <option value="all">Toutes les rubriques</option>
+            <option value="projects">Mes projets</option>
+            <option value="databases">Bases de données</option>
+            <option value="subscription">Mon abonnement</option>
+            <option value="storage">Stockage cloud</option>
+            <option value="hosting">Hébergement</option>
+            <option value="applications">Applications</option>
+            <option value="account">Mon compte</option>
           </select>
         </div>
       </div>
@@ -1551,13 +1552,13 @@ function renderDashboardNotifications(projects, databases, storageData) {
     date: item.created_at,
     icon: item.type === "website" ? "🌐" : (item.type === "application" ? "📱" : (item.type === "database" ? "▤" : "▣")),
     page: "projects",
-    category: item.type === "website" ? "website" : (item.type === "application" ? "application" : (item.type === "database" ? "database" : "other_project"))
+    category: "projects"
   })), ...(databases || []).map(item => ({
     type: "Base de données créée", name: item.name || "Base sans nom",
-    date: item.created_at, icon: "▤", page: "databases", category: "database"
+    date: item.created_at, icon: "▤", page: "databases", category: "databases"
   })), ...((storageData?.files || []).map(item => ({
     type: "Fichier ajouté", name: item.file_name || "Fichier sans nom",
-    date: item.created_at, icon: "▧", page: "storage", category: "files"
+    date: item.created_at, icon: "▧", page: "storage", category: "storage"
   })))]
     .forEach(item => {
       const timestamp = new Date(item.date || 0).getTime();
@@ -1570,7 +1571,7 @@ function renderDashboardNotifications(projects, databases, storageData) {
           level: "info",
           priority: 1,
           page: item.page,
-          category: item.category || "other_project"
+          category: item.category || "projects"
         });
       }
     });
