@@ -1580,7 +1580,126 @@ files: websiteFiles.results || []
         }, 500);
       }
     }
+// RENOMMER UN FICHIER DU SITE HÉBERGÉ
+const hostingFileRenameMatch = path.match(
+  /^\/api\/projects\/([^/]+)\/hosting\/files\/([^/]+)\/rename$/
+);
 
+if (hostingFileRenameMatch && request.method === "PATCH") {
+  try {
+    const user = await currentUser(request, env);
+
+    if (!user) {
+      return json({ error: "Vous devez être connecté." }, 401);
+    }
+
+    const projectId = decodeURIComponent(hostingFileRenameMatch[1]);
+    const fileId = decodeURIComponent(hostingFileRenameMatch[2]);
+    const body = await request.json();
+
+    const newName = String(body.name || "").trim();
+
+    if (
+      !newName ||
+      newName.length > 255 ||
+      /[\/\\\u0000-\u001F\u007F]/.test(newName) ||
+      newName === "." ||
+      newName === ".."
+    ) {
+      return json({ error: "Nom de fichier invalide." }, 400);
+    }
+
+    const file = await env.DB.prepare(`
+      SELECT
+        website_files.id,
+        website_files.file_path,
+        website_files.hosting_id,
+        website_files.deployment_id
+      FROM website_files
+      JOIN website_hostings
+        ON website_hostings.id = website_files.hosting_id
+      JOIN projects
+        ON projects.id = website_hostings.project_id
+      WHERE website_files.id = ?
+        AND projects.id = ?
+        AND projects.user_id = ?
+        AND projects.type = 'website'
+        AND website_hostings.user_id = ?
+        AND website_hostings.active_deployment_id = website_files.deployment_id
+      LIMIT 1
+    `).bind(
+      fileId,
+      projectId,
+      user.id,
+      user.id
+    ).first();
+
+    if (!file) {
+      return json({ error: "Fichier introuvable." }, 404);
+    }
+
+    if (file.file_path === "index.html") {
+      return json({
+        error: "Le fichier index.html ne peut pas être renommé."
+      }, 400);
+    }
+
+    const lastSlash = file.file_path.lastIndexOf("/");
+    const folder = lastSlash >= 0
+      ? file.file_path.slice(0, lastSlash + 1)
+      : "";
+
+    const newFilePath = folder + newName;
+
+    if (newFilePath === file.file_path) {
+      return json({ message: "Le nom du fichier est inchangé." });
+    }
+
+    const existingFile = await env.DB.prepare(`
+      SELECT id
+      FROM website_files
+      WHERE hosting_id = ?
+        AND deployment_id = ?
+        AND file_path = ?
+      LIMIT 1
+    `).bind(
+      file.hosting_id,
+      file.deployment_id,
+      newFilePath
+    ).first();
+
+    if (existingFile) {
+      return json({
+        error: "Un fichier portant déjà ce nom existe dans ce dossier."
+      }, 409);
+    }
+
+    await env.DB.prepare(`
+      UPDATE website_files
+      SET file_path = ?
+      WHERE id = ?
+        AND hosting_id = ?
+        AND deployment_id = ?
+    `).bind(
+      newFilePath,
+      fileId,
+      file.hosting_id,
+      file.deployment_id
+    ).run();
+
+    return json({
+      message: "Fichier renommé avec succès.",
+      file_path: newFilePath
+    });
+
+  } catch (error) {
+    console.error("ERREUR RENOMMAGE FICHIER SITE:", error);
+
+    return json({
+      error: "Impossible de renommer le fichier."
+    }, 500);
+  }
+}
     // HÉBERGEMENT : AFFICHER UN SITE WEB PUBLIÉ
     const siteMatch = path.match(/^\/site\/([^/]+)(?:\/(.*))?$/);
 
