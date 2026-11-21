@@ -1639,6 +1639,7 @@ function renderDashboardNotifications(projects, databases, storageData, security
 
   const securityLabels = {
     login: "Nouvelle connexion au compte",
+    new_environment_login: "Connexion depuis un nouvel environnement",
     logout: "Déconnexion du compte",
     password_change: "Mot de passe modifié",
     sessions_revoked: "Autres sessions déconnectées"
@@ -1652,7 +1653,7 @@ function renderDashboardNotifications(projects, databases, storageData, security
     const message = [event.description, event.device_info]
       .filter(Boolean)
       .join(" · ");
-    const important = event.action === "password_change" || event.action === "sessions_revoked";
+    const important = event.action === "password_change" || event.action === "sessions_revoked" || event.action === "new_environment_login";
 
     notifications.push({
       id: "security-" + String(event.id),
