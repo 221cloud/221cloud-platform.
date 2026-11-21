@@ -1402,7 +1402,8 @@ function renderDashboardNotifications(projects, databases, storageData) {
           message: item.name,
           date: item.date,
           icon: item.icon,
-          level: "info"
+          level: "info",
+          priority: 1
         });
       }
     });
@@ -1416,7 +1417,8 @@ function renderDashboardNotifications(projects, databases, storageData) {
         title: percent >= 95 ? "Stockage presque plein" : "Stockage bientôt plein",
         message: formatBytes(used) + " utilisés sur " + formatBytes(limit) + " (" + percent.toFixed(1) + " %)",
         icon: "⚠",
-        level: percent >= 95 ? "warning" : "info"
+        level: percent >= 95 ? "warning" : "info",
+        priority: 3
       });
     }
 
@@ -1427,12 +1429,15 @@ function renderDashboardNotifications(projects, databases, storageData) {
         message: trashCount + " fichier(s) en attente de restauration ou de suppression",
         icon: "🗑",
         level: "info",
+        priority: 2,
         page: "storage"
       });
     }
   }
 
   notifications.sort((a, b) => {
+    const priorityDifference = Number(b.priority || 0) - Number(a.priority || 0);
+    if (priorityDifference !== 0) return priorityDifference;
     const dateA = new Date(a.date || 0).getTime();
     const dateB = new Date(b.date || 0).getTime();
     return (Number.isNaN(dateB) ? 0 : dateB) - (Number.isNaN(dateA) ? 0 : dateA);
