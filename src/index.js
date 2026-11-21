@@ -526,6 +526,7 @@ async function ensureStorageFoldersSchema(env) {
   const columns = await env.DB.prepare("PRAGMA table_info(cloud_files)").all();
   const columnNames = (columns.results || []).map(column => column.name);
   if (!columnNames.includes("folder_id")) await env.DB.prepare("ALTER TABLE cloud_files ADD COLUMN folder_id TEXT").run();
+  if (!columnNames.includes("content_sha1")) await env.DB.prepare("ALTER TABLE cloud_files ADD COLUMN content_sha1 TEXT").run();
   if (!columnNames.includes("deleted_at")) await env.DB.prepare("ALTER TABLE cloud_files ADD COLUMN deleted_at TEXT").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS storage_activity_log (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, action TEXT NOT NULL, file_name TEXT NOT NULL, file_size INTEGER NOT NULL DEFAULT 0, details TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)").run();
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_storage_activity_user_date ON storage_activity_log(user_id, created_at DESC)").run();
@@ -3014,8 +3015,8 @@ const used = Number(usage?.used || 0);
         try {
           await env.DB.prepare(
             `INSERT INTO cloud_files
-             (id, user_id, file_name, file_size, mime_type, storage_key, b2_file_id, folder_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+             (id, user_id, file_name, file_size, mime_type, storage_key, b2_file_id, folder_id, content_sha1)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
           ).bind(
             id,
             user.id,
@@ -3024,7 +3025,8 @@ const used = Number(usage?.used || 0);
             mimeType,
             objectKey,
             uploadedFile.fileId,
-            requestedFolderId
+            requestedFolderId,
+            /^[a-f0-9]{40}$/i.test(String(uploadedFile.contentSha1 || "")) ? uploadedFile.contentSha1.toLowerCase() : null
           ).run();
 
           // Réappliquer explicitement le dossier puis vérifier la valeur persistée.
@@ -3226,7 +3228,7 @@ const used = Number(usage?.used || 0);
         const fileId = decodeURIComponent(downloadMatch[1]);
 
         const file = await env.DB.prepare(
-          `SELECT id, file_name, mime_type, storage_key, b2_file_id
+          `SELECT id, file_name, file_size, mime_type, storage_key, b2_file_id, content_sha1
            FROM cloud_files
            WHERE id = ? AND user_id = ? AND deleted_at IS NULL`
         ).bind(fileId, user.id).first();
@@ -3278,6 +3280,24 @@ const used = Number(usage?.used || 0);
         }
 
 
+        const downloadedBytes = new Uint8Array(await downloadResponse.arrayBuffer());
+        if (downloadedBytes.length !== Number(file.file_size || 0)) {
+          console.error("INTEGRITÉ STOCKAGE : taille téléchargée incohérente", {
+            fileId: file.id,
+            expected: Number(file.file_size || 0),
+            actual: downloadedBytes.length
+          });
+          return json({ error: "Le fichier récupéré est incomplet ou altéré. Le téléchargement a été interrompu." }, 502);
+        }
+        if (file.content_sha1) {
+          const actualDigest = await crypto.subtle.digest("SHA-1", downloadedBytes);
+          const actualSha1 = toHex(actualDigest);
+          if (actualSha1 !== String(file.content_sha1).toLowerCase()) {
+            console.error("INTEGRITÉ STOCKAGE : empreinte SHA-1 incorrecte", { fileId: file.id });
+            return json({ error: "L'intégrité du fichier n'a pas pu être vérifiée. Le téléchargement a été interrompu." }, 502);
+          }
+        }
+
         const headers = new Headers();
 
         headers.set(
@@ -3297,7 +3317,7 @@ headers.set(
 
         headers.set("Cache-Control", "private, no-store");
 
-        return new Response(downloadResponse.body, {
+        return new Response(downloadedBytes, {
           status: 200,
           headers
         });
