@@ -3291,7 +3291,7 @@ async function restoreHostedSitesFromBackup() {
         }
       }
       alert("Restauration des sites interrompue : " + error.message + cleanupMessage +
-        "\\nLes sites déjà publiés avant cette opération restent inchangés.");
+        "\\nAucune ancienne version publiée n’a été supprimée. Toute publication terminée reste active.");
     } finally {
       if (button) { button.disabled = false; button.textContent = originalLabel; }
     }
