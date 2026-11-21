@@ -2111,7 +2111,7 @@ function renderStorageTrash() {
   if (!storageTrashCache.length) {
     list.innerHTML = '<div class="empty">🗑️<br>La corbeille est vide.</div>';
     const count = document.getElementById("storageTrashResultCount");
-    if (count) count.textContent = "0 fichier";
+    if (count) count.textContent = "0 fichier · Espace occupé : 0 octet";
     return;
   }
 
@@ -2149,8 +2149,16 @@ function renderStorageTrash() {
     return sort === "date_asc" ? dateA - dateB : dateB - dateA;
   });
 
+  const trashTotalBytes = storageTrashCache.reduce(
+    (total, file) => total + Math.max(0, Number(file.file_size) || 0),
+    0
+  );
   const count = document.getElementById("storageTrashResultCount");
-  if (count) count.textContent = filteredFiles.length + " résultat(s) sur " + storageTrashCache.length + " fichier(s)";
+  if (count) {
+    count.textContent = filteredFiles.length + " résultat(s) affiché(s) sur "
+      + storageTrashCache.length + " fichier(s) · Espace occupé : "
+      + formatBytes(trashTotalBytes);
+  }
 
   if (!filteredFiles.length) {
     list.innerHTML = '<div class="empty">Aucun fichier ne correspond à votre recherche ou à ce filtre.</div>';
