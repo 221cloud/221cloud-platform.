@@ -492,6 +492,8 @@ let currentUser = null;
 let projectsCache = [];
 let databasesCache = [];
 let storageFilesCache = [];
+let storageFoldersCache = [];
+let activeStorageFolderId = null;
 
 const STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
@@ -1620,6 +1622,15 @@ function renderStoragePage() {
 </div>
 
 <div class="card" style="margin-bottom:15px;">
+  <div class="section-head">
+    <h3>Dossiers</h3>
+    <button class="secondary" onclick="createStorageFolder()">＋ Nouveau dossier</button>
+  </div>
+  <div id="storageFolderBreadcrumb" class="muted" style="margin-bottom:12px;"></div>
+  <div id="storageFoldersList"></div>
+</div>
+
+<div class="card" style="margin-bottom:15px;">
   <input
     type="search"
     id="storageSearchInput"
@@ -1658,6 +1669,7 @@ async function loadStorageFiles() {
   try {
     const data = await api("/storage");
     storageFilesCache = data.files || [];
+    storageFoldersCache = data.folders || [];
 
     const used = Number(data.used || 0);
     const limit = Number(data.limit || STORAGE_LIMIT_BYTES);
@@ -1701,14 +1713,74 @@ if (noticeElement) {
 
 
 
+function renderStorageFolders() {
+  const folderList = document.getElementById("storageFoldersList");
+  const breadcrumb = document.getElementById("storageFolderBreadcrumb");
+  if (!folderList) return;
+
+  const currentFolder = storageFoldersCache.find(folder => folder.id === activeStorageFolderId);
+  if (breadcrumb) {
+    breadcrumb.innerHTML = activeStorageFolderId
+      ? `<button class="secondary" onclick="openStorageFolder('${escapeHTML(currentFolder?.parent_id || "")}')">← Retour</button> <span style="margin-left:8px;">Dossier : ${escapeHTML(currentFolder?.name || "")}</span> <button class="secondary" onclick="openStorageFolder('')" style="margin-left:8px;">Racine</button>`
+      : "Emplacement : Racine";
+  }
+
+  const folders = storageFoldersCache.filter(folder =>
+    (folder.parent_id || null) === (activeStorageFolderId || null)
+  );
+  folderList.innerHTML = folders.length
+    ? folders.map(folder => `
+      <div class="item-card" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+        <button class="secondary" onclick="openStorageFolder('${escapeHTML(folder.id)}')">📁 ${escapeHTML(folder.name)}</button>
+      </div>
+    `).join("")
+    : `<div class="muted">Aucun dossier ici pour le moment.</div>`;
+}
+
+function openStorageFolder(folderId) {
+  activeStorageFolderId = folderId || null;
+  renderStorageFiles();
+}
+
+async function createStorageFolder() {
+  const name = prompt("Nom du nouveau dossier :");
+  if (name === null || !name.trim()) return;
+  try {
+    await api("/storage/folders", {
+      method: "POST",
+      body: JSON.stringify({ name: name.trim(), parent_id: activeStorageFolderId })
+    });
+    await loadStorageFiles();
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function moveStorageFile(id) {
+  const choices = [{ id: null, name: "Racine" }, ...storageFoldersCache];
+  const description = choices.map((folder, index) => `${index}. ${folder.name}`).join("\\n");
+  const answer = prompt("Choisissez le dossier de destination en indiquant son numéro :\\n" + description, "0");
+  if (answer === null) return;
+  const index = Number(answer);
+  if (!Number.isInteger(index) || index < 0 || index >= choices.length) {
+    alert("Numéro de dossier invalide.");
+    return;
+  }
+  try {
+    await api("/storage/" + encodeURIComponent(id) + "/move", {
+      method: "PATCH",
+      body: JSON.stringify({ folder_id: choices[index].id })
+    });
+    await loadStorageFiles();
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
 function renderStorageFiles() {
   const list = document.getElementById("storageFilesList");
   if (!list) return;
-
-  if (!storageFilesCache.length) {
-    list.innerHTML = `<div class="empty">Aucun fichier pour le moment. Envoyez votre premier fichier dans le cloud.</div>`;
-    return;
-  }
+  renderStorageFolders();
 
   const searchInput = document.getElementById("storageSearchInput");
   const typeFilter = document.getElementById("storageTypeFilter");
@@ -1722,6 +1794,7 @@ function renderStorageFiles() {
     : "all";
 
   const filteredFiles = storageFilesCache.filter(file => {
+    if ((file.folder_id || null) !== (activeStorageFolderId || null)) return false;
     const fileName = String(file.file_name || "").toLowerCase();
     const mimeType = String(file.mime_type || "").toLowerCase();
 
@@ -1754,7 +1827,7 @@ function renderStorageFiles() {
   });
 
   if (!filteredFiles.length) {
-    list.innerHTML = `<div class="empty">Aucun fichier ne correspond à votre recherche ou à cette catégorie.</div>`;
+    list.innerHTML = `<div class="empty">Aucun fichier dans ce dossier ou aucun résultat pour ces filtres.</div>`;
     return;
   }
 
@@ -1766,6 +1839,7 @@ function renderStorageFiles() {
       <div class="item-actions">
         ${String(file.mime_type || "").toLowerCase().startsWith("image/") ? `<button class="secondary" onclick="previewStorageImage('${escapeHTML(file.id)}')">Aperçu</button>` : ""}
 <button class="secondary" onclick="renameStorageFile('${escapeHTML(file.id)}', '${escapeHTML(file.file_name || "")}')">Renommer</button>
+        <button class="secondary" onclick="moveStorageFile('${escapeHTML(file.id)}')">Déplacer</button>
         <button class="secondary" onclick="downloadStorageFile('${escapeHTML(file.id)}')">Télécharger</button>
         <button class="danger" onclick="deleteStorageFile('${escapeHTML(file.id)}')">Supprimer</button>
       </div>
@@ -1793,6 +1867,7 @@ async function uploadStorageFile() {
 
   const formData = new FormData();
   formData.append("file", file);
+  if (activeStorageFolderId) formData.append("folder_id", activeStorageFolderId);
 
   button.disabled = true;
   button.textContent = "Envoi en cours...";
