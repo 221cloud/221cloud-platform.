@@ -1700,6 +1700,127 @@ if (hostingFileRenameMatch && request.method === "PATCH") {
     }, 500);
   }
 }
+// DÉPLACER UN FICHIER DU SITE HÉBERGÉ
+const hostingFileMoveMatch = path.match(
+  /^\/api\/projects\/([^/]+)\/hosting\/files\/([^/]+)\/move$/
+);
+
+if (hostingFileMoveMatch && request.method === "PATCH") {
+  try {
+    const user = await currentUser(request, env);
+
+    if (!user) {
+      return json({ error: "Vous devez être connecté." }, 401);
+    }
+
+    const projectId = decodeURIComponent(hostingFileMoveMatch[1]);
+    const fileId = decodeURIComponent(hostingFileMoveMatch[2]);
+    const body = await request.json();
+
+    const folder = String(body.folder || "").trim();
+
+    if (
+      folder.length > 500 ||
+      folder.startsWith("/") ||
+      folder.endsWith("/") ||
+      folder.includes("\\") ||
+      /[\u0000-\u001F\u007F]/.test(folder) ||
+      folder.split("/").some(part =>
+        !part || part === "." || part === ".."
+      )
+    ) {
+      return json({ error: "Dossier de destination invalide." }, 400);
+    }
+
+    const file = await env.DB.prepare(`
+      SELECT
+        website_files.id,
+        website_files.file_path,
+        website_files.hosting_id,
+        website_files.deployment_id
+      FROM website_files
+      JOIN website_hostings
+        ON website_hostings.id = website_files.hosting_id
+      JOIN projects
+        ON projects.id = website_hostings.project_id
+      WHERE website_files.id = ?
+        AND projects.id = ?
+        AND projects.user_id = ?
+        AND projects.type = 'website'
+        AND website_hostings.user_id = ?
+        AND website_hostings.active_deployment_id = website_files.deployment_id
+      LIMIT 1
+    `).bind(
+      fileId,
+      projectId,
+      user.id,
+      user.id
+    ).first();
+
+    if (!file) {
+      return json({ error: "Fichier introuvable." }, 404);
+    }
+
+    if (file.file_path === "index.html") {
+      return json({
+        error: "Le fichier index.html ne peut pas être déplacé."
+      }, 400);
+    }
+
+    const fileName = file.file_path.split("/").pop();
+    const newFilePath = folder
+      ? `${folder}/${fileName}`
+      : fileName;
+
+    if (newFilePath === file.file_path) {
+      return json({ message: "Le fichier est déjà dans ce dossier." });
+    }
+
+    const existingFile = await env.DB.prepare(`
+      SELECT id
+      FROM website_files
+      WHERE hosting_id = ?
+        AND deployment_id = ?
+        AND file_path = ?
+      LIMIT 1
+    `).bind(
+      file.hosting_id,
+      file.deployment_id,
+      newFilePath
+    ).first();
+
+    if (existingFile) {
+      return json({
+        error: "Un fichier portant déjà ce nom existe dans ce dossier."
+      }, 409);
+    }
+
+    await env.DB.prepare(`
+      UPDATE website_files
+      SET file_path = ?
+      WHERE id = ?
+        AND hosting_id = ?
+        AND deployment_id = ?
+    `).bind(
+      newFilePath,
+      fileId,
+      file.hosting_id,
+      file.deployment_id
+    ).run();
+
+    return json({
+      message: "Fichier déplacé avec succès.",
+      file_path: newFilePath
+    });
+
+  } catch (error) {
+    console.error("ERREUR DÉPLACEMENT FICHIER SITE:", error);
+
+    return json({
+      error: "Impossible de déplacer le fichier."
+    }, 500);
+  }
+}
     // HÉBERGEMENT : AFFICHER UN SITE WEB PUBLIÉ
     const siteMatch = path.match(/^\/site\/([^/]+)(?:\/(.*))?$/);
 
