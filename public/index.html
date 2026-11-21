@@ -3119,6 +3119,7 @@ async function restoreHostedSitesFromBackup() {
       let alreadyPresent = 0;
       let archivedFileCount = 0;
       let missingBytes = 0;
+      const preservedList = [];
 
       const safeProjectFolder = value => String(value || "Site")
         .replace(/[\\/:*?"<>|]/g, "_").trim() || "Site";
@@ -3165,6 +3166,7 @@ async function restoreHostedSitesFromBackup() {
 
           if (currentByPath.has(filePath)) {
             alreadyPresent++;
+            preservedList.push((project.name || "Site") + " / " + filePath);
             continue;
           }
           missingFiles.push({
@@ -3225,6 +3227,7 @@ async function restoreHostedSitesFromBackup() {
 
       let publishedSites = 0;
       let uploadedMissing = 0;
+      const publishedReports = [];
       for (let planIndex = 0; planIndex < plans.length; planIndex++) {
         const plan = plans[planIndex];
         if (button) button.textContent = "Préparation site " + (planIndex + 1) + "/" + plans.length + "...";
@@ -3264,14 +3267,28 @@ async function restoreHostedSitesFromBackup() {
           { method: "POST" }
         );
         publishedSites++;
+        publishedReports.push({
+          projectName: plan.project.name || "Site",
+          deploymentId,
+          missingFiles: plan.missingFiles.map(file => file.file_path)
+        });
         pendingDeployment = null;
       }
 
+      const restoredPaths = publishedReports.flatMap(report =>
+        report.missingFiles.map(filePath => report.projectName + " / " + filePath)
+      );
+      const formatReportList = items => items.length
+        ? "\n• " + items.slice(0, 30).join("\n• ") +
+          (items.length > 30 ? "\n… et " + (items.length - 30) + " autre(s)" : "")
+        : "\n• Aucun";
       alert(
         "Restauration des sites terminée.\n\n" +
-        "Sites publiés en nouvelle version : " + publishedSites + "\n" +
-        "Fichiers manquants ajoutés : " + uploadedMissing + "\n" +
-        "Fichiers déjà présents conservés : " + alreadyPresent + "\n\n" +
+        "SITES PUBLIÉS : " + publishedSites + "\n" +
+        publishedReports.map(report => "• " + report.projectName + " (version " + report.deploymentId + ")").join("\n") + "\n\n" +
+        "FICHIERS RESTAURÉS : " + uploadedMissing + formatReportList(restoredPaths) + "\n\n" +
+        "FICHIERS DÉJÀ PRÉSENTS ET CONSERVÉS : " + alreadyPresent + formatReportList(preservedList) + "\n\n" +
+        (unavailable.length ? "ÉLÉMENTS NON RESTAURÉS :" + formatReportList(unavailable) + "\n\n" : "") +
         "Les versions précédentes restent dans l'historique des déploiements."
       );
     } catch (error) {
