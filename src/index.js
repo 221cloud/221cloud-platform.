@@ -2389,7 +2389,7 @@ hosting
     }
 
     // STOCKAGE : DÉPLACEMENT D'UN FICHIER
-    const storageMoveMatch = path.match(/^\\/api\\/storage\\/([^/]+)\\/move$/);
+    const storageMoveMatch = path.match(/^\/api\/storage\/([^/]+)\/move$/);
     if (storageMoveMatch) {
       if (request.method !== "PATCH") return json({ error: "Méthode non autorisée." }, 405);
       try {
