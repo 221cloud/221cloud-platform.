@@ -2945,6 +2945,67 @@ const used = Number(usage?.used || 0);
       }
     }
 
+    // HÉBERGEMENT : TÉLÉCHARGEMENT SÉCURISÉ D'UN FICHIER PUBLIÉ POUR SAUVEGARDE
+    const hostingBackupDownloadMatch = path.match(
+      /^\/api\/projects\/([^/]+)\/hosting\/files\/([^/]+)\/backup-download$/
+    );
+
+    if (hostingBackupDownloadMatch && request.method === "GET") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        if (!storageConfigurationAvailable(env)) {
+          return json({ error: "Le stockage cloud n'est pas configuré." }, 503);
+        }
+
+        const projectId = decodeURIComponent(hostingBackupDownloadMatch[1]);
+        const fileId = decodeURIComponent(hostingBackupDownloadMatch[2]);
+        const file = await env.DB.prepare(`
+          SELECT
+            website_files.id,
+            website_files.file_path,
+            website_files.file_size,
+            website_files.mime_type,
+            website_files.storage_key,
+            website_files.b2_file_id
+          FROM website_files
+          JOIN website_hostings
+            ON website_hostings.id = website_files.hosting_id
+          JOIN projects
+            ON projects.id = website_hostings.project_id
+          WHERE website_files.id = ?
+            AND projects.id = ?
+            AND projects.user_id = ?
+            AND projects.type = 'website'
+            AND website_hostings.user_id = ?
+            AND website_hostings.active_deployment_id = website_files.deployment_id
+          LIMIT 1
+        `).bind(fileId, projectId, user.id, user.id).first();
+
+        if (!file) return json({ error: "Fichier publié introuvable." }, 404);
+
+        const downloadResponse = file.b2_file_id
+          ? await b2NativeDownload(env, file.b2_file_id)
+          : await b2Request(env, "GET", file.storage_key);
+
+        if (!downloadResponse.ok) {
+          console.error("ERREUR SAUVEGARDE FICHIER SITE B2:", downloadResponse.status);
+          return json({ error: "Impossible de récupérer le fichier publié " + safeFileName(file.file_path) + "." }, 502);
+        }
+
+        const headers = new Headers();
+        headers.set("Content-Type", file.mime_type || "application/octet-stream");
+        headers.set("Content-Disposition", "attachment; filename*=UTF-8''" + encodeURIComponent(safeFileName(file.file_path.split("/").pop())));
+        headers.set("Cache-Control", "private, no-store");
+        headers.set("X-Content-Type-Options", "nosniff");
+        headers.set("X-File-Size", String(file.file_size || 0));
+        return new Response(downloadResponse.body, { status: 200, headers });
+      } catch (error) {
+        console.error("ERREUR SAUVEGARDE FICHIER SITE:", error);
+        return json({ error: "Impossible de récupérer un fichier du site pour la sauvegarde." }, 500);
+      }
+    }
+
     const downloadMatch = path.match(
       /^\/api\/storage\/([^/]+)\/download$/
     );
