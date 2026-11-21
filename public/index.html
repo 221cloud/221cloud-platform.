@@ -526,7 +526,7 @@ async function api(path, options = {}) {
 
   return data;
 }
-function renderWebsiteFileTree(files) {
+function renderWebsiteFileTree(files, baseUrl = "") {
   const root = {
     folders: {},
     files: []
