@@ -2426,6 +2426,7 @@ function renderStorageFolders() {
   );
   folderList.innerHTML = folders.length
     ? folders.map(folder => {
+      const folderStats = getStorageFolderStats(folder.id);
       const fileCount = storageFilesCache.filter(file => file.folder_id === folder.id).length;
       const folderId = escapeHTML(folder.id);
       const folderName = escapeHTML(folder.name);
@@ -2434,17 +2435,74 @@ function renderStorageFolders() {
           <button class="storage-folder-card" onclick="openStorageFolder('${folderId}')">
             <span class="storage-folder-icon">📁</span>
             <span class="storage-folder-name">${folderName}</span>
-            <span class="storage-folder-count">${fileCount} ${fileCount === 1 ? "fichier" : "fichiers"}</span>
+            <span class="storage-folder-count">${folderStats.count} ${folderStats.count === 1 ? "fichier" : "fichiers"} · ${formatBytes(folderStats.bytes)}</span>
             <span class="storage-folder-arrow">›</span>
           </button>
           <div class="storage-folder-actions">
+            <button type="button" class="secondary" onclick="toggleStorageFolderDetails('${folderId}')">Détails</button>
             <button type="button" class="secondary" onclick="renameStorageFolder('${folderId}')">Renommer</button>
             <button type="button" class="danger" onclick="deleteStorageFolder('${folderId}')">Supprimer</button>
           </div>
+          <div id="storageFolderDetails-${folderId}" class="hidden" style="margin:12px 4px 4px;padding:14px;border:1px solid var(--border);border-radius:12px;background:rgba(8,17,33,.55);"></div>
         </div>
       `;
     }).join("")
     : `<div class="empty storage-empty-folder">📂<br>Aucun dossier ici pour le moment.</div>`;
+}
+
+function getStorageFolderStats(folderId) {
+  const children = storageFoldersCache.filter(folder => folder.parent_id === folderId);
+  const directFiles = storageFilesCache.filter(file => file.folder_id === folderId);
+  let count = directFiles.length;
+  let bytes = directFiles.reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0);
+  children.forEach(child => {
+    const childStats = getStorageFolderStats(child.id);
+    count += childStats.count;
+    bytes += childStats.bytes;
+  });
+  return { count, bytes, directCount: directFiles.length, directBytes: directFiles.reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0), children };
+}
+
+function toggleStorageFolderDetails(folderId) {
+  const details = document.getElementById("storageFolderDetails-" + folderId);
+  if (!details) return;
+  if (!details.classList.contains("hidden")) {
+    details.classList.add("hidden");
+    details.innerHTML = "";
+    return;
+  }
+
+  const folder = storageFoldersCache.find(item => item.id === folderId);
+  if (!folder) return;
+  const stats = getStorageFolderStats(folderId);
+  const directFiles = storageFilesCache.filter(file => file.folder_id === folderId);
+  const childRows = stats.children.length
+    ? stats.children.map(child => {
+        const childStats = getStorageFolderStats(child.id);
+        const childId = escapeHTML(child.id);
+        return `
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 0;border-top:1px solid var(--border);">
+            <div><strong>📁 ${escapeHTML(child.name)}</strong><div class="muted" style="font-size:12px;">${childStats.count} fichier(s) · ${formatBytes(childStats.bytes)}</div></div>
+            <button type="button" class="secondary" onclick="openStorageFolder('${childId}')">Ouvrir</button>
+          </div>
+        `;
+      }).join("")
+    : '<p class="muted">Aucun sous-dossier.</p>';
+  const fileRows = directFiles.length
+    ? directFiles.map(file => `<div class="muted" style="font-size:12px;padding:5px 0;">📄 ${escapeHTML(file.file_name || "Fichier sans nom")} · ${formatBytes(file.file_size)}</div>`).join("")
+    : '<p class="muted">Aucun fichier directement dans ce dossier.</p>';
+
+  details.innerHTML = `
+    <h4 style="margin:0 0 12px;">Détails de « ${escapeHTML(folder.name)} »</h4>
+    <div class="grid" style="gap:12px;">
+      <div><div class="muted">Fichiers au total</div><strong>${stats.count}</strong></div>
+      <div><div class="muted">Espace occupé</div><strong>${formatBytes(stats.bytes)}</strong></div>
+      <div><div class="muted">Sous-dossiers</div><strong>${stats.children.length}</strong></div>
+    </div>
+    <div style="margin-top:14px;"><strong>Contenu direct</strong><div class="muted" style="font-size:12px;margin:5px 0;">${stats.directCount} fichier(s) · ${formatBytes(stats.directBytes)}</div>${fileRows}</div>
+    <div style="margin-top:14px;"><strong>Sous-dossiers</strong>${childRows}</div>
+  `;
+  details.classList.remove("hidden");
 }
 
 function openStorageFolder(folderId) {
