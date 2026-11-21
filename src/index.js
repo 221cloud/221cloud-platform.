@@ -2575,6 +2575,29 @@ hosting
           WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL
         `).bind(projectId, user.id).first();
         if (!project) return json({ error: "Projet introuvable dans la corbeille." }, 404);
+
+        const subscription = await env.DB.prepare(`
+          SELECT plan, status
+          FROM subscriptions
+          WHERE user_id = ?
+          ORDER BY created_at DESC
+          LIMIT 1
+        `).bind(user.id).first();
+        const plan = subscription?.status === "active" ? subscription.plan : "free";
+        const projectLimits = { free: 1, starter: 5, pro: 20 };
+        const maxProjects = projectLimits[plan] ?? 1;
+        const activeCount = await env.DB.prepare(`
+          SELECT COUNT(*) AS total
+          FROM projects
+          WHERE user_id = ? AND deleted_at IS NULL
+        `).bind(user.id).first();
+
+        if (Number(activeCount?.total || 0) >= maxProjects) {
+          return json({
+            error: `Votre forfait ${plan} autorise au maximum ${maxProjects} projet(s) actif(s). Libérez une place ou changez de forfait avant de restaurer ce projet.`
+          }, 403);
+        }
+
         await env.DB.prepare(`
           UPDATE projects SET deleted_at = NULL
           WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL
