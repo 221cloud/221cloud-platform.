@@ -1582,7 +1582,10 @@ files: websiteFiles.results || []
           "Content-Type",
           file.mime_type || "application/octet-stream"
         );
-
+headers.set(
+  "Content-Disposition",
+  `attachment; filename="${filePath.split("/").pop().replace(/["\\]/g, "_")}"`
+);
         headers.set("X-Content-Type-Options", "nosniff");
 
         headers.set(
