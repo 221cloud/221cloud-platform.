@@ -524,7 +524,9 @@ function safeFileName(value) {
 async function ensureStorageFoldersSchema(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS storage_folders (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, parent_id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)").run();
   const columns = await env.DB.prepare("PRAGMA table_info(cloud_files)").all();
-  if (!(columns.results || []).some(column => column.name === "folder_id")) await env.DB.prepare("ALTER TABLE cloud_files ADD COLUMN folder_id TEXT").run();
+  const columnNames = (columns.results || []).map(column => column.name);
+  if (!columnNames.includes("folder_id")) await env.DB.prepare("ALTER TABLE cloud_files ADD COLUMN folder_id TEXT").run();
+  if (!columnNames.includes("deleted_at")) await env.DB.prepare("ALTER TABLE cloud_files ADD COLUMN deleted_at TEXT").run();
 }
 export default {
   async fetch(request, env) {
@@ -2449,7 +2451,7 @@ hosting
         const fileId = decodeURIComponent(storageMoveMatch[1]);
         const body = await request.json();
         const folderId = String(body.folder_id || "").trim() || null;
-        const file = await env.DB.prepare("SELECT id FROM cloud_files WHERE id = ? AND user_id = ? LIMIT 1").bind(fileId, user.id).first();
+        const file = await env.DB.prepare("SELECT id FROM cloud_files WHERE id = ? AND user_id = ? AND deleted_at IS NULL LIMIT 1").bind(fileId, user.id).first();
         if (!file) return json({ error: "Fichier introuvable." }, 404);
         if (folderId) {
           const folder = await env.DB.prepare("SELECT id FROM storage_folders WHERE id = ? AND user_id = ? LIMIT 1").bind(folderId, user.id).first();
@@ -2476,7 +2478,7 @@ hosting
         const result = await env.DB.prepare(
           `SELECT id, file_name, file_size, mime_type, created_at, folder_id
            FROM cloud_files
-           WHERE user_id = ?
+           WHERE user_id = ? AND deleted_at IS NULL
            ORDER BY created_at DESC`
         ).bind(user.id).all();
         const folderResult = await env.DB.prepare(
@@ -2485,6 +2487,9 @@ hosting
         ).bind(user.id).all();
         const files = result.results || [];
         const folders = folderResult.results || [];
+        const trashCount = await env.DB.prepare(
+          "SELECT COUNT(*) AS total FROM cloud_files WHERE user_id = ? AND deleted_at IS NOT NULL"
+        ).bind(user.id).first();
         const usage = await env.DB.prepare(`
   SELECT
     COALESCE((
@@ -2533,6 +2538,7 @@ const used = Number(usage?.used || 0);
         return json({
   files,
   folders,
+  trashCount: Number(trashCount?.total || 0),
   used,
   limit,
   available,
@@ -2779,7 +2785,7 @@ const used = Number(usage?.used || 0);
         const file = await env.DB.prepare(
           `SELECT id, file_name, mime_type, storage_key, b2_file_id
            FROM cloud_files
-           WHERE id = ? AND user_id = ?`
+           WHERE id = ? AND user_id = ? AND deleted_at IS NULL`
         ).bind(fileId, user.id).first();
 
         if (!file) {
@@ -2896,7 +2902,7 @@ headers.set(
         }
 
         const file = await env.DB.prepare(
-          "SELECT id, file_name FROM cloud_files WHERE id = ? AND user_id = ? LIMIT 1"
+          "SELECT id, file_name FROM cloud_files WHERE id = ? AND user_id = ? AND deleted_at IS NULL LIMIT 1"
         ).bind(fileId, user.id).first();
 
         if (!file) {
@@ -2924,94 +2930,120 @@ headers.set(
       }
     }
 
-    // STOCKAGE : SUPPRESSION D'UN FICHIER
-    const storageMatch = path.match(/^\/api\/storage\/([^/]+)$/);
-
-    if (storageMatch) {
-      if (request.method !== "DELETE") {
-        return json({ error: "Méthode non autorisée." }, 405);
-      }
-
+    // STOCKAGE : CORBEILLE DES FICHIERS
+    if (path === "/api/storage/trash" && request.method === "GET") {
       try {
         const user = await currentUser(request, env);
-
-        if (!user) {
-          return json({ error: "Vous devez être connecté." }, 401);
-        }
-
-        if (!storageConfigurationAvailable(env)) {
-          return json({
-            error: "Le stockage cloud n'est pas configuré."
-          }, 503);
-        }
-
-        const fileId = decodeURIComponent(storageMatch[1]);
-
-        const file = await env.DB.prepare(
-          `SELECT id, storage_key, b2_file_id
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureStorageFoldersSchema(env);
+        const result = await env.DB.prepare(
+          `SELECT id, file_name, file_size, mime_type, created_at, folder_id, deleted_at
            FROM cloud_files
-           WHERE id = ? AND user_id = ?`
+           WHERE user_id = ? AND deleted_at IS NOT NULL
+           ORDER BY deleted_at DESC`
+        ).bind(user.id).all();
+        return json({ files: result.results || [] });
+      } catch (error) {
+        console.error("ERREUR CHARGEMENT CORBEILLE:", error);
+        return json({ error: "Impossible de charger la corbeille." }, 500);
+      }
+    }
+
+    // STOCKAGE : RESTAURATION D'UN FICHIER
+    const storageRestoreMatch = path.match(/^\/api\/storage\/([^/]+)\/restore$/);
+    if (storageRestoreMatch) {
+      if (request.method !== "PATCH") return json({ error: "Méthode non autorisée." }, 405);
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureStorageFoldersSchema(env);
+        const fileId = decodeURIComponent(storageRestoreMatch[1]);
+        const file = await env.DB.prepare(
+          "SELECT id, folder_id FROM cloud_files WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL LIMIT 1"
         ).bind(fileId, user.id).first();
-
-        if (!file) {
-          return json({ error: "Fichier introuvable." }, 404);
+        if (!file) return json({ error: "Fichier introuvable dans la corbeille." }, 404);
+        if (file.folder_id) {
+          const folder = await env.DB.prepare(
+            "SELECT id FROM storage_folders WHERE id = ? AND user_id = ? LIMIT 1"
+          ).bind(file.folder_id, user.id).first();
+          if (!folder) {
+            await env.DB.prepare(
+              "UPDATE cloud_files SET folder_id = NULL WHERE id = ? AND user_id = ?"
+            ).bind(fileId, user.id).run();
+          }
         }
+        await env.DB.prepare(
+          "UPDATE cloud_files SET deleted_at = NULL WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL"
+        ).bind(fileId, user.id).run();
+        return json({ message: "Fichier restauré avec succès." });
+      } catch (error) {
+        console.error("ERREUR RESTAURATION FICHIER:", error);
+        return json({ error: "Impossible de restaurer ce fichier." }, 500);
+      }
+    }
 
-        
+    // STOCKAGE : SUPPRESSION DÉFINITIVE D'UN FICHIER DE LA CORBEILLE
+    const storagePermanentMatch = path.match(/^\/api\/storage\/([^/]+)\/permanent$/);
+    if (storagePermanentMatch) {
+      if (request.method !== "DELETE") return json({ error: "Méthode non autorisée." }, 405);
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        if (!storageConfigurationAvailable(env)) {
+          return json({ error: "Le stockage cloud n'est pas configuré." }, 503);
+        }
+        await ensureStorageFoldersSchema(env);
+        const fileId = decodeURIComponent(storagePermanentMatch[1]);
+        const file = await env.DB.prepare(
+          "SELECT id, storage_key, b2_file_id FROM cloud_files WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL LIMIT 1"
+        ).bind(fileId, user.id).first();
+        if (!file) return json({ error: "Fichier introuvable dans la corbeille." }, 404);
         try {
           if (file.b2_file_id) {
-            await b2NativeDelete(
-              env,
-              file.b2_file_id,
-              file.storage_key
-            );
+            await b2NativeDelete(env, file.b2_file_id, file.storage_key);
           } else {
-            const deleteResponse = await b2Request(
-              env,
-              "DELETE",
-              file.storage_key
-            );
-
+            const deleteResponse = await b2Request(env, "DELETE", file.storage_key);
             if (!deleteResponse.ok && deleteResponse.status !== 404) {
-              const errorDetails = await deleteResponse.text();
-
-              console.error(
-                "ERREUR SUPPRESSION BACKBLAZE:",
-                deleteResponse.status,
-                errorDetails.slice(0, 1500)
-              );
-
-              return json({
-                error: "Impossible de supprimer le fichier du stockage."
-              }, 502);
+              return json({ error: "Impossible de supprimer le fichier du stockage." }, 502);
             }
           }
         } catch (deleteError) {
-          console.error(
-            "ERREUR SUPPRESSION BACKBLAZE:",
-            deleteError
-          );
-
+          console.error("ERREUR SUPPRESSION DÉFINITIVE BACKBLAZE:", deleteError);
           return json({
-            error: "Impossible de supprimer le fichier du stockage.",
+            error: "Impossible de supprimer définitivement le fichier.",
             diagnostic: String(deleteError.message || deleteError)
           }, 502);
         }
-
-
         await env.DB.prepare(
-          "DELETE FROM cloud_files WHERE id = ? AND user_id = ?"
+          "DELETE FROM cloud_files WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL"
         ).bind(fileId, user.id).run();
-
-        return json({
-          message: "Fichier supprimé avec succès."
-        });
-
+        return json({ message: "Fichier supprimé définitivement." });
       } catch (error) {
-        console.error("ERREUR SUPPRESSION STOCKAGE:", error);
-        return json({
-          error: "Impossible de supprimer le fichier."
-        }, 500);
+        console.error("ERREUR SUPPRESSION DÉFINITIVE:", error);
+        return json({ error: "Impossible de supprimer définitivement le fichier." }, 500);
+      }
+    }
+
+    // STOCKAGE : ENVOI D'UN FICHIER À LA CORBEILLE (SANS EFFACER LE CONTENU)
+    const storageMatch = path.match(/^\/api\/storage\/([^/]+)$/);
+    if (storageMatch) {
+      if (request.method !== "DELETE") return json({ error: "Méthode non autorisée." }, 405);
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureStorageFoldersSchema(env);
+        const fileId = decodeURIComponent(storageMatch[1]);
+        const file = await env.DB.prepare(
+          "SELECT id FROM cloud_files WHERE id = ? AND user_id = ? AND deleted_at IS NULL LIMIT 1"
+        ).bind(fileId, user.id).first();
+        if (!file) return json({ error: "Fichier introuvable." }, 404);
+        await env.DB.prepare(
+          "UPDATE cloud_files SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND deleted_at IS NULL"
+        ).bind(fileId, user.id).run();
+        return json({ message: "Fichier déplacé dans la corbeille." });
+      } catch (error) {
+        console.error("ERREUR ENVOI CORBEILLE:", error);
+        return json({ error: "Impossible de déplacer le fichier dans la corbeille." }, 500);
       }
     }
 
