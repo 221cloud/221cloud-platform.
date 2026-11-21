@@ -1852,8 +1852,8 @@ function renderStorageFolders() {
             <span class="storage-folder-arrow">›</span>
           </button>
           <div class="storage-folder-actions">
-            <button type="button" class="secondary" onclick="renameStorageFolder('${folderId}', '${folderName.replace(/'/g, '&#39;')}')">Renommer</button>
-            <button type="button" class="danger" onclick="deleteStorageFolder('${folderId}', '${folderName.replace(/'/g, '&#39;')}')">Supprimer</button>
+            <button type="button" class="secondary" onclick="renameStorageFolder('${folderId}')">Renommer</button>
+            <button type="button" class="danger" onclick="deleteStorageFolder('${folderId}')">Supprimer</button>
           </div>
         </div>
       `;
@@ -1880,7 +1880,8 @@ async function createStorageFolder() {
   }
 }
 
-async function renameStorageFolder(id, currentName) {
+async function renameStorageFolder(id) {
+  const currentName = storageFoldersCache.find(folder => folder.id === id)?.name || "";
   const newName = prompt("Entrez le nouveau nom du dossier :", currentName);
   if (newName === null || !newName.trim() || newName.trim() === currentName) return;
   try {
@@ -1894,7 +1895,8 @@ async function renameStorageFolder(id, currentName) {
   }
 }
 
-async function deleteStorageFolder(id, name) {
+async function deleteStorageFolder(id) {
+  const name = storageFoldersCache.find(folder => folder.id === id)?.name || "ce dossier";
   const confirmation = confirm(
     "Supprimer le dossier « " + name + " » ?\n\nLe dossier doit être vide. Aucun fichier ne sera supprimé."
   );
