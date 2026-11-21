@@ -2516,11 +2516,7 @@ hosting
         }
         if (search) {
           conditions.push("LOWER(file_name) LIKE LOWER(?)");
-          values.push("%" + search.replace(/[\\%_]/g, "\\        await ensureStorageFoldersSchema(env);
-        const result = await env.DB.prepare(
-          "SELECT id, action, file_name, file_size, details, created_at FROM storage_activity_log WHERE user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 100"
-        ).bind(user.id).all();
-        return json({ activities: result.results || [] });") + "%");
+          values.push("%" + search + "%");
         }
         const where = conditions.join(" AND ");
         const countResult = await env.DB.prepare(
