@@ -1711,6 +1711,14 @@ function renderStoragePage() {
       </div>
     </div>
 
+    <div class="card" id="storageStatsCard" style="margin-top:15px; margin-bottom:18px;">
+      <h3>Répartition de vos fichiers</h3>
+      <p class="muted">Statistiques des fichiers actifs de votre espace personnel, hors corbeille. L’espace utilisé ci-dessus inclut aussi la corbeille et les sites hébergés.</p>
+      <div id="storageStatsBreakdown">
+        <div class="muted">Calcul des statistiques...</div>
+      </div>
+    </div>
+
     <div class="section-head">
   <h2 id="storageFilesTitle">Mes fichiers</h2>
   <div class="item-actions" style="margin:0;">
@@ -1804,6 +1812,82 @@ function renderStoragePage() {
   loadStorageFiles();
 }
 
+function renderStorageStats(used, limit, available) {
+  const container = document.getElementById("storageStatsBreakdown");
+  if (!container) return;
+
+  const files = storageFilesCache;
+  const getCategory = file => {
+    const mime = String(file.mime_type || "").toLowerCase();
+    if (mime.startsWith("image/")) return "Images";
+    if (mime.startsWith("video/")) return "Vidéos";
+    if (
+      mime.startsWith("text/") ||
+      mime === "application/pdf" ||
+      mime.includes("document") ||
+      mime.includes("wordprocessingml") ||
+      mime.includes("msword") ||
+      mime.includes("spreadsheet") ||
+      mime.includes("presentation") ||
+      mime.includes("opendocument") ||
+      mime === "application/rtf"
+    ) return "Documents";
+    return "Autres fichiers";
+  };
+
+  const categories = ["Images", "Vidéos", "Documents", "Autres fichiers"].map(name => {
+    const matching = files.filter(file => getCategory(file) === name);
+    return {
+      name,
+      count: matching.length,
+      bytes: matching.reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0)
+    };
+  });
+  const maxBytes = Math.max(1, ...categories.map(item => item.bytes));
+  const totalFiles = files.length;
+  const totalActiveBytes = categories.reduce((sum, item) => sum + item.bytes, 0);
+  const safeLimit = Math.max(0, Number(limit) || 0);
+  const safeAvailable = Math.max(0, Number(available) || 0);
+  const availablePercent = safeLimit > 0
+    ? Math.min(100, (safeAvailable / safeLimit) * 100)
+    : 0;
+
+  container.innerHTML = `
+    <div class="grid" style="margin-bottom:14px;">
+      <div>
+        <div class="muted">Fichiers actifs</div>
+        <div class="stat">${totalFiles}</div>
+      </div>
+      <div>
+        <div class="muted">Taille des fichiers actifs</div>
+        <div class="stat">${formatBytes(totalActiveBytes)}</div>
+      </div>
+      <div>
+        <div class="muted">Espace restant sur le quota</div>
+        <div class="stat">${formatBytes(safeAvailable)}</div>
+      </div>
+    </div>
+    <div class="muted" style="margin-bottom:8px;">Espace restant : ${availablePercent.toFixed(1)} % du quota</div>
+    <div class="progress" style="margin-bottom:16px;">
+      <div class="progress-bar" style="width:${availablePercent.toFixed(1)}%;"></div>
+    </div>
+    ${categories.map(item => {
+      const percent = totalActiveBytes > 0 ? (item.bytes / totalActiveBytes) * 100 : 0;
+      return `
+        <div style="margin-bottom:12px;">
+          <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+            <strong>${item.name}</strong>
+            <span class="muted">${item.count} fichier(s) · ${formatBytes(item.bytes)}</span>
+          </div>
+          <div class="progress" style="margin-top:6px;">
+            <div class="progress-bar" style="width:${percent.toFixed(1)}%;"></div>
+          </div>
+        </div>
+      `;
+    }).join("")}
+  `;
+}
+
 function setStorageView(view) {
   storageView = view;
   const inTrash = view === "trash";
@@ -1873,6 +1957,7 @@ if (noticeElement) {
     formatBytes(available) + " disponible";
 }
 
+    renderStorageStats(used, limit, available);
     renderStorageFiles();
   } catch(error) {
     list.innerHTML = `<div class="notice error-text">${escapeHTML(error.message)}</div>`;
