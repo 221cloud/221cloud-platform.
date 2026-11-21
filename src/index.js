@@ -1582,10 +1582,15 @@ files: websiteFiles.results || []
           "Content-Type",
           file.mime_type || "application/octet-stream"
         );
-headers.set(
-  "Content-Disposition",
-  `attachment; filename="${filePath.split("/").pop().replace(/["\\]/g, "_")}"`
-);
+const downloadRequested =
+  new URL(request.url).searchParams.get("download") === "1";
+
+if (downloadRequested) {
+  headers.set(
+    "Content-Disposition",
+    `attachment; filename*=UTF-8''${encodeURIComponent(filePath.split("/").pop())}`
+  );
+}
         headers.set("X-Content-Type-Options", "nosniff");
 
         headers.set(
