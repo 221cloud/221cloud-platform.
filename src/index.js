@@ -2708,7 +2708,10 @@ hosting
              customer_databases.id,
              customer_databases.name,
              customer_databases.project_id,
-             projects.name AS project_name,
+             CASE
+               WHEN projects.deleted_at IS NOT NULL THEN projects.name || ' (dans la corbeille)'
+               ELSE projects.name
+             END AS project_name,
              customer_databases.created_at
            FROM customer_databases
            LEFT JOIN projects
