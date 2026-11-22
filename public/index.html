@@ -2567,6 +2567,7 @@ function renderDatabases() {
         <div class="muted">Projet associé : ${escapeHTML(project ? project.name : (database.project_name || "Aucun"))}</div>
         <div class="muted">Créée le : ${escapeHTML(formatDate(database.created_at))}</div>
         <button type="button" onclick="openDatabaseStructure('${escapeHTML(database.id)}')">Gérer les tables</button>
+        <button type="button" class="danger" onclick="deleteDatabase('${escapeHTML(database.id)}')">Supprimer la base vide</button>
       </div>
     `;
   }).join("");
@@ -3221,10 +3222,24 @@ async function createDatabase() {
 }
 
 async function deleteDatabase(id) {
-  if (!confirm("Voulez-vous vraiment supprimer cette base ?")) return;
+  const database = databasesCache.find(item => item.id === id);
+  if (!database) return alert("Base de données introuvable.");
+
+  const confirmation = prompt(
+    "Cette action est irréversible et réservée aux bases sans table.\n\nPour confirmer, saisissez exactement le nom : " + database.name
+  );
+  if (confirmation === null) return;
+  if (confirmation.trim() !== database.name) {
+    return alert("Le nom saisi ne correspond pas. Aucune suppression effectuée.");
+  }
+  if (!confirm("Confirmer la suppression de la base vide « " + database.name + " » ?")) return;
 
   try {
-    await api("/databases/" + encodeURIComponent(id), {method:"DELETE"});
+    await api("/databases/" + encodeURIComponent(id), {
+      method:"DELETE",
+      body:JSON.stringify({confirm_name:confirmation.trim()})
+    });
+    alert("Base de données supprimée.");
     await loadDatabases();
   } catch(error) {
     alert(error.message);
