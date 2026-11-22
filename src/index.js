@@ -250,7 +250,7 @@ async function currentUser(request, env) {
 async function generateWebsiteSlug(env, projectName) {
   const base = String(projectName || "site")
     .normalize("NFD")
-    .replace(/[\\u0300-\\u036f]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
