@@ -808,8 +808,8 @@ export default {
       try {
         await ensureApplicationPublicationSchema(env);
         const slug = publicApplicationMatch[1];
-        const requestedFile = publicApplicationMatch[2] || "";
-        if (!requestedFile) {
+        const requestedFile = publicApplicationMatch[2];
+        if (requestedFile === undefined) {
           return Response.redirect(new URL(`/app/${slug}/`, url), 308);
         }
         const fileName = requestedFile || "index.html";
