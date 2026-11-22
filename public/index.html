@@ -4972,7 +4972,7 @@ function renderStorageFolders() {
       const folderName = escapeHTML(folder.name);
       return `
         <div class="storage-folder-row">
-          <button class="storage-folder-card" onclick="openStorageFolder('${folderId}')">
+          <button class="storage-folder-card" onclick="openStorageFolder(${escapeJSAttribute(folder.id)})">
             <span class="storage-folder-icon">📁</span>
             <span class="storage-folder-name">${folderName}</span>
             <span class="storage-folder-count">${folderStats.count} ${folderStats.count === 1 ? "fichier" : "fichiers"} · ${formatBytes(folderStats.bytes)}</span>
@@ -5209,7 +5209,7 @@ function renderStorageFiles() {
         </div>
       </div>
       <div class="item-actions">
-        ${String(file.mime_type || "").toLowerCase().startsWith("image/") ? `<button class="secondary" onclick="previewStorageImage('${escapeHTML(file.id)}')">Aperçu</button>` : ""}
+        ${String(file.mime_type || "").toLowerCase().startsWith("image/") ? `<button class="secondary" onclick="previewStorageImage(${escapeJSAttribute(file.id)})">Aperçu</button>` : ""}
 <button class="secondary" onclick="renameStorageFile(${escapeJSAttribute(file.id)}, ${escapeJSAttribute(file.file_name || "")})">Renommer</button>
         <button class="secondary" onclick="moveStorageFile(${escapeJSAttribute(file.id)})">Déplacer</button>
         <button class="secondary" onclick="downloadStorageFile(${escapeJSAttribute(file.id)})">Télécharger</button>
