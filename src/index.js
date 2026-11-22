@@ -717,12 +717,9 @@ async function ensureStorageFoldersSchema(env) {
 }
 
 
-async function loginProtectionKeys(request, email) {
+async function loginProtectionKeys(request) {
   const ip = request.headers.get("CF-Connecting-IP") || "unknown";
-  return [
-    "ip:" + await hashToken(ip),
-    "email:" + await hashToken(email)
-  ];
+  return ["ip:" + await hashToken(ip)];
 }
 
 async function ensureLoginProtectionSchema(env) {
@@ -760,50 +757,48 @@ async function ensureEmailVerificationSchema(env) {
 
 async function getLoginBlock(env, keys) {
   const now = Math.floor(Date.now() / 1000);
-  const rows = await env.DB.prepare(
-    "SELECT blocked_until FROM login_attempt_limits WHERE scope_key IN (?, ?)"
-  ).bind(keys[0], keys[1]).all();
-  return (rows.results || []).some(row => Number(row.blocked_until) > now);
+  const row = await env.DB.prepare(
+    "SELECT blocked_until FROM login_attempt_limits WHERE scope_key = ? LIMIT 1"
+  ).bind(keys[0]).first();
+  return Number(row?.blocked_until || 0) > now;
 }
 
 async function recordLoginFailure(env, keys) {
   const now = Math.floor(Date.now() / 1000);
   const windowSeconds = 15 * 60;
   const blockSeconds = 15 * 60;
+  const threshold = 20;
 
-  for (let i = 0; i < keys.length; i++) {
-    const threshold = i === 0 ? 20 : 8;
-    await env.DB.prepare(
-      `INSERT INTO login_attempt_limits
-        (scope_key, attempts, window_started_at, blocked_until)
-       VALUES (?, 1, ?, 0)
-       ON CONFLICT(scope_key) DO UPDATE SET
-         attempts = CASE
+  await env.DB.prepare(
+    `INSERT INTO login_attempt_limits
+      (scope_key, attempts, window_started_at, blocked_until)
+     VALUES (?, 1, ?, 0)
+     ON CONFLICT(scope_key) DO UPDATE SET
+       attempts = CASE
+         WHEN login_attempt_limits.window_started_at <= ? THEN 1
+         ELSE login_attempt_limits.attempts + 1
+       END,
+       window_started_at = CASE
+         WHEN login_attempt_limits.window_started_at <= ? THEN ?
+         ELSE login_attempt_limits.window_started_at
+       END,
+       blocked_until = CASE
+         WHEN (CASE
            WHEN login_attempt_limits.window_started_at <= ? THEN 1
            ELSE login_attempt_limits.attempts + 1
-         END,
-         window_started_at = CASE
-           WHEN login_attempt_limits.window_started_at <= ? THEN ?
-           ELSE login_attempt_limits.window_started_at
-         END,
-         blocked_until = CASE
-           WHEN (CASE
-             WHEN login_attempt_limits.window_started_at <= ? THEN 1
-             ELSE login_attempt_limits.attempts + 1
-           END) >= ? THEN ?
-           ELSE login_attempt_limits.blocked_until
-         END`
-    ).bind(
-      keys[i],
-      now,
-      now - windowSeconds,
-      now - windowSeconds,
-      now,
-      now - windowSeconds,
-      threshold,
-      now + blockSeconds
-    ).run();
-  }
+         END) >= ? THEN ?
+         ELSE login_attempt_limits.blocked_until
+       END`
+  ).bind(
+    keys[0],
+    now,
+    now - windowSeconds,
+    now - windowSeconds,
+    now,
+    now - windowSeconds,
+    threshold,
+    now + blockSeconds
+  ).run();
 
   await env.DB.prepare(
     "DELETE FROM login_attempt_limits WHERE window_started_at < ? AND blocked_until < ?"
@@ -812,8 +807,8 @@ async function recordLoginFailure(env, keys) {
 
 async function clearLoginFailures(env, keys) {
   await env.DB.prepare(
-    "DELETE FROM login_attempt_limits WHERE scope_key IN (?, ?)"
-  ).bind(keys[0], keys[1]).run();
+    "DELETE FROM login_attempt_limits WHERE scope_key = ?"
+  ).bind(keys[0]).run();
 }
 
 
