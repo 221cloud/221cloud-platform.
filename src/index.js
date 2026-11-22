@@ -3435,6 +3435,14 @@ hosting
           const limit = Math.min(50, Math.max(1, Number.parseInt(url.searchParams.get("limit") || "20", 10) || 20));
           const offset = Math.max(0, Number.parseInt(url.searchParams.get("offset") || "0", 10) || 0);
           const search = String(url.searchParams.get("q") || "").trim().slice(0, 100);
+          const requestedSort = String(url.searchParams.get("sort") || "created_at");
+          const sortColumn = requestedSort === "created_at"
+            ? null
+            : columns.find(column => column.name === requestedSort) || null;
+          const sortDirection = String(url.searchParams.get("direction") || "desc").toLowerCase() === "asc" ? "ASC" : "DESC";
+          const orderExpression = sortColumn
+            ? quoteIdentifier(sortColumn.physical_name)
+            : quoteIdentifier("created_at");
           const whereParts = [];
           const bindings = [];
           if (search && columns.length) {
@@ -3451,7 +3459,7 @@ hosting
           const selectSql = ["row_id", "created_at", ...selectColumns].map(quoteIdentifier).join(", ");
           const result = await env.DB.prepare(
             "SELECT " + selectSql + " FROM " + quoteIdentifier(table.physical_name) + whereSql +
-            " ORDER BY created_at DESC, row_id DESC LIMIT ? OFFSET ?"
+            " ORDER BY " + orderExpression + " " + sortDirection + ", created_at DESC, row_id DESC LIMIT ? OFFSET ?"
           ).bind(...bindings, limit, offset).all();
           return json({
             rows: result.results || [],
