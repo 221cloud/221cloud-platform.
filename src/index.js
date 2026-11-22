@@ -1002,6 +1002,49 @@ if (path === "/api/admin/subscriptions" && request.method === "GET") {
     summary
   });
 }
+if (path.startsWith("/api/admin/subscriptions/") && request.method === "GET") {
+  const auth = await requireAdmin(request, env);
+  if (auth.response) return auth.response;
+
+  const userId = decodeURIComponent(
+    path.slice("/api/admin/subscriptions/".length)
+  );
+
+  if (!userId || userId.includes("/")) {
+    return json({ error: "Identifiant utilisateur invalide." }, 400);
+  }
+
+  const user = await env.DB.prepare(
+    `SELECT id, full_name, email, role, status, created_at
+     FROM users
+     WHERE id = ?
+     LIMIT 1`
+  ).bind(userId).first();
+
+  if (!user) {
+    return json({ error: "Utilisateur introuvable." }, 404);
+  }
+
+  const result = await env.DB.prepare(
+    `SELECT
+       id,
+       plan,
+       status,
+       started_at,
+       expires_at,
+       auto_renew,
+       created_at
+     FROM subscriptions
+     WHERE user_id = ?
+     ORDER BY created_at DESC
+     LIMIT 100`
+  ).bind(userId).all();
+
+  return json({
+    user,
+    history: result.results || []
+  });
+}
 if (path === "/api/admin/users" && request.method === "GET") {
   const auth = await requireAdmin(request, env);
 
