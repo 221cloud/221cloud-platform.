@@ -1650,32 +1650,30 @@ if (path === "/api/subscription" && request.method === "GET") {
       SELECT
         plan,
         status,
+        CASE
+          WHEN LOWER(status) = 'active'
+            AND expires_at IS NOT NULL
+            AND datetime(expires_at) <= CURRENT_TIMESTAMP
+          THEN 'expired'
+          ELSE LOWER(status)
+        END AS effective_status,
+        CASE
+          WHEN LOWER(status) = 'active'
+            AND (expires_at IS NULL OR datetime(expires_at) > CURRENT_TIMESTAMP)
+          THEN LOWER(plan)
+          ELSE 'free'
+        END AS effective_plan,
         created_at,
         started_at,
         expires_at,
         auto_renew
       FROM subscriptions
       WHERE user_id = ?
-      ORDER BY created_at DESC
+      ORDER BY datetime(created_at) DESC, id DESC
       LIMIT 50
     `).bind(user.id).all();
 
-    const subscriptionHistory = (subscriptionHistoryResult.results || []).map(item => {
-      const expiryTime = item.expires_at ? new Date(item.expires_at).getTime() : null;
-      const isExpired = String(item.status || "").toLowerCase() === "active"
-        && expiryTime !== null
-        && Number.isFinite(expiryTime)
-        && expiryTime <= Date.now();
-      const effectiveStatus = isExpired ? "expired" : String(item.status || "inactive").toLowerCase();
-      const effectivePlan = effectiveStatus === "active"
-        ? String(item.plan || "free").toLowerCase()
-        : "free";
-      return {
-        ...item,
-        effective_plan: effectivePlan,
-        effective_status: effectiveStatus
-      };
-    });
+    const subscriptionHistory = subscriptionHistoryResult.results || [];
     const latestSubscription = subscriptionHistory[0] || null;
     const subscription = latestSubscription
       ? {
