@@ -2166,6 +2166,8 @@ function renderCustomerDatabaseTablePage() {
     "<option value='boolean'>Booléen (oui/non)</option><option value='date'>Date</option></select>" +
     "<button type='button' onclick='createCustomerDatabaseColumn()'>＋ Ajouter la colonne</button>" +
     "<div id='customerColumnMessage' aria-live='polite'></div></div>" +
+    "<div class='card'><h3>Zone de danger</h3><p class='muted'>La suppression efface définitivement cette table et toutes ses données.</p>" +
+    "<button class='danger' type='button' onclick='deleteCustomerDatabaseTable()'>Supprimer cette table</button></div>" +
     "<div class='section-head'><h2>Colonnes</h2><span class='muted' id='customerColumnsTotal'>Chargement...</span></div>" +
     "<div id='customerColumnsList'><div class='empty'>Chargement des colonnes...</div></div>" +
     "<div class='notice'>Chaque table possède aussi un identifiant technique et une date de création gérés automatiquement par 221Cloud.</div>";
@@ -2195,6 +2197,36 @@ async function loadCustomerDatabaseColumns() {
     container.innerHTML = "<div class='notice error-text'>" + escapeHTML(error.message) + "</div>";
   }
 }
+async function deleteCustomerDatabaseTable() {
+  if (!activeDatabaseStructure || !activeDatabaseStructure.tableId) return;
+  const tableName = activeDatabaseStructure.tableName;
+  const confirmed = confirm(
+    "Attention : supprimer définitivement la table « " + tableName +
+    " » et toutes les données qu'elle contient ? Cette action est irréversible."
+  );
+  if (!confirmed) return;
+  const typedName = prompt("Pour confirmer, saisis exactement le nom de la table : " + tableName);
+  if (typedName === null) return;
+  if (typedName.trim() !== tableName) {
+    alert("Le nom saisi ne correspond pas. Aucune suppression effectuée.");
+    return;
+  }
+  try {
+    await api("/databases/" + encodeURIComponent(activeDatabaseStructure.databaseId) +
+      "/tables/" + encodeURIComponent(activeDatabaseStructure.tableId), {
+        method: "DELETE",
+        body: JSON.stringify({ confirm_name: typedName.trim() })
+      });
+    alert("La table et ses données ont été supprimées.");
+    activeDatabaseStructure.tableId = null;
+    activeDatabaseStructure.tableName = null;
+    renderDatabaseStructurePage();
+    await loadCustomerDatabaseTables();
+  } catch (error) {
+    alert(error.message || "Impossible de supprimer cette table.");
+  }
+}
+
 async function createCustomerDatabaseColumn() {
   if (!activeDatabaseStructure || !activeDatabaseStructure.tableId) return;
   const input = document.getElementById("customerColumnName");
