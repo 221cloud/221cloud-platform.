@@ -3354,8 +3354,18 @@ hosting
         });
       } catch (error) {
         if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
+        const errorMessage = String(error?.message || "");
+        if (
+          errorMessage.includes("Impossible de générer une adresse publique unique") ||
+          errorMessage.includes("UNIQUE constraint failed")
+        ) {
+          console.warn("CONFLIT DE PUBLICATION APPLICATION:", errorMessage);
+          return json({
+            error: "La publication rencontre un conflit temporaire. Aucune nouvelle adresse n'a pu être réservée. Attendez quelques instants puis réessayez."
+          }, 409);
+        }
         console.error("ERREUR PUBLICATION APPLICATION:", error);
-        return json({ error: "Impossible de publier l'application." }, 500);
+        return json({ error: "Impossible de publier l'application pour le moment. Vérifiez votre connexion et réessayez." }, 500);
       }
     }
 
