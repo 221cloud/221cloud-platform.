@@ -3534,7 +3534,7 @@ hosting
           ).bind(projectId, file.file_name).first();
           if (!existingVersion) {
             await env.DB.prepare(
-              "INSERT INTO application_file_versions (id, project_id, file_name, version_number, content, mime_type) SELECT ?, ?, ?, 1, ?, ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)"
+              "INSERT OR IGNORE INTO application_file_versions (id, project_id, file_name, version_number, content, mime_type) SELECT ?, ?, ?, 1, ?, ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)"
             ).bind(crypto.randomUUID(), projectId, file.file_name, file.content || "", file.mime_type, projectId, user.id).run();
           }
         }
