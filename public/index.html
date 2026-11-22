@@ -2159,6 +2159,8 @@ function renderCustomerDatabaseTablePage() {
   activeDatabaseStructure.columns = activeDatabaseStructure.columns || [];
   activeDatabaseStructure.rowsOffset = activeDatabaseStructure.rowsOffset || 0;
   activeDatabaseStructure.rowsSearch = activeDatabaseStructure.rowsSearch || "";
+  activeDatabaseStructure.rowsSortColumn = activeDatabaseStructure.rowsSortColumn || "created_at";
+  activeDatabaseStructure.rowsSortDirection = activeDatabaseStructure.rowsSortDirection || "desc";
   main.innerHTML =
     "<button class='secondary' type='button' onclick=\"openDatabaseStructure('" + escapeHTML(activeDatabaseStructure.databaseId) + "')\">← Retour aux tables</button>" +
     "<h1 class='page-title'>" + escapeHTML(activeDatabaseStructure.tableName) + "</h1>" +
@@ -2179,7 +2181,8 @@ function renderCustomerDatabaseTablePage() {
     "<button id='customerAddRowButton' type='button' onclick='createCustomerDatabaseRow()' disabled>＋ Ajouter la ligne</button>" +
     "<div id='customerRowMessage' aria-live='polite'></div></div>" +
     "<div class='section-head'><h2>Données de la table</h2><span class='muted' id='customerRowsTotal'>Chargement...</span></div>" +
-    "<div class='card'><label for='customerRowsSearch'>Rechercher dans les données</label>" +
+    "<div class='card'><h3>Trier les données</h3><div id='customerRowsSortControls'><p class='muted'>Chargement des options de tri...</p></div>" +
+    "<label for='customerRowsSearch'>Rechercher dans les données</label>" +
     "<input id='customerRowsSearch' maxlength='100' placeholder='Saisir un mot ou une valeur' value='" + escapeHTML(activeDatabaseStructure.rowsSearch) + "'>" +
     "<button class='secondary' type='button' onclick='searchCustomerDatabaseRows()'>Rechercher</button>" +
     "<div id='customerRowsList'><div class='empty'>Chargement des lignes...</div></div>" +
@@ -2211,6 +2214,7 @@ async function loadCustomerDatabaseColumns() {
       ).join("");
     }
     renderCustomerDatabaseRowForm();
+    renderCustomerDatabaseSortControls();
     await loadCustomerDatabaseRows();
   } catch (error) {
     container.innerHTML = "<div class='notice error-text'>" + escapeHTML(error.message) + "</div>";
@@ -2274,7 +2278,9 @@ async function loadCustomerDatabaseRows() {
   const params = new URLSearchParams({
     limit: "10",
     offset: String(activeDatabaseStructure.rowsOffset || 0),
-    q: activeDatabaseStructure.rowsSearch || ""
+    q: activeDatabaseStructure.rowsSearch || "",
+    sort: activeDatabaseStructure.rowsSortColumn || "created_at",
+    direction: activeDatabaseStructure.rowsSortDirection || "desc"
   });
   try {
     const data = await api("/databases/" + encodeURIComponent(activeDatabaseStructure.databaseId) +
@@ -2312,6 +2318,33 @@ async function loadCustomerDatabaseRows() {
   } catch (error) {
     container.innerHTML = "<div class='notice error-text'>" + escapeHTML(error.message) + "</div>";
   }
+}
+function renderCustomerDatabaseSortControls() {
+  if (!activeDatabaseStructure) return;
+  const container = document.getElementById("customerRowsSortControls");
+  if (!container) return;
+  const columns = activeDatabaseStructure.columns || [];
+  const options = ["<option value='created_at'>Date de création</option>"].concat(
+    columns.map(column => "<option value='" + escapeHTML(column.name) + "'>" + escapeHTML(column.name) + "</option>")
+  ).join("");
+  container.innerHTML =
+    "<label for='customerRowsSortColumn'>Trier par</label><select id='customerRowsSortColumn' onchange='applyCustomerDatabaseSort()'>" + options + "</select>" +
+    "<label for='customerRowsSortDirection'>Ordre</label><select id='customerRowsSortDirection' onchange='applyCustomerDatabaseSort()'>" +
+    "<option value='asc'>Croissant (A → Z / plus petit au plus grand)</option>" +
+    "<option value='desc'>Décroissant (Z → A / plus grand au plus petit)</option></select>";
+  const columnSelect = document.getElementById("customerRowsSortColumn");
+  const directionSelect = document.getElementById("customerRowsSortDirection");
+  if (columnSelect) columnSelect.value = activeDatabaseStructure.rowsSortColumn || "created_at";
+  if (directionSelect) directionSelect.value = activeDatabaseStructure.rowsSortDirection || "desc";
+}
+function applyCustomerDatabaseSort() {
+  if (!activeDatabaseStructure) return;
+  const columnSelect = document.getElementById("customerRowsSortColumn");
+  const directionSelect = document.getElementById("customerRowsSortDirection");
+  activeDatabaseStructure.rowsSortColumn = columnSelect ? columnSelect.value : "created_at";
+  activeDatabaseStructure.rowsSortDirection = directionSelect ? directionSelect.value : "desc";
+  activeDatabaseStructure.rowsOffset = 0;
+  loadCustomerDatabaseRows();
 }
 function searchCustomerDatabaseRows() {
   if (!activeDatabaseStructure) return;
