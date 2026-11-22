@@ -699,6 +699,56 @@ async function clearLoginFailures(env, keys) {
 }
 
 
+async function registrationProtectionKey(request) {
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  return "register:ip:" + await hashToken(ip);
+}
+
+async function isRegistrationBlocked(env, key) {
+  const row = await env.DB.prepare(
+    "SELECT blocked_until FROM login_attempt_limits WHERE scope_key = ? LIMIT 1"
+  ).bind(key).first();
+  return Number(row?.blocked_until || 0) > Math.floor(Date.now() / 1000);
+}
+
+async function recordRegistrationAttempt(env, key) {
+  const now = Math.floor(Date.now() / 1000);
+  const windowSeconds = 15 * 60;
+  const blockSeconds = 15 * 60;
+  // Cinq inscriptions sont autorisées par IP sur 15 minutes.
+  // La sixième demande déclenche un blocage temporaire.
+  await env.DB.prepare(`
+    INSERT INTO login_attempt_limits
+      (scope_key, attempts, window_started_at, blocked_until)
+    VALUES (?, 1, ?, 0)
+    ON CONFLICT(scope_key) DO UPDATE SET
+      attempts = CASE
+        WHEN login_attempt_limits.window_started_at <= ? THEN 1
+        ELSE login_attempt_limits.attempts + 1
+      END,
+      window_started_at = CASE
+        WHEN login_attempt_limits.window_started_at <= ? THEN ?
+        ELSE login_attempt_limits.window_started_at
+      END,
+      blocked_until = CASE
+        WHEN (CASE
+          WHEN login_attempt_limits.window_started_at <= ? THEN 1
+          ELSE login_attempt_limits.attempts + 1
+        END) >= 6 THEN ?
+        ELSE login_attempt_limits.blocked_until
+      END
+  `).bind(
+    key,
+    now,
+    now - windowSeconds,
+    now - windowSeconds,
+    now,
+    now - windowSeconds,
+    now + blockSeconds
+  ).run();
+}
+
+
 async function ensureAdminAuditSchema(env) {
   await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS admin_audit_events (
@@ -1242,6 +1292,20 @@ if (
     // INSCRIPTION
     if (path === "/api/register" && request.method === "POST") {
       try {
+        await ensureLoginProtectionSchema(env);
+        const registrationKey = await registrationProtectionKey(request);
+        if (await isRegistrationBlocked(env, registrationKey)) {
+          return json({
+            error: "Trop de demandes d'inscription. Réessaie dans 15 minutes."
+          }, 429, { "Retry-After": "900" });
+        }
+        await recordRegistrationAttempt(env, registrationKey);
+        if (await isRegistrationBlocked(env, registrationKey)) {
+          return json({
+            error: "Trop de demandes d'inscription. Réessaie dans 15 minutes."
+          }, 429, { "Retry-After": "900" });
+        }
+
         const body = await request.json();
 
         const email = String(body.email || "").trim().toLowerCase();
@@ -1350,7 +1414,7 @@ if (
         }
 
         const user = await env.DB.prepare(
-          "SELECT id, email, full_name, role, password_hash FROM users WHERE email = ?"
+          "SELECT id, email, full_name, role, status, password_hash FROM users WHERE email = ?"
         ).bind(email).first();
 
         if (
@@ -1365,6 +1429,12 @@ if (
         }
 
         await clearLoginFailures(env, protectionKeys);
+        if (user.status !== "active") {
+          return json({
+            error: "Ce compte est suspendu. Contacte l'administration pour obtenir de l'aide."
+          }, 403);
+        }
+
         await ensureAccountSecuritySchema(env);
         const currentDeviceInfo = getGeneralDeviceInfo(request);
         const knownEnvironment = await env.DB.prepare(
