@@ -620,6 +620,7 @@ const API = "/api";
 let currentUser = null;
 let projectsCache = [];
 let databasesCache = [];
+let activeDatabaseStructure = null;
 let storageFilesCache = [];
 let storageFoldersCache = [];
 let storageTrashCache = [];
@@ -2013,8 +2014,7 @@ async function renderDatabasesPage() {
     </div>
 
     <div class="notice">
-      Les bases affichées ici sont des espaces logiques enregistrés dans 221Cloud.
-      Elles ne correspondent pas encore à des instances de bases de données indépendantes.
+      Créez des tables et définissez leurs colonnes. Les données de chaque compte restent isolées dans 221Cloud.
     </div>
 
     <div class="section-head">
@@ -2076,10 +2076,147 @@ function renderDatabases() {
         <h3>▤ ${escapeHTML(database.name)}</h3>
         <div class="muted">Projet associé : ${escapeHTML(project ? project.name : (database.project_name || "Aucun"))}</div>
         <div class="muted">Créée le : ${escapeHTML(formatDate(database.created_at))}</div>
-              
+        <button type="button" onclick="openDatabaseStructure('${escapeHTML(database.id)}')">Gérer les tables</button>
       </div>
     `;
   }).join("");
+}
+
+async function openDatabaseStructure(databaseId) {
+  const database = databasesCache.find(item => item.id === databaseId);
+  if (!database) return alert("Base de données introuvable.");
+  activeDatabaseStructure = { databaseId: databaseId, databaseName: database.name, tableId: null, tableName: null };
+  renderDatabaseStructurePage();
+  await loadCustomerDatabaseTables();
+}
+function renderDatabaseStructurePage() {
+  const main = document.getElementById("mainContent");
+  if (!main || !activeDatabaseStructure) return;
+  main.innerHTML = "<button class='secondary' type='button' onclick='renderDatabasesPage()'>← Retour aux bases</button>" +
+    "<h1 class='page-title'>" + escapeHTML(activeDatabaseStructure.databaseName) + "</h1>" +
+    "<p class='page-subtitle'>Structure de la base de données</p>" +
+    "<div class='card form-card'><h3>Créer une table</h3><label for='customerTableName'>Nom de la table</label>" +
+    "<input id='customerTableName' maxlength='80' placeholder='Exemple : clients'>" +
+    "<button type='button' onclick='createCustomerDatabaseTable()'>＋ Créer la table</button>" +
+    "<div id='customerTableMessage' aria-live='polite'></div></div>" +
+    "<div class='section-head'><h2>Tables</h2><span class='muted' id='customerTablesTotal'>Chargement...</span></div>" +
+    "<div id='customerTablesList'><div class='empty'>Chargement des tables...</div></div>";
+}
+async function loadCustomerDatabaseTables() {
+  if (!activeDatabaseStructure) return;
+  const container = document.getElementById("customerTablesList");
+  if (!container) return;
+  container.innerHTML = "<div class='empty'>Chargement des tables...</div>";
+  try {
+    const data = await api("/databases/" + encodeURIComponent(activeDatabaseStructure.databaseId) + "/tables");
+    if (!activeDatabaseStructure || !document.getElementById("customerTablesList")) return;
+    const tables = Array.isArray(data.tables) ? data.tables : [];
+    const total = document.getElementById("customerTablesTotal");
+    if (total) total.textContent = tables.length + " table(s)";
+    if (!tables.length) {
+      container.innerHTML = "<div class='empty'>Aucune table. Créez votre première table ci-dessus.</div>";
+      return;
+    }
+    container.innerHTML = tables.map(table =>
+      "<div class='item-card'><h3>▦ " + escapeHTML(table.name) + "</h3>" +
+      "<div class='muted'>Créée le : " + escapeHTML(formatDate(table.created_at)) + "</div>" +
+      "<button type='button' onclick=\"openCustomerDatabaseTable('" + escapeHTML(table.id) + "','" + escapeHTML(table.name) + "')\">Gérer les colonnes</button></div>"
+    ).join("");
+  } catch (error) {
+    container.innerHTML = "<div class='notice error-text'>" + escapeHTML(error.message) + "</div>";
+  }
+}
+async function createCustomerDatabaseTable() {
+  if (!activeDatabaseStructure) return;
+  const input = document.getElementById("customerTableName");
+  const message = document.getElementById("customerTableMessage");
+  const name = input ? input.value.trim() : "";
+  if (!name) {
+    if (message) message.innerHTML = "<p class='error-text'>Saisissez le nom de la table.</p>";
+    return;
+  }
+  try {
+    await api("/databases/" + encodeURIComponent(activeDatabaseStructure.databaseId) + "/tables", {
+      method: "POST", body: JSON.stringify({ name: name })
+    });
+    if (message) message.innerHTML = "<p class='success-text'>Table créée avec succès.</p>";
+    if (input) input.value = "";
+    await loadCustomerDatabaseTables();
+  } catch (error) {
+    if (message) message.innerHTML = "<p class='error-text'>" + escapeHTML(error.message) + "</p>";
+  }
+}
+async function openCustomerDatabaseTable(tableId, tableName) {
+  if (!activeDatabaseStructure) return;
+  activeDatabaseStructure.tableId = tableId;
+  activeDatabaseStructure.tableName = tableName;
+  renderCustomerDatabaseTablePage();
+  await loadCustomerDatabaseColumns();
+}
+function renderCustomerDatabaseTablePage() {
+  const main = document.getElementById("mainContent");
+  if (!main || !activeDatabaseStructure) return;
+  main.innerHTML = "<button class='secondary' type='button' onclick=\"openDatabaseStructure('" + escapeHTML(activeDatabaseStructure.databaseId) + "')\">← Retour aux tables</button>" +
+    "<h1 class='page-title'>" + escapeHTML(activeDatabaseStructure.tableName) + "</h1>" +
+    "<p class='page-subtitle'>Colonnes de la table · " + escapeHTML(activeDatabaseStructure.databaseName) + "</p>" +
+    "<div class='card form-card'><h3>Ajouter une colonne</h3><label for='customerColumnName'>Nom de la colonne</label>" +
+    "<input id='customerColumnName' maxlength='80' placeholder='Exemple : prénom'>" +
+    "<label for='customerColumnType'>Type de données</label>" +
+    "<select id='customerColumnType'><option value='text'>Texte</option><option value='number'>Nombre</option>" +
+    "<option value='boolean'>Booléen (oui/non)</option><option value='date'>Date</option></select>" +
+    "<button type='button' onclick='createCustomerDatabaseColumn()'>＋ Ajouter la colonne</button>" +
+    "<div id='customerColumnMessage' aria-live='polite'></div></div>" +
+    "<div class='section-head'><h2>Colonnes</h2><span class='muted' id='customerColumnsTotal'>Chargement...</span></div>" +
+    "<div id='customerColumnsList'><div class='empty'>Chargement des colonnes...</div></div>" +
+    "<div class='notice'>Chaque table possède aussi un identifiant technique et une date de création gérés automatiquement par 221Cloud.</div>";
+}
+async function loadCustomerDatabaseColumns() {
+  if (!activeDatabaseStructure || !activeDatabaseStructure.tableId) return;
+  const container = document.getElementById("customerColumnsList");
+  if (!container) return;
+  container.innerHTML = "<div class='empty'>Chargement des colonnes...</div>";
+  try {
+    const data = await api("/databases/" + encodeURIComponent(activeDatabaseStructure.databaseId) +
+      "/tables/" + encodeURIComponent(activeDatabaseStructure.tableId) + "/columns");
+    if (!activeDatabaseStructure || !activeDatabaseStructure.tableId || !document.getElementById("customerColumnsList")) return;
+    const columns = Array.isArray(data.columns) ? data.columns : [];
+    const total = document.getElementById("customerColumnsTotal");
+    if (total) total.textContent = columns.length + " / 50 colonne(s)";
+    if (!columns.length) {
+      container.innerHTML = "<div class='empty'>Aucune colonne personnalisée. Ajoutez vos premiers champs ci-dessus.</div>";
+      return;
+    }
+    const labels = { text: "Texte", number: "Nombre", boolean: "Booléen", date: "Date" };
+    container.innerHTML = columns.map(column =>
+      "<div class='item-card'><strong>" + escapeHTML(column.name) + "</strong>" +
+      "<div class='muted'>Type : " + escapeHTML(labels[column.data_type] || column.data_type) + "</div></div>"
+    ).join("");
+  } catch (error) {
+    container.innerHTML = "<div class='notice error-text'>" + escapeHTML(error.message) + "</div>";
+  }
+}
+async function createCustomerDatabaseColumn() {
+  if (!activeDatabaseStructure || !activeDatabaseStructure.tableId) return;
+  const input = document.getElementById("customerColumnName");
+  const typeInput = document.getElementById("customerColumnType");
+  const name = input ? input.value.trim() : "";
+  const data_type = typeInput ? typeInput.value : "text";
+  const message = document.getElementById("customerColumnMessage");
+  if (!name) {
+    if (message) message.innerHTML = "<p class='error-text'>Saisissez le nom de la colonne.</p>";
+    return;
+  }
+  try {
+    await api("/databases/" + encodeURIComponent(activeDatabaseStructure.databaseId) +
+      "/tables/" + encodeURIComponent(activeDatabaseStructure.tableId) + "/columns", {
+        method: "POST", body: JSON.stringify({ name: name, data_type: data_type })
+      });
+    if (message) message.innerHTML = "<p class='success-text'>Colonne ajoutée avec succès.</p>";
+    if (input) input.value = "";
+    await loadCustomerDatabaseColumns();
+  } catch (error) {
+    if (message) message.innerHTML = "<p class='error-text'>" + escapeHTML(error.message) + "</p>";
+  }
 }
 
 async function createDatabase() {
