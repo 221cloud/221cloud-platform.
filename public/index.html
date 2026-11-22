@@ -1212,6 +1212,9 @@ async function renderAdmin() {
           </select>
         </div>
       </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+        <button type="button" class="secondary" id="adminUsersExport">Exporter les résultats en CSV</button>
+      </div>
       <p class="muted" id="adminUserCount"></p>
       <div id="adminUsersTable"></div>
     `;
@@ -1221,6 +1224,7 @@ async function renderAdmin() {
     const statusFilter = document.getElementById("adminUserStatusFilter");
     const userCount = document.getElementById("adminUserCount");
     const usersTable = document.getElementById("adminUsersTable");
+    const exportUsersButton = document.getElementById("adminUsersExport");
 
     function renderFilteredAdminUsers() {
       const query = searchInput.value.trim().toLowerCase();
@@ -1236,6 +1240,7 @@ async function renderAdmin() {
       });
 
       userCount.textContent = filteredUsers.length + " compte(s) affiché(s) sur " + users.length + ".";
+      exportUsersButton.disabled = filteredUsers.length === 0;
       usersTable.innerHTML = filteredUsers.length
         ? `
           <div style="overflow-x:auto">
@@ -1278,6 +1283,44 @@ async function renderAdmin() {
         `
         : '<p class="muted">Aucun compte ne correspond à ces critères.</p>';
     }
+
+    exportUsersButton.addEventListener("click", () => {
+      const query = searchInput.value.trim().toLowerCase();
+      const selectedRole = roleFilter.value;
+      const selectedStatus = statusFilter.value;
+      const filteredUsers = users.filter(user => {
+        const matchesQuery = !query ||
+          String(user.full_name || "").toLowerCase().includes(query) ||
+          String(user.email || "").toLowerCase().includes(query);
+        const matchesRole = selectedRole === "all" || user.role === selectedRole;
+        const matchesStatus = selectedStatus === "all" || user.status === selectedStatus;
+        return matchesQuery && matchesRole && matchesStatus;
+      });
+      const csvCell = value => {
+        let text = String(value ?? "");
+        if (/^[=+\\-@\\t\\r]/.test(text)) text = "'" + text;
+        return '"' + text.replace(/"/g, '""') + '"';
+      };
+      const rows = [
+        ["Nom", "Email", "Rôle", "Statut"],
+        ...filteredUsers.map(user => [
+          user.full_name || "",
+          user.email || "",
+          user.role === "admin" ? "Administrateur" : "Client",
+          user.status === "active" ? "Actif" : "Suspendu"
+        ])
+      ];
+      const csv = "\\uFEFF" + rows.map(row => row.map(csvCell).join(";")).join("\\r\\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "221cloud-utilisateurs.csv";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    });
 
     searchInput.addEventListener("input", renderFilteredAdminUsers);
     roleFilter.addEventListener("change", renderFilteredAdminUsers);
