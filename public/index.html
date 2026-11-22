@@ -4172,23 +4172,56 @@ async function restoreStorageBackup() {
       let backup;
       try { backup = JSON.parse(new TextDecoder("utf-8").decode(metadataBytes)); }
       catch (e) { throw new Error("Le fichier de métadonnées est illisible."); }
-      if (backup.product !== "221Cloud" || !backup.contents) throw new Error("Cette archive ne correspond pas au format de sauvegarde 221Cloud.");
-      const files = Array.isArray(backup.contents.files) ? backup.contents.files : [];
-      const folders = Array.isArray(backup.contents.folders) ? backup.contents.folders : [];
-      if (!files.length && !folders.length) throw new Error("Cette sauvegarde ne contient aucun fichier ni dossier à restaurer.");
-      const totalBytes = files.reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0);
-      const oversized = files.filter(file => Number(file.file_size) > MAX_FILE_SIZE_BYTES);
-      if (oversized.length) throw new Error("Certains fichiers dépassent la limite actuelle de 20 Mo par fichier. Aucun élément n'a été restauré.");
-      const storage = await api("/storage");
-      const used = Number(storage.used || 0);
-      const limit = Number(storage.limit || STORAGE_LIMIT_BYTES);
-      let existingTrashFiles = [];
-      try {
-        const trashData = await api("/storage/trash");
-        existingTrashFiles = Array.isArray(trashData.files) ? trashData.files : [];
-      } catch (trashError) {
-        existingTrashFiles = [];
+      if (backup.product !== "221Cloud" || !backup.contents || typeof backup.contents !== "object") throw new Error("Cette archive ne correspond pas au format de sauvegarde 221Cloud.");
+      if (!Array.isArray(backup.contents.files) || !Array.isArray(backup.contents.folders)) {
+        throw new Error("Les métadonnées de sauvegarde sont incomplètes : listes de fichiers ou de dossiers absentes.");
       }
+      const files = backup.contents.files;
+      const folders = backup.contents.folders;
+      if (!files.length && !folders.length) throw new Error("Cette sauvegarde ne contient aucun fichier ni dossier à restaurer.");
+      if (files.length > 10000 || folders.length > 5000) throw new Error("Cette sauvegarde contient trop d'éléments pour une restauration sûre.");
+      const folderIds = new Set();
+      for (const folder of folders) {
+        if (!folder || typeof folder !== "object" || typeof folder.id !== "string" || !folder.id.trim() ||
+            folderIds.has(folder.id) || typeof folder.name !== "string" || !folder.name.trim() ||
+            (folder.parent_id != null && typeof folder.parent_id !== "string")) {
+          throw new Error("Métadonnées de dossier invalides ou identifiants répétés. Aucun élément n'a été restauré.");
+        }
+        folderIds.add(folder.id);
+      }
+      for (const folder of folders) {
+        if (folder.parent_id != null && !folderIds.has(folder.parent_id)) {
+          throw new Error("Un dossier fait référence à un parent absent de la sauvegarde.");
+        }
+      }
+      const fileIds = new Set();
+      let totalBytes = 0;
+      for (const file of files) {
+        const size = Number(file?.file_size);
+        if (!file || typeof file !== "object" || typeof file.id !== "string" || !file.id.trim() ||
+            fileIds.has(file.id) || typeof file.file_name !== "string" || !file.file_name.trim() ||
+            !Number.isSafeInteger(size) || size < 0 || size > MAX_FILE_SIZE_BYTES ||
+            (file.folder_id != null && !folderIds.has(file.folder_id)) ||
+            (file.deleted_at != null && typeof file.deleted_at !== "string") ||
+            (file.mime_type != null && typeof file.mime_type !== "string")) {
+          throw new Error("Métadonnées de fichier invalides, taille non autorisée ou dossier introuvable. Aucun élément n'a été restauré.");
+        }
+        fileIds.add(file.id);
+        totalBytes += size;
+        if (!Number.isSafeInteger(totalBytes)) throw new Error("Le volume total indiqué dans la sauvegarde est invalide.");
+      }
+      const storage = await api("/storage");
+      if (!storage || !Array.isArray(storage.files) || !Number.isFinite(Number(storage.used)) ||
+          !Number.isFinite(Number(storage.limit)) || Number(storage.used) < 0 || Number(storage.limit) <= 0) {
+        throw new Error("Impossible de vérifier de façon fiable le stockage et son quota. Restauration annulée.");
+      }
+      const used = Number(storage.used);
+      const limit = Number(storage.limit);
+      const trashData = await api("/storage/trash");
+      if (!trashData || !Array.isArray(trashData.files)) {
+        throw new Error("Impossible de vérifier le contenu de la corbeille. Restauration annulée pour éviter de créer des doublons.");
+      }
+      const existingTrashFiles = trashData.files;
       const existingFiles = [
         ...(Array.isArray(storage.files) ? storage.files : []),
         ...existingTrashFiles
@@ -4206,6 +4239,15 @@ async function restoreStorageBackup() {
       const fileEntries = [];
       const folderMap = new Map(folders.map(folder => [folder.id, folder]));
       const pathCache = new Map();
+      for (const folder of folders) {
+        let current = folder;
+        const seen = new Set();
+        while (current) {
+          if (seen.has(current.id)) throw new Error("La structure des dossiers contient une boucle. Aucun élément n'a été restauré.");
+          seen.add(current.id);
+          current = current.parent_id ? folderMap.get(current.parent_id) : null;
+        }
+      }
       function folderPath(id, seen = new Set()) {
         if (!id || !folderMap.has(id) || seen.has(id)) return "";
         if (pathCache.has(id)) return pathCache.get(id);
@@ -4380,7 +4422,11 @@ async function restoreHostedSitesFromBackup() {
       if (backup.product !== "221Cloud" || !backup.contents) {
         throw new Error("Cette archive ne correspond pas au format 221Cloud.");
       }
-      const archivedSites = Array.isArray(backup.contents.hosted_sites) ? backup.contents.hosted_sites : [];
+      if (!Array.isArray(backup.contents.hosted_sites)) {
+        throw new Error("La liste des sites hébergés est absente ou invalide dans les métadonnées.");
+      }
+      const archivedSites = backup.contents.hosted_sites;
+      if (archivedSites.length > 100) throw new Error("Cette sauvegarde contient trop de sites pour une restauration sûre.");
       if (!archivedSites.length) {
         alert("Cette archive ne contient aucun fichier de site hébergé.");
         return;
@@ -4402,8 +4448,16 @@ async function restoreHostedSitesFromBackup() {
         .map(part => part.replace(/[\\:*?"<>|]/g, "_"))
         .join("/");
 
+      const archivedProjectIds = new Set();
       for (const archivedSite of archivedSites) {
-        const archivedFiles = Array.isArray(archivedSite.files) ? archivedSite.files : [];
+        if (!archivedSite || typeof archivedSite !== "object" ||
+            typeof archivedSite.project_id !== "string" || !archivedSite.project_id.trim() ||
+            archivedProjectIds.has(archivedSite.project_id) || !Array.isArray(archivedSite.files)) {
+          throw new Error("Métadonnées de site invalides ou projet répété dans la sauvegarde.");
+        }
+        archivedProjectIds.add(archivedSite.project_id);
+        const archivedFiles = archivedSite.files;
+        if (archivedFiles.length > 5000) throw new Error("Un site contient trop de fichiers pour une restauration sûre.");
         archivedFileCount += archivedFiles.length;
         const project = projects.find(item => item.id === archivedSite.project_id);
         if (!project) {
@@ -4423,8 +4477,18 @@ async function restoreHostedSitesFromBackup() {
         const safeFolder = safeProjectFolder(archivedSite.project_name || project.name);
         const missingFiles = [];
 
+        const archivedPaths = new Set();
         for (const archivedFile of archivedFiles) {
+          const size = Number(archivedFile?.file_size);
+          if (!archivedFile || typeof archivedFile !== "object" ||
+              typeof archivedFile.file_path !== "string" ||
+              !Number.isSafeInteger(size) || size < 0 || size > MAX_FILE_SIZE_BYTES ||
+              (archivedFile.mime_type != null && typeof archivedFile.mime_type !== "string")) {
+            throw new Error("Métadonnées de fichier de site invalides ou taille non autorisée.");
+          }
           const filePath = safeArchivedPath(archivedFile.file_path);
+          if (archivedPaths.has(filePath)) throw new Error("Le site contient plusieurs entrées pour le même chemin : " + filePath);
+          archivedPaths.add(filePath);
           if (!filePath || filePath.startsWith("/") || filePath.split("/").some(part => !part || part === "." || part === "..")) {
             throw new Error("Chemin invalide dans la sauvegarde du site " + (project.name || "") + ".");
           }
