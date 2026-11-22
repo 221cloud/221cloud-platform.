@@ -4745,6 +4745,11 @@ async function openApplicationEditor(projectId) {
     "<p class=\"muted\">Les modifications restent dans votre espace 221Cloud. Enregistrez-les avant de quitter cette page.</p></div>" +
     "<div class=\"card\"><div class=\"section-head\"><h2>Historique des versions</h2><span class=\"muted\">Par fichier · 30 dernières versions</span></div>" +
     "<div id=\"applicationVersionHistory\"><p class=\"muted\">Chargement de l'historique...</p></div></div>" +
+    "<div class=\"card\"><div class=\"section-head\"><h2>Publication</h2><span class=\"status\" id=\"applicationPublicationBadge\">Non publiée</span></div>" +
+    "<p class=\"muted\">Publiez la dernière version enregistrée de votre application. Les publications précédentes sont conservées dans l'historique.</p>" +
+    "<div id=\"applicationPublicationStatus\" class=\"muted\">Vérification de la publication...</div>" +
+    "<p id=\"applicationPublishedUrl\"></p>" +
+    "<button id=\"publishApplicationButton\" type=\"button\" onclick=\"publishApplication()\">Publier l'application</button></div>" +
     "<div class=\"section-head\"><h2>Aperçu de l'application</h2><span class=\"muted\">Exécution isolée</span></div>" +
     "<div class=\"card\" style=\"padding:8px\"><iframe id=\"applicationPreviewFrame\" title=\"Aperçu de l'application\" sandbox=\"allow-scripts\" style=\"display:block;width:100%;min-height:420px;border:1px solid var(--border-color,#d8deea);border-radius:10px;background:white\"></iframe></div>" +
     "<div class=\"notice\">Limites : trois fichiers (index.html, style.css, script.js), 256 Ko par fichier et 1 Mo au total. L'historique conserve les 30 dernières versions de chaque fichier.</div>";
@@ -4759,8 +4764,74 @@ async function openApplicationEditor(projectId) {
     renderApplicationEditorFile();
     refreshApplicationPreview();
     status.textContent = "Fichiers chargés.";
+    await loadApplicationPublication();
   } catch (error) {
     status.textContent = error.message;
+  }
+}
+
+
+async function loadApplicationPublication() {
+  if (!applicationEditorState) return;
+  const status = document.getElementById("applicationPublicationStatus");
+  const badge = document.getElementById("applicationPublicationBadge");
+  const link = document.getElementById("applicationPublishedUrl");
+  const button = document.getElementById("publishApplicationButton");
+  if (status) status.textContent = "Vérification de la publication...";
+  try {
+    const data = await api("/projects/" + encodeURIComponent(applicationEditorState.projectId) + "/application-publication");
+    const publication = data.publication;
+    if (!publication) {
+      if (badge) badge.textContent = "Non publiée";
+      if (status) status.textContent = "Aucune version n'est actuellement en ligne.";
+      if (link) link.innerHTML = "";
+      if (button) button.textContent = "Publier l'application";
+      return;
+    }
+    if (badge) badge.textContent = "En ligne";
+    if (status) status.textContent = "Version publiée : " + Number(publication.version_number || 1) +
+      " · " + formatDate(publication.published_at || publication.updated_at);
+    if (link) link.innerHTML = '<a href="' + escapeHTML(publication.url) + '" target="_blank" rel="noopener noreferrer">' +
+      escapeHTML(publication.url) + '</a>';
+    if (button) button.textContent = "Publier une nouvelle version";
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function publishApplication() {
+  if (!applicationEditorState) return;
+  const editor = document.getElementById("applicationCodeEditor");
+  if (editor) applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
+  const changedFiles = ["index.html", "style.css", "script.js"].filter(fileName =>
+    applicationEditorState.files[fileName] !== applicationEditorState.savedFiles[fileName]
+  );
+  if (changedFiles.length) {
+    alert("Enregistrez d'abord vos modifications avant de publier. Fichiers modifiés : " + changedFiles.join(", "));
+    return;
+  }
+  const confirmed = confirm("Publier la dernière version enregistrée de cette application ? Si elle est déjà en ligne, la nouvelle version remplacera la version active. Les versions publiées précédentes resteront conservées.");
+  if (!confirmed) return;
+  const button = document.getElementById("publishApplicationButton");
+  const status = document.getElementById("applicationPublicationStatus");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Publication...";
+  }
+  if (status) status.textContent = "Préparation de la publication...";
+  try {
+    const result = await api("/projects/" + encodeURIComponent(applicationEditorState.projectId) + "/application-publication", {
+      method: "POST",
+      body: JSON.stringify({})
+    });
+    if (status) status.textContent = result.message + " · Version " + Number(result.publication.version_number);
+    await loadApplicationPublication();
+    if (status && result.message) status.textContent = result.message + " · Version " + Number(result.publication.version_number);
+    alert("Application publiée avec succès. Son adresse publique est affichée dans la section Publication.");
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 
