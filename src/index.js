@@ -1239,13 +1239,20 @@ if (path.startsWith("/api/admin/subscriptions/") && request.method === "GET") {
        id,
        plan,
        status,
+       CASE
+         WHEN LOWER(status) = 'active'
+           AND expires_at IS NOT NULL
+           AND datetime(expires_at) <= CURRENT_TIMESTAMP
+         THEN 'expired'
+         ELSE LOWER(status)
+       END AS effective_status,
        started_at,
        expires_at,
        auto_renew,
        created_at
      FROM subscriptions
      WHERE user_id = ?
-     ORDER BY created_at DESC
+     ORDER BY datetime(created_at) DESC, id DESC
      LIMIT 100`
   ).bind(userId).all();
 
