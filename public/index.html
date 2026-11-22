@@ -1347,9 +1347,62 @@ async function renderAdmin() {
       active: "Actif",
       suspended: "Suspendu"
     };
-    auditContainer.innerHTML = auditEvents.length
-      ? `
-        <p class="muted">${auditEvents.length} dernière(s) action(s) enregistrée(s).</p>
+    const auditAdmins = [...new Set(auditEvents.map(item => item.actor_email).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    auditContainer.innerHTML = `
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px">
+        <label>
+          <span class="muted">Rechercher</span>
+          <input id="adminAuditSearch" type="search" placeholder="Administrateur, compte, action..." style="width:100%;margin-top:6px">
+        </label>
+        <label>
+          <span class="muted">Type d’action</span>
+          <select id="adminAuditActionFilter" style="width:100%;margin-top:6px">
+            <option value="">Toutes les actions</option>
+            <option value="role_changed">Changement de rôle</option>
+            <option value="status_changed">Changement de statut</option>
+          </select>
+        </label>
+        <label>
+          <span class="muted">Administrateur</span>
+          <select id="adminAuditAdminFilter" style="width:100%;margin-top:6px">
+            <option value="">Tous les administrateurs</option>
+            ${auditAdmins.map(email => `<option value="${escapeHTML(email)}">${escapeHTML(email)}</option>`).join("")}
+          </select>
+        </label>
+      </div>
+      <div id="adminAuditResults"></div>
+    `;
+    const auditSearch = document.getElementById("adminAuditSearch");
+    const auditActionFilter = document.getElementById("adminAuditActionFilter");
+    const auditAdminFilter = document.getElementById("adminAuditAdminFilter");
+    const auditResults = document.getElementById("adminAuditResults");
+
+    function renderAdminAuditEvents() {
+      const query = auditSearch.value.trim().toLowerCase();
+      const action = auditActionFilter.value;
+      const admin = auditAdminFilter.value;
+      const filteredEvents = auditEvents.filter(item => {
+        const searchable = [
+          item.actor_email, item.target_email, item.action,
+          auditActionNames[item.action], auditValueNames[item.old_value],
+          auditValueNames[item.new_value]
+        ].filter(Boolean).join(" ").toLowerCase();
+        return (!query || searchable.includes(query))
+          && (!action || item.action === action)
+          && (!admin || item.actor_email === admin);
+      });
+
+      if (!auditEvents.length) {
+        auditResults.innerHTML = '<p class="muted">Aucune action administrative enregistrée pour le moment. Les prochaines modifications de rôle ou de statut apparaîtront ici.</p>';
+        return;
+      }
+      if (!filteredEvents.length) {
+        auditResults.innerHTML = '<p class="muted">Aucune action ne correspond à ces critères.</p>';
+        return;
+      }
+
+      auditResults.innerHTML = `
+        <p class="muted">${filteredEvents.length} action(s) affichée(s) sur ${auditEvents.length}.</p>
         <div style="overflow-x:auto">
           <table style="width:100%;border-collapse:collapse">
             <thead>
@@ -1362,7 +1415,7 @@ async function renderAdmin() {
               </tr>
             </thead>
             <tbody>
-              ${auditEvents.map(item => `
+              ${filteredEvents.map(item => `
                 <tr>
                   <td style="padding:12px">${escapeHTML(item.created_at ? formatDate(item.created_at) : "—")}</td>
                   <td style="padding:12px">${escapeHTML(item.actor_email || "—")}</td>
@@ -1374,8 +1427,12 @@ async function renderAdmin() {
             </tbody>
           </table>
         </div>
-      `
-      : '<p class="muted">Aucune action administrative enregistrée pour le moment. Les prochaines modifications de rôle ou de statut apparaîtront ici.</p>';
+      `;
+    }
+    auditSearch.addEventListener("input", renderAdminAuditEvents);
+    auditActionFilter.addEventListener("change", renderAdminAuditEvents);
+    auditAdminFilter.addEventListener("change", renderAdminAuditEvents);
+    renderAdminAuditEvents();
 
     const subscriptions = subscriptionsData.subscriptions || [];
     const subscriptionSummary = subscriptionsData.summary || {};
