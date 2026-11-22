@@ -4743,9 +4743,11 @@ async function openApplicationEditor(projectId) {
     "<div class=\"item-actions\" style=\"margin-top:12px\"><button id=\"saveApplicationFilesButton\" type=\"button\" onclick=\"saveApplicationFiles()\">Enregistrer tous les fichiers</button>" +
     "<button class=\"secondary\" type=\"button\" onclick=\"refreshApplicationPreview()\">Actualiser l'aperçu</button><span id=\"applicationSaveStatus\" class=\"muted\" aria-live=\"polite\"></span></div>" +
     "<p class=\"muted\">Les modifications restent dans votre espace 221Cloud. Enregistrez-les avant de quitter cette page.</p></div>" +
+    "<div class=\"card\"><div class=\"section-head\"><h2>Historique des versions</h2><span class=\"muted\">Par fichier · 30 dernières versions</span></div>" +
+    "<div id=\"applicationVersionHistory\"><p class=\"muted\">Chargement de l'historique...</p></div></div>" +
     "<div class=\"section-head\"><h2>Aperçu de l'application</h2><span class=\"muted\">Exécution isolée</span></div>" +
     "<div class=\"card\" style=\"padding:8px\"><iframe id=\"applicationPreviewFrame\" title=\"Aperçu de l'application\" sandbox=\"allow-scripts\" style=\"display:block;width:100%;min-height:420px;border:1px solid var(--border-color,#d8deea);border-radius:10px;background:white\"></iframe></div>" +
-    "<div class=\"notice\">Limites initiales : trois fichiers (index.html, style.css, script.js), 256 Ko par fichier et 1 Mo au total. Les versions et la publication seront ajoutées dans les prochaines étapes.</div>";
+    "<div class=\"notice\">Limites : trois fichiers (index.html, style.css, script.js), 256 Ko par fichier et 1 Mo au total. L'historique conserve les 30 dernières versions de chaque fichier.</div>";
 
   const status = document.getElementById("applicationSaveStatus");
   status.textContent = "Chargement des fichiers...";
@@ -4753,7 +4755,7 @@ async function openApplicationEditor(projectId) {
     const data = await api("/projects/" + encodeURIComponent(projectId) + "/application-files");
     const files = {};
     (data.files || []).forEach(file => { files[file.file_name] = file.content || ""; });
-    applicationEditorState = { projectId: projectId, files: files, activeFile: "index.html" };
+    applicationEditorState = { projectId: projectId, files: files, savedFiles: { ...files }, activeFile: "index.html" };
     renderApplicationEditorFile();
     refreshApplicationPreview();
     status.textContent = "Fichiers chargés.";
@@ -4773,6 +4775,7 @@ function renderApplicationEditorFile() {
     "\" onclick=\"selectApplicationEditorFile('" + name + "')\">" + name + "</button>"
   ).join("");
   editor.value = applicationEditorState.files[applicationEditorState.activeFile] || "";
+  loadApplicationFileVersions();
 }
 
 function selectApplicationEditorFile(fileName) {
@@ -4789,19 +4792,28 @@ async function saveApplicationFiles() {
   const button = document.getElementById("saveApplicationFilesButton");
   const status = document.getElementById("applicationSaveStatus");
   if (editor) applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
+  const changedFiles = ["index.html", "style.css", "script.js"].filter(fileName =>
+    applicationEditorState.files[fileName] !== applicationEditorState.savedFiles[fileName]
+  );
+  if (!changedFiles.length) {
+    if (status) status.textContent = "Aucune modification à enregistrer.";
+    return;
+  }
   if (button) {
     button.disabled = true;
     button.textContent = "Enregistrement...";
   }
-  if (status) status.textContent = "Sauvegarde en cours...";
+  if (status) status.textContent = "Sauvegarde et création des versions...";
   try {
-    for (const fileName of ["index.html", "style.css", "script.js"]) {
+    for (const fileName of changedFiles) {
       await api("/projects/" + encodeURIComponent(applicationEditorState.projectId) + "/application-files/" + encodeURIComponent(fileName), {
         method: "PUT",
         body: JSON.stringify({ content: applicationEditorState.files[fileName] || "" })
       });
+      applicationEditorState.savedFiles[fileName] = applicationEditorState.files[fileName];
     }
-    if (status) status.textContent = "Tous les fichiers sont enregistrés.";
+    if (status) status.textContent = changedFiles.length + " fichier(s) enregistré(s). Nouvelle(s) version(s) conservée(s).";
+    await loadApplicationFileVersions();
   } catch (error) {
     if (status) status.textContent = error.message;
   } finally {
@@ -4809,6 +4821,59 @@ async function saveApplicationFiles() {
       button.disabled = false;
       button.textContent = "Enregistrer tous les fichiers";
     }
+  }
+}
+
+async function loadApplicationFileVersions() {
+  if (!applicationEditorState) return;
+  const container = document.getElementById("applicationVersionHistory");
+  if (!container) return;
+  const fileName = applicationEditorState.activeFile;
+  container.innerHTML = "<p class=\"muted\">Chargement de l'historique de " + escapeHTML(fileName) + "...</p>";
+  try {
+    const data = await api("/projects/" + encodeURIComponent(applicationEditorState.projectId) +
+      "/application-files/" + encodeURIComponent(fileName) + "/versions");
+    if (!applicationEditorState || applicationEditorState.activeFile !== fileName) return;
+    const versions = Array.isArray(data.versions) ? data.versions : [];
+    if (!versions.length) {
+      container.innerHTML = "<p class=\"muted\">Aucune version enregistrée pour ce fichier.</p>";
+      return;
+    }
+    container.innerHTML = "<p class=\"muted\">Historique de " + escapeHTML(fileName) + "</p>" +
+      versions.map(version =>
+        "<div class=\"item-card\"><div class=\"storage-file-heading\"><div class=\"storage-file-details\">" +
+        "<strong>Version " + escapeHTML(String(version.version_number)) + "</strong>" +
+        "<div class=\"muted\">" + escapeHTML(formatDate(version.created_at)) + " · " +
+        Math.max(0, Math.ceil(Number(version.size || 0) / 1024)) + " Ko</div></div>" +
+        "<button class=\"secondary\" type=\"button\" onclick=\"restoreApplicationFileVersion('" +
+        escapeHTML(version.id) + "', " + Number(version.version_number) + ")\">Restaurer</button></div></div>"
+      ).join("");
+  } catch (error) {
+    if (applicationEditorState && applicationEditorState.activeFile === fileName) {
+      container.innerHTML = "<p class=\"error-text\">" + escapeHTML(error.message) + "</p>";
+    }
+  }
+}
+
+async function restoreApplicationFileVersion(versionId, versionNumber) {
+  if (!applicationEditorState) return;
+  const fileName = applicationEditorState.activeFile;
+  if (!confirm("Restaurer la version " + versionNumber + " de " + fileName + " ? Le contenu actuel de ce fichier dans l'éditeur sera remplacé. La version actuelle enregistrée sera conservée dans l'historique.")) return;
+  const status = document.getElementById("applicationSaveStatus");
+  if (status) status.textContent = "Restauration en cours...";
+  try {
+    const data = await api("/projects/" + encodeURIComponent(applicationEditorState.projectId) +
+      "/application-files/" + encodeURIComponent(fileName) + "/restore", {
+        method: "POST",
+        body: JSON.stringify({ version_id: versionId })
+      });
+    applicationEditorState.files[fileName] = data.file.content || "";
+    applicationEditorState.savedFiles[fileName] = data.file.content || "";
+    renderApplicationEditorFile();
+    refreshApplicationPreview();
+    if (status) status.textContent = "Version " + versionNumber + " restaurée. Une nouvelle version a été créée.";
+  } catch (error) {
+    if (status) status.textContent = error.message;
   }
 }
 
