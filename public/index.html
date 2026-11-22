@@ -655,6 +655,18 @@ async function api(path, options = {}) {
   try { data = await response.json(); } catch(e) {}
 
   if (!response.ok) {
+    if (
+      response.status === 401 &&
+      currentUser &&
+      !["/login", "/register", "/logout"].includes(path)
+    ) {
+      currentUser = null;
+      document.getElementById("appScreen").classList.add("hidden");
+      document.getElementById("authScreen").classList.remove("hidden");
+      showAuthForm("login");
+      showMessage("Votre session a expiré ou n'est plus valide. Connectez-vous à nouveau.");
+    }
+
     let errorMessage = data.error || data.message || "Une erreur est survenue.";
 
     if (data.storage_status) {
@@ -960,11 +972,16 @@ async function login() {
 async function logout() {
   try {
     await api("/logout", {method:"POST",body:"{}"});
-  } catch(error) {}
+  } catch(error) {
+    alert("La déconnexion n'a pas pu être confirmée. Vérifiez votre connexion puis réessayez. Votre écran reste ouvert pour éviter de vous déconnecter uniquement en apparence.");
+    return;
+  }
+
   currentUser = null;
   document.getElementById("appScreen").classList.add("hidden");
   document.getElementById("authScreen").classList.remove("hidden");
   showAuthForm("login");
+  showMessage("Vous êtes déconnecté.", "success");
 }
 
 async function checkSession() {
