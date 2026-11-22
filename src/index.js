@@ -4625,7 +4625,7 @@ const used = Number(usage?.used || 0);
 
         const fileId = decodeURIComponent(backupDownloadMatch[1]);
         const file = await env.DB.prepare(
-          `SELECT id, file_name, mime_type, storage_key, b2_file_id
+          `SELECT id, file_name, file_size, mime_type, storage_key, b2_file_id, content_sha1
            FROM cloud_files
            WHERE id = ? AND user_id = ?
            LIMIT 1`
@@ -4645,12 +4645,30 @@ const used = Number(usage?.used || 0);
           return json({ error: "Impossible de récupérer le fichier " + safeFileName(file.file_name) + "." }, 502);
         }
 
+        const downloadedBytes = new Uint8Array(await downloadResponse.arrayBuffer());
+        if (downloadedBytes.length !== Number(file.file_size || 0)) {
+          console.error("INTEGRITÉ SAUVEGARDE STOCKAGE : taille incohérente", {
+            fileId: file.id,
+            expected: Number(file.file_size || 0),
+            actual: downloadedBytes.length
+          });
+          return json({ error: "Le fichier récupéré pour la sauvegarde est incomplet ou altéré." }, 502);
+        }
+        if (file.content_sha1) {
+          const actualDigest = await crypto.subtle.digest("SHA-1", downloadedBytes);
+          const actualSha1 = toHex(actualDigest);
+          if (actualSha1 !== String(file.content_sha1).toLowerCase()) {
+            console.error("INTEGRITÉ SAUVEGARDE STOCKAGE : empreinte SHA-1 incorrecte", { fileId: file.id });
+            return json({ error: "L'intégrité du fichier n'a pas pu être vérifiée pour la sauvegarde." }, 502);
+          }
+        }
+
         const headers = new Headers();
         headers.set("Content-Type", file.mime_type || "application/octet-stream");
         headers.set("Content-Disposition", "attachment; filename*=UTF-8''" + encodeURIComponent(safeFileName(file.file_name)));
         headers.set("Cache-Control", "private, no-store");
         headers.set("X-Content-Type-Options", "nosniff");
-        return new Response(downloadResponse.body, { status: 200, headers });
+        return new Response(downloadedBytes, { status: 200, headers });
       } catch (error) {
         console.error("ERREUR SAUVEGARDE FICHIER STOCKAGE:", error);
         return json({ error: "Impossible de récupérer un fichier pour la sauvegarde." }, 500);
@@ -4706,13 +4724,23 @@ const used = Number(usage?.used || 0);
           return json({ error: "Impossible de récupérer le fichier publié " + safeFileName(file.file_path) + "." }, 502);
         }
 
+        const downloadedBytes = new Uint8Array(await downloadResponse.arrayBuffer());
+        if (downloadedBytes.length !== Number(file.file_size || 0)) {
+          console.error("INTEGRITÉ SAUVEGARDE SITE : taille incohérente", {
+            fileId: file.id,
+            expected: Number(file.file_size || 0),
+            actual: downloadedBytes.length
+          });
+          return json({ error: "Le fichier du site récupéré pour la sauvegarde est incomplet ou altéré." }, 502);
+        }
+
         const headers = new Headers();
         headers.set("Content-Type", file.mime_type || "application/octet-stream");
         headers.set("Content-Disposition", "attachment; filename*=UTF-8''" + encodeURIComponent(safeFileName(file.file_path.split("/").pop())));
         headers.set("Cache-Control", "private, no-store");
         headers.set("X-Content-Type-Options", "nosniff");
         headers.set("X-File-Size", String(file.file_size || 0));
-        return new Response(downloadResponse.body, { status: 200, headers });
+        return new Response(downloadedBytes, { status: 200, headers });
       } catch (error) {
         console.error("ERREUR SAUVEGARDE FICHIER SITE:", error);
         return json({ error: "Impossible de récupérer un fichier du site pour la sauvegarde." }, 500);
