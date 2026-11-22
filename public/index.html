@@ -6198,8 +6198,8 @@ async function loadApplicationFileVersions() {
         "<strong>Version " + escapeHTML(String(version.version_number)) + "</strong>" +
         "<div class=\"muted\">" + escapeHTML(formatDate(version.created_at)) + " · " +
         Math.max(0, Math.ceil(Number(version.size || 0) / 1024)) + " Ko</div></div>" +
-        "<button class=\"secondary\" type=\"button\" onclick=\"restoreApplicationFileVersion('" +
-        escapeHTML(version.id) + "', " + Number(version.version_number) + ")\">Restaurer</button></div></div>"
+        "<button class=\"secondary\" type=\"button\" onclick=\"restoreApplicationFileVersion(" +
+        escapeJSAttribute(version.id) + ", " + Number(version.version_number) + ")\">Restaurer</button></div></div>"
       ).join("");
   } catch (error) {
     if (applicationEditorState && applicationEditorState.activeFile === fileName) {
