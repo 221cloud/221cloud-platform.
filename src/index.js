@@ -247,6 +247,54 @@ function validDatabaseName(value) {
     value.trim().length <= DATABASE_NAME_MAX;
 }
 
+async function ensureCustomerDatabaseStructureSchema(env) {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS customer_database_tables (
+      id TEXT PRIMARY KEY,
+      database_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      physical_name TEXT NOT NULL UNIQUE,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE INDEX IF NOT EXISTS idx_customer_database_tables_owner
+    ON customer_database_tables(database_id, user_id, created_at)
+  `).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS customer_database_columns (
+      id TEXT PRIMARY KEY,
+      table_id TEXT NOT NULL,
+      database_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      data_type TEXT NOT NULL,
+      physical_name TEXT NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(table_id, physical_name)
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE INDEX IF NOT EXISTS idx_customer_database_columns_table
+    ON customer_database_columns(table_id, user_id, position)
+  `).run();
+}
+
+function customerColumnSqlType(type) {
+  return ({
+    text: "TEXT",
+    number: "REAL",
+    boolean: "INTEGER",
+    date: "TEXT"
+  })[type] || null;
+}
+
+function safeInternalSqlIdentifier(value) {
+  return typeof value === "string" && /^[a-zA-Z][a-zA-Z0-9_]{0,120}$/.test(value);
+}
+
 // OUTILS DE SIGNATURE AWS S3 / BACKBLAZE B2
 
 function toHex(buffer) {
@@ -3274,6 +3322,160 @@ hosting
       }
     }
 
+    // STRUCTURE DES BASES CLIENT : TABLES ET COLONNES
+    const databaseTablesMatch = path.match(/^\/api\/databases\/([^/]+)\/tables$/);
+    const databaseColumnsMatch = path.match(/^\/api\/databases\/([^/]+)\/tables\/([^/]+)\/columns$/);
+
+    if (databaseTablesMatch || databaseColumnsMatch) {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureCustomerDatabaseStructureSchema(env);
+
+        const databaseId = decodeURIComponent(
+          (databaseTablesMatch || databaseColumnsMatch)[1]
+        );
+        const database = await env.DB.prepare(
+          "SELECT id FROM customer_databases WHERE id = ? AND user_id = ? LIMIT 1"
+        ).bind(databaseId, user.id).first();
+        if (!database) return json({ error: "Base de données introuvable." }, 404);
+
+        if (databaseTablesMatch) {
+          if (request.method === "GET") {
+            const result = await env.DB.prepare(
+              `SELECT id, name, created_at
+               FROM customer_database_tables
+               WHERE database_id = ? AND user_id = ?
+               ORDER BY created_at ASC, name COLLATE NOCASE ASC`
+            ).bind(databaseId, user.id).all();
+            return json({ tables: result.results || [] });
+          }
+
+          if (request.method !== "POST") {
+            return json({ error: "Méthode non autorisée." }, 405);
+          }
+
+          const body = await request.json();
+          const name = String(body.name || "").trim();
+          if (!validDatabaseName(name)) {
+            return json({ error: "Le nom de la table doit contenir entre 1 et 80 caractères." }, 400);
+          }
+
+          const duplicate = await env.DB.prepare(
+            "SELECT id FROM customer_database_tables WHERE database_id = ? AND user_id = ? AND name = ? COLLATE NOCASE LIMIT 1"
+          ).bind(databaseId, user.id, name).first();
+          if (duplicate) return json({ error: "Une table porte déjà ce nom dans cette base." }, 409);
+
+          const id = crypto.randomUUID();
+          const physicalName = "cdb_" + databaseId.replace(/-/g, "") + "_" + id.replace(/-/g, "");
+          if (!safeInternalSqlIdentifier(physicalName)) {
+            return json({ error: "Impossible de préparer la table." }, 500);
+          }
+
+          await env.DB.prepare(
+            `CREATE TABLE "${physicalName}" (
+              row_id TEXT PRIMARY KEY,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )`
+          ).run();
+
+          try {
+            await env.DB.prepare(
+              `INSERT INTO customer_database_tables
+               (id, database_id, user_id, name, physical_name)
+               VALUES (?, ?, ?, ?, ?)`
+            ).bind(id, databaseId, user.id, name, physicalName).run();
+          } catch (error) {
+            await env.DB.prepare(`DROP TABLE IF EXISTS "${physicalName}"`).run();
+            throw error;
+          }
+
+          return json({
+            message: "Table créée avec succès.",
+            table: { id, name, created_at: new Date().toISOString() }
+          }, 201);
+        }
+
+        if (request.method !== "GET" && request.method !== "POST") {
+          return json({ error: "Méthode non autorisée." }, 405);
+        }
+
+        const tableId = decodeURIComponent(databaseColumnsMatch[2]);
+        const table = await env.DB.prepare(
+          `SELECT id, physical_name FROM customer_database_tables
+           WHERE id = ? AND database_id = ? AND user_id = ? LIMIT 1`
+        ).bind(tableId, databaseId, user.id).first();
+        if (!table || !safeInternalSqlIdentifier(table.physical_name)) {
+          return json({ error: "Table introuvable." }, 404);
+        }
+
+        if (request.method === "GET") {
+          const result = await env.DB.prepare(
+            `SELECT id, name, data_type, position, created_at
+             FROM customer_database_columns
+             WHERE table_id = ? AND database_id = ? AND user_id = ?
+             ORDER BY position ASC, created_at ASC`
+          ).bind(tableId, databaseId, user.id).all();
+          return json({ columns: result.results || [] });
+        }
+
+        const body = await request.json();
+        const name = String(body.name || "").trim();
+        const dataType = String(body.data_type || "text").trim().toLowerCase();
+        const sqlType = customerColumnSqlType(dataType);
+        if (!validDatabaseName(name)) {
+          return json({ error: "Le nom de la colonne doit contenir entre 1 et 80 caractères." }, 400);
+        }
+        if (!sqlType) {
+          return json({ error: "Type invalide. Choisissez texte, nombre, booléen ou date." }, 400);
+        }
+
+        const columnCount = await env.DB.prepare(
+          "SELECT COUNT(*) AS total FROM customer_database_columns WHERE table_id = ? AND user_id = ?"
+        ).bind(tableId, user.id).first();
+        if (Number(columnCount?.total || 0) >= 50) {
+          return json({ error: "Une table peut contenir au maximum 50 colonnes personnalisées." }, 400);
+        }
+
+        const duplicate = await env.DB.prepare(
+          "SELECT id FROM customer_database_columns WHERE table_id = ? AND user_id = ? AND name = ? COLLATE NOCASE LIMIT 1"
+        ).bind(tableId, user.id, name).first();
+        if (duplicate) return json({ error: "Une colonne porte déjà ce nom dans cette table." }, 409);
+
+        const columnId = crypto.randomUUID();
+        const physicalColumn = "col_" + columnId.replace(/-/g, "");
+        const position = Number(columnCount?.total || 0);
+
+        await env.DB.prepare(
+          `ALTER TABLE "${table.physical_name}" ADD COLUMN "${physicalColumn}" ${sqlType}`
+        ).run();
+
+        try {
+          await env.DB.prepare(
+            `INSERT INTO customer_database_columns
+             (id, table_id, database_id, user_id, name, data_type, physical_name, position)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          ).bind(
+            columnId, tableId, databaseId, user.id, name, dataType, physicalColumn, position
+          ).run();
+        } catch (error) {
+          // La colonne ajoutée reste vide si l'enregistrement des métadonnées échoue.
+          throw error;
+        }
+
+        return json({
+          message: "Colonne ajoutée avec succès.",
+          column: {
+            id: columnId, name, data_type: dataType, position,
+            created_at: new Date().toISOString()
+          }
+        }, 201);
+      } catch (error) {
+        console.error("ERREUR STRUCTURE BASE CLIENT:", error);
+        return json({ error: "Impossible de traiter la structure de cette base de données." }, 500);
+      }
+    }
+
     // SUPPRESSION D'UNE BASE LOGIQUE
     const databaseMatch = path.match(/^\/api\/databases\/([^/]+)$/);
 
@@ -3300,6 +3502,16 @@ hosting
           return json({
             error: "Base de données introuvable."
           }, 404);
+        }
+
+        await ensureCustomerDatabaseStructureSchema(env);
+        const tableCount = await env.DB.prepare(
+          "SELECT COUNT(*) AS total FROM customer_database_tables WHERE database_id = ? AND user_id = ?"
+        ).bind(databaseId, user.id).first();
+        if (Number(tableCount?.total || 0) > 0) {
+          return json({
+            error: "Cette base contient des tables. Supprimez d'abord ses tables depuis son espace de gestion."
+          }, 409);
         }
 
         await env.DB.prepare(
