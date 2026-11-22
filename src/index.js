@@ -2028,7 +2028,7 @@ if (path === "/api/subscription" && request.method === "GET") {
         }
 
         try {
-          await env.DB.prepare(`
+          const insertResult = await env.DB.prepare(`
             INSERT INTO website_files (
               id,
               hosting_id,
@@ -2039,7 +2039,17 @@ if (path === "/api/subscription" && request.method === "GET") {
               storage_key,
               b2_file_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?
+            WHERE EXISTS (
+              SELECT 1
+              FROM deployments d
+              JOIN website_hostings h ON h.project_id = d.project_id
+              WHERE d.id = ?
+                AND d.project_id = ?
+                AND d.status = 'pending'
+                AND h.id = ?
+                AND h.user_id = ?
+            )
           `).bind(
             id,
             deployment.hosting_id,
@@ -2048,8 +2058,23 @@ if (path === "/api/subscription" && request.method === "GET") {
             file.size,
             mimeType,
             storageKey,
-            uploadedFile.fileId
+            uploadedFile.fileId,
+            deploymentId,
+            projectId,
+            deployment.hosting_id,
+            user.id
           ).run();
+
+          if (!insertResult?.meta?.changes) {
+            try {
+              await b2NativeDelete(env, uploadedFile.fileId, uploadedFile.fileName);
+            } catch (cleanupError) {
+              console.error("ERREUR NETTOYAGE FICHIER APRÈS CHANGEMENT DE STATUT:", cleanupError);
+            }
+            return json({
+              error: "Ce déploiement n'accepte plus de fichiers. Le transfert a été annulé."
+            }, 409);
+          }
 
         } catch (databaseError) {
           console.error(
@@ -2233,15 +2258,30 @@ if (path === "/api/subscription" && request.method === "GET") {
           const uploaded = await b2NativeUpload(env, newKey, bytes, file.mime_type || "application/octet-stream");
           uploadedCopies.push({ fileId: uploaded.fileId, fileName: uploaded.fileName || newKey });
           const newId = crypto.randomUUID();
-          await env.DB.prepare(`
+          const insertResult = await env.DB.prepare(`
             INSERT INTO website_files (
               id, hosting_id, deployment_id, file_path, file_size,
               mime_type, storage_key, b2_file_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            )
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?
+            WHERE EXISTS (
+              SELECT 1
+              FROM deployments d
+              JOIN website_hostings h ON h.project_id = d.project_id
+              WHERE d.id = ?
+                AND d.project_id = ?
+                AND d.status = 'pending'
+                AND h.id = ?
+                AND h.user_id = ?
+            )
           `).bind(
             newId, target.hosting_id, deploymentId, file.file_path,
-            file.file_size, file.mime_type, newKey, uploaded.fileId
+            file.file_size, file.mime_type, newKey, uploaded.fileId,
+            deploymentId, projectId, target.hosting_id, user.id
           ).run();
+          if (!insertResult?.meta?.changes) {
+            throw new Error("Le déploiement a changé de statut pendant la restauration.");
+          }
           insertedIds.push(newId);
         }
 
