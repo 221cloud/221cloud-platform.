@@ -2193,6 +2193,8 @@ function renderCustomerDatabaseTablePage() {
     "<span class='muted' id='customerRowsPage'>Page 1</span>" +
     "<button class='secondary' id='customerRowsNext' type='button' onclick='changeCustomerDatabaseRowsPage(1)' disabled>Suivant →</button></div></div>" +
     "<div class='notice'>Chaque ligne possède un identifiant technique et une date de création gérés automatiquement par 221Cloud.</div>";
+  const pageSizeSelect = document.getElementById("customerRowsPageSize");
+  if (pageSizeSelect) pageSizeSelect.value = String(activeDatabaseStructure.rowsPageSize);
 }
 async function loadCustomerDatabaseColumns() {
   if (!activeDatabaseStructure || !activeDatabaseStructure.tableId) return;
