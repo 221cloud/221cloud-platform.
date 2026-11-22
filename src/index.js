@@ -9,6 +9,50 @@ const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 
 const MAX_UPLOAD_REQUEST_BYTES = MAX_FILE_SIZE_BYTES + 2 * 1024 * 1024;
 
+const MAX_JSON_REQUEST_BYTES = 4 * 1024 * 1024;
+
+// Lit et limite le corps JSON avant son analyse.
+// La limite de 4 Mo conserve une marge suffisante pour les imports de données.
+async function readLimitedJsonBody(request) {
+  const contentLength = Number(request.headers.get("Content-Length") || 0);
+  if (contentLength > MAX_JSON_REQUEST_BYTES) {
+    const error = new Error("La requête JSON dépasse la limite autorisée de 4 Mo.");
+    error.status = 413;
+    throw error;
+  }
+  if (!request.body) return JSON.parse("");
+
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_JSON_REQUEST_BYTES) {
+        await reader.cancel();
+        const error = new Error("La requête JSON dépasse la limite autorisée de 4 Mo.");
+        error.status = 413;
+        throw error;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return JSON.parse(new TextDecoder().decode(body));
+}
+
 // Lit les requêtes multipart avec une limite stricte avant leur analyse.
 // La limite inclut le fichier et les champs/formats multipart.
 async function readLimitedMultipartForm(request) {
@@ -1031,6 +1075,7 @@ export default {
           }
         });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR PUBLICATION APPLICATION:", error);
         return new Response("Publication temporairement indisponible.", { status: 503 });
       }
@@ -1047,6 +1092,7 @@ export default {
       try {
         await ensureProjectTrashSchema(env);
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR INITIALISATION CORBEILLE PROJETS:", error);
         return json({ error: "Impossible de vérifier le système de projets." }, 500);
       }
@@ -1231,7 +1277,7 @@ if (
     path.slice("/api/admin/users/".length)
   );
 
-  const body = await request.json();
+  const body = await readLimitedJsonBody(request);
 
   const target = await env.DB.prepare(
     `SELECT id, role, status
@@ -1320,6 +1366,7 @@ if (
         ).run();
       }
     } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
       console.error("ERREUR JOURNAL ADMINISTRATION:", error);
     }
   }
@@ -1349,6 +1396,7 @@ if (
           tables: result.results
         });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR DATABASE:", error);
         return json({
           platform: "221Cloud",
@@ -1374,7 +1422,7 @@ if (
           }, 429, { "Retry-After": "900" });
         }
 
-        const body = await request.json();
+        const body = await readLimitedJsonBody(request);
 
         const email = String(body.email || "").trim().toLowerCase();
         const password = String(body.password || "");
@@ -1457,6 +1505,7 @@ if (
         });
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR INSCRIPTION 221CLOUD:", error);
         return json({
           error: "Impossible de créer le compte."
@@ -1467,7 +1516,7 @@ if (
     // CONNEXION
     if (path === "/api/login" && request.method === "POST") {
       try {
-        const body = await request.json();
+        const body = await readLimitedJsonBody(request);
 
         const email = String(body.email || "").trim().toLowerCase();
         const password = String(body.password || "");
@@ -1528,6 +1577,7 @@ if (
         });
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR CONNEXION 221CLOUD:", error);
         return json({
           error: "Impossible de se connecter."
@@ -1547,6 +1597,7 @@ if (
         return json({ user });
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR SESSION 221CLOUD:", error);
         return json({
           error: "Impossible de vérifier la session."
@@ -1628,6 +1679,7 @@ if (path === "/api/subscription" && request.method === "GET") {
     });
 
   } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
     console.error("ERREUR ABONNEMENT 221CLOUD:", error);
     return json({
       error: "Impossible de récupérer l'abonnement."
@@ -1655,6 +1707,7 @@ if (path === "/api/subscription" && request.method === "GET") {
         });
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR LISTE PROJETS:", error);
         return json({
           error: "Impossible de charger les projets."
@@ -1728,6 +1781,7 @@ if (path === "/api/subscription" && request.method === "GET") {
         }, 201);
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR CRÉATION DÉPLOIEMENT:", error);
         return json({
           error: "Impossible de préparer le déploiement."
@@ -2013,6 +2067,7 @@ if (path === "/api/subscription" && request.method === "GET") {
         }, 201);
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error(
           "ERREUR ENVOI FICHIER DÉPLOIEMENT:",
           error
@@ -2056,6 +2111,7 @@ if (path === "/api/subscription" && request.method === "GET") {
         `).bind(deployment.hosting_id, deploymentId).all();
         return json({ files: result.results || [] });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR LISTE FICHIERS ANCIENNE VERSION:", error);
         return json({ error: "Impossible de consulter les fichiers de cette version." }, 500);
       }
@@ -2093,7 +2149,7 @@ if (path === "/api/subscription" && request.method === "GET") {
           return json({ error: "Le déploiement n'accepte plus de fichiers." }, 409);
         }
         let cloneRequest = {};
-        try { cloneRequest = await request.json(); } catch (e) {}
+        try { cloneRequest = await readLimitedJsonBody(request); } catch (error) { if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413); }
         const additionalBytes = Math.max(0, Number(cloneRequest.additional_bytes) || 0);
         const sourceDeploymentId = String(cloneRequest.source_deployment_id || target.active_deployment_id || "");
         if (!sourceDeploymentId) return json({ cloned: 0 });
@@ -2171,6 +2227,7 @@ if (path === "/api/subscription" && request.method === "GET") {
 
         return json({ cloned: insertedIds.length, bytes: cloneBytes });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR COPIE FICHIERS SITE ACTUEL:", error);
         for (const id of insertedIds) {
           try { await env.DB.prepare("DELETE FROM website_files WHERE id = ?").bind(id).run(); } catch (cleanupError) {}
@@ -2216,6 +2273,7 @@ if (path === "/api/subscription" && request.method === "GET") {
         await env.DB.prepare("DELETE FROM deployments WHERE id = ? AND status = 'pending'").bind(deploymentId).run();
         return json({ message: "Déploiement en attente annulé." });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR ANNULATION DÉPLOIEMENT:", error);
         return json({ error: "Impossible d'annuler le déploiement en attente." }, 500);
       }
@@ -2358,6 +2416,7 @@ if (path === "/api/subscription" && request.method === "GET") {
         });
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR PUBLICATION SITE:", error);
 
         return json({
@@ -2449,6 +2508,7 @@ files: websiteFiles.results || []
         });
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR CONSULTATION HÉBERGEMENT:", error);
 
         return json({
@@ -2539,6 +2599,7 @@ files: websiteFiles.results || []
         });
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR SUPPRESSION FICHIER SITE:", error);
 
         return json({
@@ -2561,7 +2622,7 @@ if (hostingFileRenameMatch && request.method === "PATCH") {
 
     const projectId = decodeURIComponent(hostingFileRenameMatch[1]);
     const fileId = decodeURIComponent(hostingFileRenameMatch[2]);
-    const body = await request.json();
+    const body = await readLimitedJsonBody(request);
 
     const newName = String(body.name || "").trim();
 
@@ -2660,6 +2721,7 @@ if (hostingFileRenameMatch && request.method === "PATCH") {
     });
 
   } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
     console.error("ERREUR RENOMMAGE FICHIER SITE:", error);
 
     return json({
@@ -2682,7 +2744,7 @@ if (hostingFileMoveMatch && request.method === "PATCH") {
 
     const projectId = decodeURIComponent(hostingFileMoveMatch[1]);
     const fileId = decodeURIComponent(hostingFileMoveMatch[2]);
-    const body = await request.json();
+    const body = await readLimitedJsonBody(request);
 
     const folder = String(body.folder || "").trim();
 
@@ -2782,6 +2844,7 @@ if (hostingFileMoveMatch && request.method === "PATCH") {
     });
 
   } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
     console.error("ERREUR DÉPLACEMENT FICHIER SITE:", error);
 
     return json({
@@ -2916,6 +2979,7 @@ if (downloadRequested) {
         );
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR AFFICHAGE SITE:", error);
 
         return new Response("Erreur lors du chargement du site.", {
@@ -2983,6 +3047,7 @@ if (downloadRequested) {
         });
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR HÉBERGEMENT PROJET:", error);
         return json({
           error: "Impossible de préparer l'hébergement."
@@ -2999,7 +3064,7 @@ if (downloadRequested) {
           return json({ error: "Vous devez être connecté." }, 401);
         }
 
-        const body = await request.json();
+        const body = await readLimitedJsonBody(request);
         const name = String(body.name || "").trim();
         const type = String(body.type || "website");
 
@@ -3086,6 +3151,7 @@ hosting
         }, 201);
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR CREATION PROJET:", error);
         return json({
           error: "Impossible de créer le projet."
@@ -3105,6 +3171,7 @@ hosting
         `).bind(user.id).all();
         return json({ projects: result.results || [] });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR CORBEILLE PROJETS:", error);
         return json({ error: "Impossible de charger la corbeille des projets." }, 500);
       }
@@ -3150,6 +3217,7 @@ hosting
         `).bind(projectId, user.id).run();
         return json({ message: "Projet restauré avec succès.", project });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR RESTAURATION PROJET:", error);
         return json({ error: "Impossible de restaurer ce projet." }, 500);
       }
@@ -3187,6 +3255,7 @@ hosting
           }
         });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR ÉTAT PUBLICATION APPLICATION:", error);
         return json({ error: "Impossible de charger l'état de publication." }, 500);
       }
@@ -3261,6 +3330,7 @@ hosting
           }
         });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR PUBLICATION APPLICATION:", error);
         return json({ error: "Impossible de publier l'application." }, 500);
       }
@@ -3359,6 +3429,7 @@ hosting
         }
         return json({ files: files.results || [] });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR FICHIERS APPLICATION:", error);
         return json({ error: "Impossible de charger les fichiers de l'application." }, 500);
       }
@@ -3380,7 +3451,7 @@ hosting
           "SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
         ).bind(projectId, user.id).first();
         if (!project) return json({ error: "Application introuvable." }, 404);
-        const body = await request.json();
+        const body = await readLimitedJsonBody(request);
         const content = typeof body.content === "string" ? body.content : null;
         if (content === null) return json({ error: "Contenu de fichier invalide." }, 400);
         const size = new TextEncoder().encode(content).length;
@@ -3407,6 +3478,7 @@ hosting
         ).bind(projectId, fileName, projectId, fileName).run();
         return json({ message: "Fichier enregistré et version conservée.", file_name: fileName, size, version_number: nextVersion });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR ENREGISTREMENT FICHIER APPLICATION:", error);
         return json({ error: "Impossible d'enregistrer ce fichier." }, 500);
       }
@@ -3433,6 +3505,7 @@ hosting
         ).bind(projectId, fileName).all();
         return json({ versions: versions.results || [] });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR HISTORIQUE VERSIONS APPLICATION:", error);
         return json({ error: "Impossible de charger l'historique de ce fichier." }, 500);
       }
@@ -3454,7 +3527,7 @@ hosting
           "SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
         ).bind(projectId, user.id).first();
         if (!project) return json({ error: "Application introuvable." }, 404);
-        const body = await request.json();
+        const body = await readLimitedJsonBody(request);
         const versionId = String(body.version_id || "");
         if (!versionId) return json({ error: "Version non indiquée." }, 400);
         const version = await env.DB.prepare(
@@ -3487,6 +3560,7 @@ hosting
           file: { file_name: fileName, content: version.content, mime_type: version.mime_type, version_number: nextVersion }
         });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR RESTAURATION VERSION APPLICATION:", error);
         return json({ error: "Impossible de restaurer cette version." }, 500);
       }
@@ -3516,7 +3590,7 @@ hosting
         }
 
         if (request.method === "PATCH") {
-          const body = await request.json();
+          const body = await readLimitedJsonBody(request);
 
           const name = body.name === undefined
             ? existing.name
@@ -3570,6 +3644,7 @@ hosting
         return json({ error: "Méthode non autorisée." }, 405);
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR GESTION PROJET:", error);
         return json({
           error: "Impossible de traiter cette opération."
@@ -3609,6 +3684,7 @@ hosting
         });
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR LISTE BASES:", error);
         return json({
           error: "Impossible de charger les bases de données."
@@ -3625,7 +3701,7 @@ hosting
           return json({ error: "Vous devez être connecté." }, 401);
         }
 
-        const body = await request.json();
+        const body = await readLimitedJsonBody(request);
         const name = String(body.name || "").trim();
 
         const projectId = body.project_id
@@ -3680,6 +3756,7 @@ hosting
         }, 201);
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR CREATION BASE:", error);
         return json({
           error: "Impossible de créer la base de données."
@@ -3707,7 +3784,7 @@ hosting
         if (!table || !safeInternalSqlIdentifier(table.physical_name)) {
           return json({ error: "Table introuvable." }, 404);
         }
-        const body = await request.json();
+        const body = await readLimitedJsonBody(request);
         if (String(body.confirm_name || "").trim() !== table.name) {
           return json({ error: "Confirmation invalide. Le nom exact de la table est requis." }, 400);
         }
@@ -3722,6 +3799,7 @@ hosting
         ]);
         return json({ message: "Table et ses données supprimées définitivement." });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR SUPPRESSION TABLE CLIENT:", error);
         return json({ error: "Impossible de supprimer cette table." }, 500);
       }
@@ -3836,7 +3914,7 @@ hosting
         }
 
         if (rowId === "import" && request.method === "POST") {
-          const body = await request.json();
+          const body = await readLimitedJsonBody(request);
           const rows = body.rows;
           if (!Array.isArray(rows) || rows.length < 1 || rows.length > 500) {
             return json({ error: "Le fichier doit contenir entre 1 et 500 lignes de données par import." }, 400);
@@ -3893,7 +3971,7 @@ hosting
         }
 
         if (!rowId && request.method === "POST") {
-          const body = await request.json();
+          const body = await readLimitedJsonBody(request);
           const checked = validateValues(body.values);
           if (checked.error) return json({ error: checked.error }, 400);
           const newRowId = crypto.randomUUID();
@@ -3907,7 +3985,7 @@ hosting
         }
 
         if (rowId && request.method === "PATCH") {
-          const body = await request.json();
+          const body = await readLimitedJsonBody(request);
           const checked = validateValues(body.values);
           if (checked.error) return json({ error: checked.error }, 400);
           const assignments = checked.entries.map(([column]) => quoteIdentifier(column.physical_name) + " = ?");
@@ -3928,6 +4006,7 @@ hosting
         }
         return json({ error: "Méthode non autorisée." }, 405);
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR DONNÉES TABLE CLIENT:", error);
         return json({ error: "Impossible de traiter les données de cette table." }, 500);
       }
@@ -3966,7 +4045,7 @@ hosting
             return json({ error: "Méthode non autorisée." }, 405);
           }
 
-          const body = await request.json();
+          const body = await readLimitedJsonBody(request);
           const name = String(body.name || "").trim();
           if (!validDatabaseName(name)) {
             return json({ error: "Le nom de la table doit contenir entre 1 et 80 caractères." }, 400);
@@ -3997,6 +4076,7 @@ hosting
                VALUES (?, ?, ?, ?, ?)`
             ).bind(id, databaseId, user.id, name, physicalName).run();
           } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
             await env.DB.prepare(`DROP TABLE IF EXISTS "${physicalName}"`).run();
             throw error;
           }
@@ -4030,7 +4110,7 @@ hosting
           return json({ columns: result.results || [] });
         }
 
-        const body = await request.json();
+        const body = await readLimitedJsonBody(request);
         const name = String(body.name || "").trim();
         const dataType = String(body.data_type || "text").trim().toLowerCase();
         const sqlType = customerColumnSqlType(dataType);
@@ -4070,6 +4150,7 @@ hosting
             columnId, tableId, databaseId, user.id, name, dataType, physicalColumn, position
           ).run();
         } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
           // La colonne ajoutée reste vide si l'enregistrement des métadonnées échoue.
           throw error;
         }
@@ -4082,6 +4163,7 @@ hosting
           }
         }, 201);
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR STRUCTURE BASE CLIENT:", error);
         return json({ error: "Impossible de traiter la structure de cette base de données." }, 500);
       }
@@ -4134,6 +4216,7 @@ hosting
         });
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR SUPPRESSION BASE:", error);
         return json({
           error: "Impossible de supprimer la base de données."
@@ -4148,7 +4231,7 @@ hosting
         const user = await currentUser(request, env);
         if (!user) return json({ error: "Vous devez être connecté." }, 401);
         await ensureStorageFoldersSchema(env);
-        const body = await request.json();
+        const body = await readLimitedJsonBody(request);
         const name = String(body.name || "").trim();
         const parentId = String(body.parent_id || "").trim() || null;
         if (!name || name.length > 80 || name.includes("/") || name.includes("\\") || /[\u0000-\u001F\u007F]/.test(name) || name === "." || name === "..") return json({ error: "Nom de dossier invalide." }, 400);
@@ -4162,6 +4245,7 @@ hosting
         await env.DB.prepare("INSERT INTO storage_folders (id, user_id, name, parent_id) VALUES (?, ?, ?, ?)").bind(id, user.id, name, parentId).run();
         return json({ message: "Dossier créé avec succès.", folder: { id, name, parent_id: parentId } }, 201);
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR CRÉATION DOSSIER:", error);
         return json({ error: "Impossible de créer le dossier." }, 500);
       }
@@ -4184,7 +4268,7 @@ hosting
         if (!folder) return json({ error: "Dossier introuvable." }, 404);
 
         if (action === "rename") {
-          const body = await request.json();
+          const body = await readLimitedJsonBody(request);
           const name = String(body.name || "").trim();
           if (!name || name.length > 80 || name.includes("/") || name.includes("\\") || /[\u0000-\u001F\u007F]/.test(name) || name === "." || name === "..") {
             return json({ error: "Nom de dossier invalide." }, 400);
@@ -4211,6 +4295,7 @@ hosting
         ).bind(folderId, user.id).run();
         return json({ message: "Dossier supprimé avec succès." });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR GESTION DOSSIER STOCKAGE:", error);
         return json({ error: "Impossible de modifier ce dossier." }, 500);
       }
@@ -4225,7 +4310,7 @@ hosting
         if (!user) return json({ error: "Vous devez être connecté." }, 401);
         await ensureStorageFoldersSchema(env);
         const fileId = decodeURIComponent(storageMoveMatch[1]);
-        const body = await request.json();
+        const body = await readLimitedJsonBody(request);
         const folderId = String(body.folder_id || "").trim() || null;
         const file = await env.DB.prepare("SELECT id, file_name, file_size, folder_id FROM cloud_files WHERE id = ? AND user_id = ? AND deleted_at IS NULL LIMIT 1").bind(fileId, user.id).first();
         if (!file) return json({ error: "Fichier introuvable." }, 404);
@@ -4248,6 +4333,7 @@ hosting
         await recordStorageActivity(env, user.id, "move", file, "De : " + sourceName + " → Vers : " + destinationName);
         return json({ message: "Fichier déplacé avec succès.", folder_id: folderId });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR DÉPLACEMENT FICHIER:", error);
         return json({ error: "Impossible de déplacer le fichier." }, 500);
       }
@@ -4299,6 +4385,7 @@ hosting
           note: "Cette sauvegarde contient uniquement les métadonnées. Les contenus des fichiers ne sont pas inclus."
         });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR SAUVEGARDE MÉTADONNÉES STOCKAGE:", error);
         return json({ error: "Impossible de préparer la sauvegarde du stockage." }, 500);
       }
@@ -4343,6 +4430,7 @@ hosting
           pagination: { page, pageSize, total, totalPages }
         });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR HISTORIQUE STOCKAGE:", error);
         return json({ error: "Impossible de charger l'historique du stockage." }, 500);
       }
@@ -4431,6 +4519,7 @@ const used = Number(usage?.used || 0);
 });
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR LISTE STOCKAGE:", error);
         return json({
           error: "Impossible de charger le stockage."
@@ -4651,6 +4740,7 @@ const used = Number(usage?.used || 0);
         }, 201);
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR ENVOI STOCKAGE:", error);
         return json({
           error: "Impossible d'envoyer le fichier."
@@ -4721,6 +4811,7 @@ const used = Number(usage?.used || 0);
         headers.set("X-Content-Type-Options", "nosniff");
         return new Response(downloadedBytes, { status: 200, headers });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR SAUVEGARDE FICHIER STOCKAGE:", error);
         return json({ error: "Impossible de récupérer un fichier pour la sauvegarde." }, 500);
       }
@@ -4793,6 +4884,7 @@ const used = Number(usage?.used || 0);
         headers.set("X-File-Size", String(file.file_size || 0));
         return new Response(downloadedBytes, { status: 200, headers });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR SAUVEGARDE FICHIER SITE:", error);
         return json({ error: "Impossible de récupérer un fichier du site pour la sauvegarde." }, 500);
       }
@@ -4925,6 +5017,7 @@ headers.set(
         });
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR TELECHARGEMENT:", error);
         return json({
           error: "Impossible de télécharger le fichier."
@@ -4952,7 +5045,7 @@ headers.set(
 
         await ensureStorageFoldersSchema(env);
         const fileId = decodeURIComponent(storageRenameMatch[1]);
-        const body = await request.json();
+        const body = await readLimitedJsonBody(request);
         const fileName = String(body.name || "").trim();
 
         if (
@@ -4989,6 +5082,7 @@ headers.set(
         });
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR RENOMMAGE STOCKAGE:", error);
         return json({
           error: "Impossible de renommer le fichier."
@@ -5010,6 +5104,7 @@ headers.set(
         ).bind(user.id).all();
         return json({ files: result.results || [] });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR CHARGEMENT CORBEILLE:", error);
         return json({ error: "Impossible de charger la corbeille." }, 500);
       }
@@ -5047,6 +5142,7 @@ headers.set(
         await recordStorageActivity(env, user.id, "restore", file, "Restauré dans : " + (originalFolder?.name || "Racine"));
         return json({ message: "Fichier restauré avec succès." });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR RESTAURATION FICHIER:", error);
         return json({ error: "Impossible de restaurer ce fichier." }, 500);
       }
@@ -5090,6 +5186,7 @@ headers.set(
         await recordStorageActivity(env, user.id, "permanent_delete", file, "Supprimé définitivement depuis la corbeille");
         return json({ message: "Fichier supprimé définitivement." });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR SUPPRESSION DÉFINITIVE:", error);
         return json({ error: "Impossible de supprimer définitivement le fichier." }, 500);
       }
@@ -5117,6 +5214,7 @@ headers.set(
         await recordStorageActivity(env, user.id, "trash", file, "Mis à la corbeille depuis : " + (sourceFolder?.name || "Racine"));
         return json({ message: "Fichier déplacé dans la corbeille." });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR ENVOI CORBEILLE:", error);
         return json({ error: "Impossible de déplacer le fichier dans la corbeille." }, 500);
       }
@@ -5135,6 +5233,7 @@ headers.set(
 
         return json({ events: result.results || [] });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR LECTURE JOURNAL DE SÉCURITÉ:", error);
         return json({ error: "Impossible de charger le journal de sécurité." }, 500);
       }
@@ -5161,6 +5260,7 @@ headers.set(
           idle_timeout_minutes: SESSION_IDLE_MINUTES
         });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR INFORMATIONS SESSION:", error);
         return json({ error: "Impossible de charger les informations de session." }, 500);
       }
@@ -5172,7 +5272,7 @@ headers.set(
         const user = await currentUser(request, env);
         if (!user) return json({ error: "Vous devez être connecté." }, 401);
 
-        const body = await request.json();
+        const body = await readLimitedJsonBody(request);
         const currentPassword = String(body.current_password || "");
         const newPassword = String(body.new_password || "");
 
@@ -5215,6 +5315,7 @@ headers.set(
           message: "Mot de passe modifié. Les autres sessions ont été déconnectées."
         });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR CHANGEMENT MOT DE PASSE:", error);
         return json({ error: "Impossible de modifier le mot de passe." }, 500);
       }
@@ -5247,6 +5348,7 @@ headers.set(
           revoked: Number(result.meta?.changes || 0)
         });
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR RÉVOCATION DES SESSIONS:", error);
         return json({ error: "Impossible de déconnecter les autres sessions." }, 500);
       }
@@ -5278,6 +5380,7 @@ headers.set(
         );
 
       } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR DECONNEXION 221CLOUD:", error);
         return json({
           error: "Impossible de se déconnecter."
