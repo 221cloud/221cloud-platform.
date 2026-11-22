@@ -839,7 +839,10 @@ export default {
             "Content-Type": contentType,
             "Cache-Control": "no-cache",
             "X-Content-Type-Options": "nosniff",
-            "Referrer-Policy": "strict-origin-when-cross-origin"
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+            ...(fileName === "index.html" ? {
+              "Content-Security-Policy": "sandbox allow-scripts allow-forms; default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src *; img-src * data: blob:; style-src * 'unsafe-inline'; script-src * 'unsafe-inline' 'unsafe-eval'; font-src * data:"
+            } : {})
           }
         });
       } catch (error) {
