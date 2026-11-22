@@ -2189,6 +2189,12 @@ function renderCustomerDatabaseTablePage() {
     "<input id='customerRowsSearch' maxlength='100' placeholder='Saisir un mot ou une valeur' value='" + escapeHTML(activeDatabaseStructure.rowsSearch) + "'>" +
     "<button class='secondary' type='button' onclick='searchCustomerDatabaseRows()'>Rechercher</button>" +
     "<button class='secondary' type='button' id='customerRowsExport' onclick='exportCustomerDatabaseCsv()'>↓ Exporter en CSV</button>" +
+    "<div class='card form-card'><h3>Importer un fichier CSV</h3>" +
+    "<p class='muted'>Le fichier doit contenir une ligne d'en-tête avec les noms exacts des colonnes de cette table. Les données existantes seront conservées.</p>" +
+    "<label for='customerCsvImportFile'>Choisir un fichier CSV</label>" +
+    "<input id='customerCsvImportFile' type='file' accept='.csv,text/csv' onchange='previewCustomerDatabaseCsvImport()'>" +
+    "<div id='customerCsvImportPreview' aria-live='polite'></div>" +
+    "<button class='secondary' type='button' id='customerCsvImportButton' onclick='importCustomerDatabaseCsv()' disabled>Importer les lignes</button></div>" +
     "<div id='customerRowsList'><div class='empty'>Chargement des lignes...</div></div>" +
     "<div class='item-actions'><button class='secondary' id='customerRowsPrevious' type='button' onclick='changeCustomerDatabaseRowsPage(-1)' disabled>← Précédent</button>" +
     "<span class='muted' id='customerRowsPage'>Page 1</span>" +
@@ -2367,6 +2373,171 @@ function searchCustomerDatabaseRows() {
   activeDatabaseStructure.rowsSearch = input ? input.value.trim() : "";
   activeDatabaseStructure.rowsOffset = 0;
   loadCustomerDatabaseRows();
+}
+function parseCustomerCsvText(text) {
+  const source = String(text || "").replace(/^\\uFEFF/, "");
+  const firstLine = source.split(/\\r?\\n/, 1)[0] || "";
+  let delimiter = ",";
+  let quoted = false;
+  const counts = { ",": 0, ";": 0, "\\t": 0 };
+  for (let i = 0; i < firstLine.length; i++) {
+    const char = firstLine[i];
+    if (char === '"') {
+      if (quoted && firstLine[i + 1] === '"') i++;
+      else quoted = !quoted;
+    } else if (!quoted && Object.prototype.hasOwnProperty.call(counts, char)) {
+      counts[char]++;
+    }
+  }
+  delimiter = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+  const records = [];
+  let row = [];
+  let cell = "";
+  quoted = false;
+  for (let i = 0; i < source.length; i++) {
+    const char = source[i];
+    if (char === '"') {
+      if (quoted && source[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (!quoted && char === delimiter) {
+      row.push(cell);
+      cell = "";
+    } else if (!quoted && (char === "\\n" || char === "\\r")) {
+      if (char === "\\r" && source[i + 1] === "\\n") i++;
+      row.push(cell);
+      if (row.some(value => String(value).trim() !== "")) records.push(row);
+      row = [];
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+  if (quoted) throw new Error("Le fichier CSV contient un champ entre guillemets qui n'est pas fermé.");
+  row.push(cell);
+  if (row.some(value => String(value).trim() !== "")) records.push(row);
+  return records;
+}
+async function previewCustomerDatabaseCsvImport() {
+  if (!activeDatabaseStructure || !activeDatabaseStructure.tableId) return;
+  const input = document.getElementById("customerCsvImportFile");
+  const preview = document.getElementById("customerCsvImportPreview");
+  const button = document.getElementById("customerCsvImportButton");
+  if (button) button.disabled = true;
+  if (preview) preview.innerHTML = "";
+  activeDatabaseStructure.csvImportRows = null;
+  const file = input && input.files ? input.files[0] : null;
+  if (!file) return;
+  try {
+    if (!/\\.csv$/i.test(file.name) && file.type !== "text/csv") throw new Error("Choisissez un fichier au format .csv.");
+    if (file.size > 1024 * 1024) throw new Error("Le fichier CSV ne doit pas dépasser 1 Mo.");
+    const records = parseCustomerCsvText(await file.text());
+    if (records.length < 2) throw new Error("Le fichier doit contenir une ligne d'en-tête et au moins une ligne de données.");
+    const headers = records[0].map(value => String(value).trim());
+    if (headers.length && headers[0].toLowerCase() === "date de création") headers.shift();
+    const columns = activeDatabaseStructure.columns || [];
+    const normalizedHeaders = headers.map(value => value.toLocaleLowerCase());
+    if (new Set(normalizedHeaders).size !== normalizedHeaders.length) throw new Error("Le fichier contient des noms de colonnes en double.");
+    const columnByName = new Map(columns.map(column => [column.name.toLocaleLowerCase(), column]));
+    const missing = columns.filter(column => !normalizedHeaders.includes(column.name.toLocaleLowerCase()));
+    const unknown = headers.filter(header => !columnByName.has(header.toLocaleLowerCase()));
+    if (missing.length || unknown.length) {
+      const details = [];
+      if (missing.length) details.push("Colonnes manquantes : " + missing.map(column => column.name).join(", "));
+      if (unknown.length) details.push("Colonnes inconnues : " + unknown.join(", "));
+      throw new Error(details.join(" · ") + ". Les en-têtes doivent correspondre aux colonnes de la table.");
+    }
+    const dataRecords = records.slice(1);
+    if (dataRecords.length > 500) throw new Error("Maximum 500 lignes par import. Séparez le fichier en plusieurs parties.");
+    const importedRows = [];
+    for (let index = 0; index < dataRecords.length; index++) {
+      const cells = dataRecords[index];
+      if (cells.length > headers.length && cells.slice(headers.length).some(value => value !== "")) {
+        throw new Error("La ligne " + (index + 2) + " contient trop de valeurs.");
+      }
+      const values = {};
+      for (let h = 0; h < headers.length; h++) {
+        const column = columnByName.get(headers[h].toLocaleLowerCase());
+        const raw = String(cells[h] === undefined ? "" : cells[h]).trim();
+        if (!raw) {
+          values[column.name] = null;
+        } else if (column.data_type === "number") {
+          const number = Number(raw.replace(",", "."));
+          if (!Number.isFinite(number)) throw new Error("Valeur numérique invalide à la ligne " + (index + 2) + ", colonne « " + column.name + " ».");
+          values[column.name] = number;
+        } else if (column.data_type === "boolean") {
+          const normalized = raw.toLocaleLowerCase();
+          if (["oui", "yes", "true", "1"].includes(normalized)) values[column.name] = 1;
+          else if (["non", "no", "false", "0"].includes(normalized)) values[column.name] = 0;
+          else throw new Error("Valeur oui/non invalide à la ligne " + (index + 2) + ", colonne « " + column.name + " ».");
+        } else if (column.data_type === "date") {
+          const match = raw.match(/^(\\d{4})-(\\d{2})-(\\d{2})$/);
+          if (!match) throw new Error("Date invalide à la ligne " + (index + 2) + ". Format attendu : AAAA-MM-JJ.");
+          const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+          if (date.getUTCFullYear() !== Number(match[1]) || date.getUTCMonth() + 1 !== Number(match[2]) || date.getUTCDate() !== Number(match[3])) {
+            throw new Error("Date inexistante à la ligne " + (index + 2) + ".");
+          }
+          values[column.name] = raw;
+        } else {
+          if (raw.length > 5000) throw new Error("Texte trop long à la ligne " + (index + 2) + ", colonne « " + column.name + " ».");
+          values[column.name] = cells[h] === undefined ? "" : cells[h];
+        }
+      }
+      importedRows.push(values);
+    }
+    if (!importedRows.length) throw new Error("Aucune ligne de données à importer.");
+    activeDatabaseStructure.csvImportRows = importedRows;
+    activeDatabaseStructure.csvImportFileName = file.name;
+    if (preview) {
+      const sample = importedRows.slice(0, 5);
+      const labels = columns.map(column => column.name);
+      preview.innerHTML = "<p class='success-text'>" + importedRows.length + " ligne(s) prêtes à importer · " + labels.length + " colonne(s) reconnues.</p>" +
+        "<p class='muted'>Aperçu des " + sample.length + " premières lignes de « " + escapeHTML(file.name) + " » :</p>" +
+        "<div class='table-wrap'><table><thead><tr>" + labels.map(label => "<th>" + escapeHTML(label) + "</th>").join("") +
+        "</tr></thead><tbody>" + sample.map(item => "<tr>" + labels.map(label => "<td>" + escapeHTML(item[label] === null ? "—" : String(item[label])) + "</td>").join("") + "</tr>").join("") +
+        "</tbody></table></div>" +
+        (importedRows.length > 5 ? "<p class='muted'>+" + (importedRows.length - 5) + " autre(s) ligne(s)</p>" : "");
+    }
+    if (button) button.disabled = false;
+  } catch (error) {
+    if (preview) preview.innerHTML = "<p class='error-text'>" + escapeHTML(error.message || "Impossible de lire ce fichier CSV.") + "</p>";
+    activeDatabaseStructure.csvImportRows = null;
+  }
+}
+async function importCustomerDatabaseCsv() {
+  if (!activeDatabaseStructure || !activeDatabaseStructure.tableId || !Array.isArray(activeDatabaseStructure.csvImportRows)) return;
+  const rows = activeDatabaseStructure.csvImportRows;
+  if (!confirm("Importer " + rows.length + " ligne(s) dans cette table ? Les données déjà présentes ne seront pas modifiées.")) return;
+  const button = document.getElementById("customerCsvImportButton");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Importation...";
+  }
+  try {
+    const data = await api("/databases/" + encodeURIComponent(activeDatabaseStructure.databaseId) +
+      "/tables/" + encodeURIComponent(activeDatabaseStructure.tableId) + "/rows/import", {
+        method: "POST",
+        body: JSON.stringify({ rows: rows })
+      });
+    activeDatabaseStructure.csvImportRows = null;
+    const input = document.getElementById("customerCsvImportFile");
+    if (input) input.value = "";
+    const preview = document.getElementById("customerCsvImportPreview");
+    if (preview) preview.innerHTML = "<p class='success-text'>" + Number(data.imported || 0) + " ligne(s) importée(s) avec succès.</p>";
+    await loadCustomerDatabaseRows();
+    alert(Number(data.imported || 0) + " ligne(s) importée(s).");
+  } catch (error) {
+    const preview = document.getElementById("customerCsvImportPreview");
+    if (preview) preview.innerHTML = "<p class='error-text'>" + escapeHTML(error.message || "L'import CSV a échoué.") + "</p>";
+  } finally {
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Importer les lignes";
+    }
+  }
 }
 async function exportCustomerDatabaseCsv() {
   if (!activeDatabaseStructure || !activeDatabaseStructure.tableId) return;
