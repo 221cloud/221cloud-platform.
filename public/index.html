@@ -2161,6 +2161,7 @@ function renderCustomerDatabaseTablePage() {
   activeDatabaseStructure.rowsSearch = activeDatabaseStructure.rowsSearch || "";
   activeDatabaseStructure.rowsSortColumn = activeDatabaseStructure.rowsSortColumn || "created_at";
   activeDatabaseStructure.rowsSortDirection = activeDatabaseStructure.rowsSortDirection || "desc";
+  activeDatabaseStructure.rowsPageSize = [10, 20, 50].includes(Number(activeDatabaseStructure.rowsPageSize)) ? Number(activeDatabaseStructure.rowsPageSize) : 10;
   main.innerHTML =
     "<button class='secondary' type='button' onclick=\"openDatabaseStructure('" + escapeHTML(activeDatabaseStructure.databaseId) + "')\">← Retour aux tables</button>" +
     "<h1 class='page-title'>" + escapeHTML(activeDatabaseStructure.tableName) + "</h1>" +
@@ -2182,6 +2183,8 @@ function renderCustomerDatabaseTablePage() {
     "<div id='customerRowMessage' aria-live='polite'></div></div>" +
     "<div class='section-head'><h2>Données de la table</h2><span class='muted' id='customerRowsTotal'>Chargement...</span></div>" +
     "<div class='card'><h3>Trier les données</h3><div id='customerRowsSortControls'><p class='muted'>Chargement des options de tri...</p></div>" +
+    "<label for='customerRowsPageSize'>Lignes par page</label><select id='customerRowsPageSize' onchange='applyCustomerDatabasePageSize()'>" +
+    "<option value='10'>10 lignes</option><option value='20'>20 lignes</option><option value='50'>50 lignes</option></select>" +
     "<label for='customerRowsSearch'>Rechercher dans les données</label>" +
     "<input id='customerRowsSearch' maxlength='100' placeholder='Saisir un mot ou une valeur' value='" + escapeHTML(activeDatabaseStructure.rowsSearch) + "'>" +
     "<button class='secondary' type='button' onclick='searchCustomerDatabaseRows()'>Rechercher</button>" +
@@ -2275,8 +2278,9 @@ async function loadCustomerDatabaseRows() {
   const container = document.getElementById("customerRowsList");
   if (!container) return;
   container.innerHTML = "<div class='empty'>Chargement des lignes...</div>";
+  const pageSize = [10, 20, 50].includes(Number(activeDatabaseStructure.rowsPageSize)) ? Number(activeDatabaseStructure.rowsPageSize) : 10;
   const params = new URLSearchParams({
-    limit: "10",
+    limit: String(pageSize),
     offset: String(activeDatabaseStructure.rowsOffset || 0),
     q: activeDatabaseStructure.rowsSearch || "",
     sort: activeDatabaseStructure.rowsSortColumn || "created_at",
@@ -2337,6 +2341,14 @@ function renderCustomerDatabaseSortControls() {
   if (columnSelect) columnSelect.value = activeDatabaseStructure.rowsSortColumn || "created_at";
   if (directionSelect) directionSelect.value = activeDatabaseStructure.rowsSortDirection || "desc";
 }
+function applyCustomerDatabasePageSize() {
+  if (!activeDatabaseStructure) return;
+  const select = document.getElementById("customerRowsPageSize");
+  const value = Number(select ? select.value : 10);
+  activeDatabaseStructure.rowsPageSize = [10, 20, 50].includes(value) ? value : 10;
+  activeDatabaseStructure.rowsOffset = 0;
+  loadCustomerDatabaseRows();
+}
 function applyCustomerDatabaseSort() {
   if (!activeDatabaseStructure) return;
   const columnSelect = document.getElementById("customerRowsSortColumn");
@@ -2355,7 +2367,8 @@ function searchCustomerDatabaseRows() {
 }
 function changeCustomerDatabaseRowsPage(direction) {
   if (!activeDatabaseStructure) return;
-  activeDatabaseStructure.rowsOffset = Math.max(0, (activeDatabaseStructure.rowsOffset || 0) + direction * 10);
+  const pageSize = [10, 20, 50].includes(Number(activeDatabaseStructure.rowsPageSize)) ? Number(activeDatabaseStructure.rowsPageSize) : 10;
+  activeDatabaseStructure.rowsOffset = Math.max(0, (activeDatabaseStructure.rowsOffset || 0) + direction * pageSize);
   loadCustomerDatabaseRows();
 }
 async function editCustomerDatabaseRow(rowId) {
