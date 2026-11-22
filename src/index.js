@@ -7,6 +7,47 @@ const DATABASE_NAME_MAX = 80;
 const STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 
+const MAX_UPLOAD_REQUEST_BYTES = MAX_FILE_SIZE_BYTES + 2 * 1024 * 1024;
+
+// Lit les requêtes multipart avec une limite stricte avant leur analyse.
+// La limite inclut le fichier et les champs/formats multipart.
+async function readLimitedMultipartForm(request) {
+  const contentLength = Number(request.headers.get("Content-Length") || 0);
+  if (contentLength > MAX_UPLOAD_REQUEST_BYTES) return null;
+  if (!request.body) return null;
+
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_UPLOAD_REQUEST_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  const contentType = request.headers.get("Content-Type");
+  return new Response(body, {
+    headers: { "Content-Type": contentType }
+  }).formData();
+}
+
 function json(data, status = 200, extraHeaders = {}) {
   const headers = new Headers(extraHeaders);
   headers.set("Content-Type", "application/json; charset=utf-8");
@@ -1766,7 +1807,12 @@ if (path === "/api/subscription" && request.method === "GET") {
         }
 
         await ensureStorageFoldersSchema(env);
-        const form = await request.formData();
+        const form = await readLimitedMultipartForm(request);
+        if (!form) {
+          return json({
+            error: "La requête d'envoi dépasse la limite autorisée de 22 Mo."
+          }, 413);
+        }
         const file = form.get("file");
         const requestedFolderId = String(form.get("folder_id") || "").trim() || null;
         if (requestedFolderId) {
@@ -4415,7 +4461,12 @@ const used = Number(usage?.used || 0);
         }
 
         await ensureStorageFoldersSchema(env);
-        const form = await request.formData();
+        const form = await readLimitedMultipartForm(request);
+        if (!form) {
+          return json({
+            error: "La requête d'envoi dépasse la limite autorisée de 22 Mo."
+          }, 413);
+        }
         const file = form.get("file");
         const requestedFolderId = String(form.get("folder_id") || "").trim() || null;
 
