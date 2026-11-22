@@ -3521,8 +3521,8 @@ hosting
           ];
           for (const [fileName, content, mimeType] of starterFiles) {
             await env.DB.prepare(
-              "INSERT OR IGNORE INTO application_files (id, project_id, file_name, content, mime_type) VALUES (?, ?, ?, ?, ?)"
-            ).bind(crypto.randomUUID(), projectId, fileName, content, mimeType).run();
+              "INSERT OR IGNORE INTO application_files (id, project_id, file_name, content, mime_type) SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)"
+            ).bind(crypto.randomUUID(), projectId, fileName, content, mimeType, projectId, user.id).run();
           }
           files = await env.DB.prepare(
             "SELECT file_name, content, mime_type, created_at, updated_at FROM application_files WHERE project_id = ? ORDER BY file_name ASC"
@@ -3534,10 +3534,14 @@ hosting
           ).bind(projectId, file.file_name).first();
           if (!existingVersion) {
             await env.DB.prepare(
-              "INSERT INTO application_file_versions (id, project_id, file_name, version_number, content, mime_type) VALUES (?, ?, ?, 1, ?, ?)"
-            ).bind(crypto.randomUUID(), projectId, file.file_name, file.content || "", file.mime_type).run();
+              "INSERT INTO application_file_versions (id, project_id, file_name, version_number, content, mime_type) SELECT ?, ?, ?, 1, ?, ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)"
+            ).bind(crypto.randomUUID(), projectId, file.file_name, file.content || "", file.mime_type, projectId, user.id).run();
           }
         }
+        const stillActive = await env.DB.prepare(
+          "SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
+        ).bind(projectId, user.id).first();
+        if (!stillActive) return json({ error: "Cette application a été déplacée dans la corbeille." }, 404);
         return json({ files: files.results || [] });
       } catch (error) {
         if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
