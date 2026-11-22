@@ -3721,11 +3721,15 @@ hosting
             }, 400);
           }
 
-          await env.DB.prepare(
+          const updateResult = await env.DB.prepare(
             `UPDATE projects
              SET name = ?, type = ?
-             WHERE id = ? AND user_id = ?`
+             WHERE id = ? AND user_id = ? AND deleted_at IS NULL`
           ).bind(name, type, projectId, user.id).run();
+
+          if (!Number(updateResult?.meta?.changes || 0)) {
+            return json({ error: "Ce projet n'est plus disponible ou a été déplacé dans la corbeille." }, 404);
+          }
 
           const updated = await env.DB.prepare(
             `SELECT id, name, type, status, created_at
