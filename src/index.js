@@ -3395,22 +3395,30 @@ hosting
           SELECT ?, ?, COALESCE(MAX(version_number), 0) + 1, ?, ?, ?
           FROM application_publication_versions
           WHERE publication_id = ?
-        `).bind(versionId, publication.id, indexHtml, styleCss, scriptJs, publication.id);
+            AND EXISTS (
+              SELECT 1 FROM projects
+              WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL
+            )
+        `).bind(versionId, publication.id, indexHtml, styleCss, scriptJs, publication.id, projectId, user.id);
         const publicationWrite = isNewPublication
           ? env.DB.prepare(`
               INSERT INTO application_publications
                 (id, user_id, project_id, slug, active_version_id)
-              VALUES (?, ?, ?, ?, ?)
-            `).bind(publication.id, user.id, projectId, publication.slug, versionId)
+              SELECT ?, ?, ?, ?, ?
+              WHERE EXISTS (
+                SELECT 1 FROM projects
+                WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL
+              )
+            `).bind(publication.id, user.id, projectId, publication.slug, versionId, projectId, user.id)
           : env.DB.prepare(
-              "UPDATE application_publications SET active_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?"
-            ).bind(versionId, publication.id, user.id);
+              "UPDATE application_publications SET active_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)"
+            ).bind(versionId, publication.id, user.id, projectId, user.id);
         await env.DB.batch([versionInsert, publicationWrite]);
         const publishedVersion = await env.DB.prepare(
           "SELECT version_number FROM application_publication_versions WHERE id = ? AND publication_id = ? LIMIT 1"
         ).bind(versionId, publication.id).first();
         const versionNumber = Number(publishedVersion?.version_number || 0);
-        if (!versionNumber) throw new Error("La version publiée est introuvable après son enregistrement.");
+        if (!versionNumber) return json({ error: "Cette application a été déplacée dans la corbeille. La publication a été annulée." }, 409);
         const publishedUrl = `https://221cloud-platform.elhadjidame-sall.workers.dev/app/${publication.slug}/`;
         return json({
           message: isNewPublication ? "Application publiée avec succès." : "Nouvelle version publiée avec succès.",
@@ -3569,11 +3577,11 @@ hosting
         const nextFileVersionId = crypto.randomUUID();
         await env.DB.batch([
           env.DB.prepare(
-            "INSERT INTO application_files (id, project_id, file_name, content, mime_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) ON CONFLICT(project_id, file_name) DO UPDATE SET content = excluded.content, mime_type = excluded.mime_type, updated_at = CURRENT_TIMESTAMP"
-          ).bind(crypto.randomUUID(), projectId, fileName, content, mimeType),
+            "INSERT INTO application_files (id, project_id, file_name, content, mime_type, created_at, updated_at) SELECT ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL) ON CONFLICT(project_id, file_name) DO UPDATE SET content = excluded.content, mime_type = excluded.mime_type, updated_at = CURRENT_TIMESTAMP"
+          ).bind(crypto.randomUUID(), projectId, fileName, content, mimeType, projectId, user.id),
           env.DB.prepare(
-            "INSERT INTO application_file_versions (id, project_id, file_name, version_number, content, mime_type) SELECT ?, ?, ?, COALESCE(MAX(version_number), 0) + 1, ?, ? FROM application_file_versions WHERE project_id = ? AND file_name = ?"
-          ).bind(nextFileVersionId, projectId, fileName, content, mimeType, projectId, fileName),
+            "INSERT INTO application_file_versions (id, project_id, file_name, version_number, content, mime_type) SELECT ?, ?, ?, COALESCE(MAX(version_number), 0) + 1, ?, ? FROM application_file_versions WHERE project_id = ? AND file_name = ? AND EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)"
+          ).bind(nextFileVersionId, projectId, fileName, content, mimeType, projectId, fileName, projectId, user.id),
           env.DB.prepare(
             "DELETE FROM application_file_versions WHERE project_id = ? AND file_name = ? AND version_number NOT IN (SELECT version_number FROM application_file_versions WHERE project_id = ? AND file_name = ? ORDER BY version_number DESC LIMIT 30)"
           ).bind(projectId, fileName, projectId, fileName)
@@ -3582,6 +3590,7 @@ hosting
           "SELECT version_number FROM application_file_versions WHERE id = ? AND project_id = ? AND file_name = ? LIMIT 1"
         ).bind(nextFileVersionId, projectId, fileName).first();
         const nextVersion = Number(savedVersion?.version_number || 0);
+        if (!nextVersion) return json({ error: "Cette application a été déplacée dans la corbeille. Aucune modification n'a été enregistrée." }, 409);
         return json({ message: "Fichier enregistré et version conservée.", file_name: fileName, size, version_number: nextVersion });
       } catch (error) {
         if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
@@ -3652,10 +3661,10 @@ hosting
         await env.DB.batch([
           env.DB.prepare(
             "INSERT INTO application_files (id, project_id, file_name, content, mime_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) ON CONFLICT(project_id, file_name) DO UPDATE SET content = excluded.content, mime_type = excluded.mime_type, updated_at = CURRENT_TIMESTAMP"
-          ).bind(crypto.randomUUID(), projectId, fileName, version.content, version.mime_type),
+          ).bind(crypto.randomUUID(), projectId, fileName, version.content, version.mime_type, projectId, user.id),
           env.DB.prepare(
             "INSERT INTO application_file_versions (id, project_id, file_name, version_number, content, mime_type) SELECT ?, ?, ?, COALESCE(MAX(version_number), 0) + 1, ?, ? FROM application_file_versions WHERE project_id = ? AND file_name = ?"
-          ).bind(restoredVersionId, projectId, fileName, version.content, version.mime_type, projectId, fileName),
+          ).bind(restoredVersionId, projectId, fileName, version.content, version.mime_type, projectId, fileName, projectId, user.id),
           env.DB.prepare(
             "DELETE FROM application_file_versions WHERE project_id = ? AND file_name = ? AND version_number NOT IN (SELECT version_number FROM application_file_versions WHERE project_id = ? AND file_name = ? ORDER BY version_number DESC LIMIT 30)"
           ).bind(projectId, fileName, projectId, fileName)
@@ -3664,6 +3673,7 @@ hosting
           "SELECT version_number FROM application_file_versions WHERE id = ? AND project_id = ? AND file_name = ? LIMIT 1"
         ).bind(restoredVersionId, projectId, fileName).first();
         const nextVersion = Number(restoredVersion?.version_number || 0);
+        if (!nextVersion) return json({ error: "Cette application a été déplacée dans la corbeille. La version n'a pas été restaurée." }, 409);
         return json({
           message: "Version restaurée. Une nouvelle version a été conservée dans l'historique.",
           file: { file_name: fileName, content: version.content, mime_type: version.mime_type, version_number: nextVersion }
