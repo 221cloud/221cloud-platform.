@@ -5856,6 +5856,8 @@ async function renderSubscriptionPage() {
     };
 
     const plan = plans[subscription.plan] || plans.free;
+    const limits = data.limits || { storage_bytes: 0, projects: 0 };
+    const usage = data.usage || { storage_bytes: 0, projects: 0 };
 
     main.innerHTML = `
       <h1 class="page-title">Mon abonnement</h1>
@@ -5878,6 +5880,11 @@ async function renderSubscriptionPage() {
         </div>
         <p class="muted">Début : ${escapeHTML(subscription.started_at || "Non renseigné")}</p>
         <p class="muted">Expiration : ${escapeHTML(subscription.expires_at || "Aucune")}</p>
+        <div class="section-head">
+          <h3>Votre consommation actuelle</h3>
+        </div>
+        <p>Stockage : <strong>${formatBytes(usage.storage_bytes)}</strong> utilisé sur <strong>${formatBytes(limits.storage_bytes)}</strong></p>
+        <p>Projets : <strong>${Number(usage.projects || 0)}</strong> utilisé(s) sur <strong>${Number(limits.projects || 0)}</strong></p>
       </div>
 
       <div class="section-head">
