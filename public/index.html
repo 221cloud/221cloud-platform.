@@ -1338,7 +1338,7 @@ async function renderAdmin() {
         const data = await api("/admin/subscriptions/" + encodeURIComponent(userId));
         const user = data.user || {};
         const history = data.history || [];
-        const planNames = { free: "Free", starter: "Starter, pro: "Pro" };
+        const planNames = { free: "Free", starter: "Starter", pro: "Pro" };
         const statusNames = {
           active: "Actif",
           expired: "Expiré",
