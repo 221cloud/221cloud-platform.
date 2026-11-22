@@ -918,6 +918,33 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    // Protection CSRF : les mutations de l'API doivent provenir de la même origine.
+    // Les appels du navigateur envoient Origin; Referer sert de repli si Origin est absent.
+    if (
+      path.startsWith("/api/") &&
+      ["POST", "PUT", "PATCH", "DELETE"].includes(request.method.toUpperCase())
+    ) {
+      const originHeader = request.headers.get("Origin");
+      const refererHeader = request.headers.get("Referer");
+      let requestOrigin = null;
+
+      try {
+        if (originHeader) {
+          requestOrigin = new URL(originHeader).origin;
+        } else if (refererHeader) {
+          requestOrigin = new URL(refererHeader).origin;
+        }
+      } catch {
+        requestOrigin = null;
+      }
+
+      if (!requestOrigin || requestOrigin !== url.origin) {
+        return json({
+          error: "Requête refusée : origine non autorisée."
+        }, 403);
+      }
+    }
+
     // PUBLICATION D'APPLICATION : SERVIR UNIQUEMENT LA VERSION ACTIVE
     const publicApplicationMatch = path.match(/^\/app\/([a-z0-9-]+)(?:\/(.*))?$/);
     if (publicApplicationMatch && request.method === "GET") {
