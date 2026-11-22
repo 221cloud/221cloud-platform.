@@ -6356,7 +6356,7 @@ async function loadAccountSessionInfo() {
         : date.toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" });
     };
     container.innerHTML = `
-      <p><strong>Dernière activité enregistrée :</strong><br>${escapeHTML(formatSessionDate(result.last_activity_at))}</p>
+      <p><strong>Session vérifiée le :</strong><br>${escapeHTML(formatSessionDate(result.last_activity_at))}</p>
       <p><strong>Expiration estimée :</strong><br>${escapeHTML(formatSessionDate(result.expires_at))}</p>
       <p class="muted">La session expire après ${Number(result.idle_timeout_minutes) || 60} minutes sans activité.</p>
     `;
