@@ -3958,13 +3958,17 @@ hosting
               rowErrors.push({ row: index + 1, error: "Ligne invalide." });
               continue;
             }
-            const unknownColumns = Object.keys(source).filter(name =>
+            const sourceColumns = Object.keys(source);
+            const hasUnknownColumns = sourceColumns.some(name =>
               !columns.some(column => column.name === name)
             );
-            if (unknownColumns.length) {
+            const hasMissingColumns = columns.some(column =>
+              !Object.prototype.hasOwnProperty.call(source, column.name)
+            );
+            if (hasUnknownColumns || hasMissingColumns) {
               rowErrors.push({
                 row: index + 1,
-                error: "Une ou plusieurs colonnes du fichier CSV sont inconnues."
+                error: "Les colonnes du fichier CSV doivent correspondre exactement à celles de la table."
               });
               continue;
             }
