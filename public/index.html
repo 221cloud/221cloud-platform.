@@ -1374,6 +1374,7 @@ async function renderAdmin() {
       </div>
       <div style="margin:0 0 14px">
         <button type="button" class="secondary" id="adminAuditExport" ${auditEvents.length ? "" : "disabled"}>Exporter le journal en CSV</button>
+        <button type="button" class="secondary" id="adminAuditExportPDF">Créer un PDF</button>
       </div>
       <div id="adminAuditResults"></div>
     `;
@@ -1399,7 +1400,74 @@ async function renderAdmin() {
       });
     }
 
-    auditExportButton.addEventListener("click", () => {
+    document.getElementById("adminAuditExportPDF").addEventListener("click", () => {
+      const printWindow = window.open("", "_blank");
+      if (!printWindow) {
+        alert("Le navigateur a bloqué la fenêtre PDF. Autorisez les fenêtres surgissantes pour 221Cloud, puis réessayez.");
+        return;
+      }
+      const events = getFilteredAdminAuditEvents();
+      const generatedAt = new Date().toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short" });
+      const rows = events.map(item => {
+        const dateLabel = item.created_at ? formatDate(item.created_at) : "—";
+        return "<tr><td>" + escapeHTML(dateLabel) + "</td><td>" +
+          escapeHTML(item.actor_email || "—") + "</td><td>" +
+          escapeHTML(item.target_email || "—") + "</td><td>" +
+          escapeHTML(auditActionNames[item.action] || item.action || "—") + "</td><td>" +
+          escapeHTML((auditValueNames[item.old_value] || item.old_value || "—") + " → " + (auditValueNames[item.new_value] || item.new_value || "—")) +
+          "</td></tr>";
+      }).join("");
+      const documentHTML = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>221Cloud - Journal administratif</title>
+<style>
+  @page { size: A4 landscape; margin: 14mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; color: #172033; margin: 0; font-size: 10pt; }
+  header { border-bottom: 3px solid #397fff; padding-bottom: 12px; margin-bottom: 18px; }
+  .brand { color: #245fc2; font-size: 23pt; font-weight: 800; letter-spacing: .3px; }
+  h1 { font-size: 16pt; margin: 8px 0 4px; }
+  .meta { color: #596579; font-size: 9pt; line-height: 1.6; }
+  .summary { margin: 12px 0; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th { background: #eaf0fb; color: #1b3156; text-align: left; }
+  th, td { border: 1px solid #cbd5e1; padding: 7px; vertical-align: top; overflow-wrap: anywhere; }
+  tbody tr:nth-child(even) { background: #f7f9fc; }
+  th:nth-child(1) { width: 17%; }
+  th:nth-child(2) { width: 20%; }
+  th:nth-child(3) { width: 20%; }
+  th:nth-child(4) { width: 19%; }
+  th:nth-child(5) { width: 24%; }
+  footer { margin-top: 16px; color: #64748b; font-size: 8pt; text-align: right; }
+  @media screen { body { padding: 22px; } .print-note { margin: 12px 0; color: #245fc2; } }
+  @media print { .print-note { display: none; } tr { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">221Cloud</div>
+  <h1>Journal des actions administratives</h1>
+  <div class="meta">Document généré le ${escapeHTML(generatedAt)}<br>Type d’action : ${escapeHTML(auditActionFilter.value ? auditActionNames[auditActionFilter.value] : "Toutes")}<br>Administrateur : ${escapeHTML(auditAdminFilter.value || "Tous")}<br>Recherche : ${escapeHTML(auditSearch.value.trim() || "Aucune")}</div>
+</header>
+<div class="summary">${events.length} action(s) répertoriée(s)</div>
+<div class="print-note">Choisissez « Imprimer » puis « Enregistrer au format PDF » pour conserver ce document.</div>
+<table>
+<thead><tr><th>Date</th><th>Administrateur</th><th>Compte concerné</th><th>Action</th><th>Modification</th></tr></thead>
+<tbody>${rows || '<tr><td colspan="5">Aucune action administrative enregistrée pour ces critères.</td></tr>'}</tbody>
+</table>
+<footer>221Cloud — Journal des actions administratives</footer>
+<script>window.addEventListener("load", function () { setTimeout(function () { window.print(); }, 350); });<\/script>
+</body>
+</html>`;
+      printWindow.document.open();
+      printWindow.document.write(documentHTML);
+      printWindow.document.close();
+    });
+
+        auditExportButton.addEventListener("click", () => {
       const rows = [
         ["Date", "Administrateur", "Compte concerné", "Action", "Ancienne valeur", "Nouvelle valeur"],
         ...getFilteredAdminAuditEvents().map(item => [
