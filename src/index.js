@@ -3274,10 +3274,37 @@ hosting
           }, 403);
         }
 
-        await env.DB.prepare(`
+        // Le contrôle du quota est répété dans la même instruction que la restauration.
+        // Ainsi, deux restaurations simultanées ne peuvent pas consommer la même place.
+        const restoreResult = await env.DB.prepare(`
           UPDATE projects SET deleted_at = NULL
           WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL
-        `).bind(projectId, user.id).run();
+            AND (
+              SELECT COUNT(*) FROM projects
+              WHERE user_id = ? AND deleted_at IS NULL
+            ) < ?
+        `).bind(projectId, user.id, user.id, maxProjects).run();
+
+        if (!Number(restoreResult?.meta?.changes || 0)) {
+          const currentProject = await env.DB.prepare(`
+            SELECT id FROM projects
+            WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL
+          `).bind(projectId, user.id).first();
+          if (!currentProject) {
+            return json({ error: "Ce projet a déjà été restauré ou n'est plus disponible dans la corbeille." }, 409);
+          }
+          const latestActiveCount = await env.DB.prepare(`
+            SELECT COUNT(*) AS total FROM projects
+            WHERE user_id = ? AND deleted_at IS NULL
+          `).bind(user.id).first();
+          if (Number(latestActiveCount?.total || 0) >= maxProjects) {
+            return json({
+              error: `Votre forfait ${plan} autorise au maximum ${maxProjects} projet(s) actif(s). Libérez une place ou changez de forfait avant de restaurer ce projet.`
+            }, 403);
+          }
+          return json({ error: "La restauration n'a pas pu être effectuée. Actualisez la page puis réessayez." }, 409);
+        }
+
         return json({ message: "Projet restauré avec succès.", project });
       } catch (error) {
         if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
