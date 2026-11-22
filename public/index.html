@@ -1606,8 +1606,8 @@ async function renderAdmin() {
                       <strong>${escapeHTML(item.full_name || "—")}</strong>
                       <div class="muted">${escapeHTML(item.email || "")}</div>
                     </td>
-                    <td style="padding:12px">${escapeHTML(planNames[item.plan] || item.plan || "Aucun")}</td>
-                    <td style="padding:12px">${escapeHTML(item.status || "Aucun abonnement")}</td>
+                    <td style="padding:12px">${escapeHTML(planNames[item.effective_plan] || item.effective_plan || "Aucun")}</td>
+                    <td style="padding:12px">${escapeHTML(({ active: "Actif", expired: "Expiré", cancelled: "Annulé", canceled: "Annulé", pending: "En attente", inactive: "Inactif" })[String(item.effective_status || "").toLowerCase()] || item.effective_status || "Aucun abonnement")}</td>
                     <td style="padding:12px">${escapeHTML(item.started_at ? formatDate(item.started_at) : "—")}</td>
                     <td style="padding:12px">${escapeHTML(item.expires_at ? formatDate(item.expires_at) : "Aucune")}</td>
                     <td style="padding:12px">
@@ -1683,7 +1683,7 @@ async function renderAdmin() {
                   ${history.map(item => `
                     <tr>
                       <td style="padding:12px">${escapeHTML(planNames[item.plan] || item.plan || "—")}</td>
-                      <td style="padding:12px">${escapeHTML(statusNames[String(item.status || "").toLowerCase()] || item.status || "—")}</td>
+                      <td style="padding:12px">${escapeHTML(statusNames[String(item.effective_status || item.status || "").toLowerCase()] || item.effective_status || item.status || "—")}</td>
                       <td style="padding:12px">${escapeHTML(item.started_at ? formatDate(item.started_at) : "—")}</td>
                       <td style="padding:12px">${escapeHTML(item.expires_at ? formatDate(item.expires_at) : "Aucune")}</td>
                       <td style="padding:12px">${Number(item.auto_renew) === 1 ? "Oui" : "Non"}</td>
