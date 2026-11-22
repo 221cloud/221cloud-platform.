@@ -4229,7 +4229,7 @@ hosting
         const databaseId = decodeURIComponent(databaseMatch[1]);
 
         const existing = await env.DB.prepare(
-          `SELECT id FROM customer_databases
+          `SELECT id, name FROM customer_databases
            WHERE id = ? AND user_id = ?`
         ).bind(databaseId, user.id).first();
 
@@ -4237,6 +4237,13 @@ hosting
           return json({
             error: "Base de données introuvable."
           }, 404);
+        }
+
+        const body = await readLimitedJsonBody(request);
+        if (typeof body.confirm_name !== "string" || body.confirm_name.trim() !== existing.name) {
+          return json({
+            error: "Confirmation invalide. Le nom exact de la base est requis."
+          }, 400);
         }
 
         await ensureCustomerDatabaseStructureSchema(env);
