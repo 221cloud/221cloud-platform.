@@ -736,6 +736,28 @@ async function ensureLoginProtectionSchema(env) {
   ).run();
 }
 
+// Prépare le stockage des inscriptions en attente de vérification e-mail.
+// Cette fonction n'est pas encore appelée : aucune table n'est créée en production
+// avant l'intégration complète et l'activation contrôlée du parcours.
+async function ensureEmailVerificationSchema(env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS pending_email_verifications (
+      email TEXT PRIMARY KEY,
+      full_name TEXT,
+      password_hash TEXT NOT NULL,
+      code_hash TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_sent_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`
+  ).run();
+
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_pending_email_verifications_expires ON pending_email_verifications(expires_at)"
+  ).run();
+}
+
 async function getLoginBlock(env, keys) {
   const now = Math.floor(Date.now() / 1000);
   const rows = await env.DB.prepare(
