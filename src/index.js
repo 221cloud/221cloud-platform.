@@ -186,6 +186,27 @@ async function generateWebsiteSlug(env, projectName) {
 
   return slug;
 }
+async function generateApplicationSlug(env, projectName) {
+  const base = String(projectName || "application")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 50)
+    .replace(/-+$/g, "") || "application";
+
+  let slug = base;
+  let suffix = 2;
+  while (await env.DB.prepare(
+    "SELECT id FROM application_publications WHERE slug = ? LIMIT 1"
+  ).bind(slug).first()) {
+    slug = `${base}-${suffix}`;
+    suffix++;
+  }
+  return slug;
+}
+
 async function requireAdmin(request, env) {
   const user = await currentUser(request, env);
 
@@ -731,6 +752,35 @@ async function ensureApplicationFilesSchema(env) {
     "CREATE INDEX IF NOT EXISTS idx_application_file_versions_lookup ON application_file_versions(project_id, file_name, version_number DESC)"
   ).run();
 }
+async function ensureApplicationPublicationSchema(env) {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS application_publications (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      project_id TEXT NOT NULL UNIQUE,
+      slug TEXT NOT NULL UNIQUE,
+      active_version_id TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS application_publication_versions (
+      id TEXT PRIMARY KEY,
+      publication_id TEXT NOT NULL,
+      version_number INTEGER NOT NULL,
+      index_html TEXT NOT NULL,
+      style_css TEXT NOT NULL DEFAULT '',
+      script_js TEXT NOT NULL DEFAULT '',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(publication_id, version_number)
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_application_publication_versions ON application_publication_versions(publication_id, version_number DESC)"
+  ).run();
+}
+
 
 async function ensureProjectTrashSchema(env) {
   const columns = await env.DB.prepare("PRAGMA table_info(projects)").all();
@@ -750,6 +800,54 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
+
+    if (path === "/api/health") {
+    // PUBLICATION D'APPLICATION : SERVIR UNIQUEMENT LA VERSION ACTIVE
+    const publicApplicationMatch = path.match(/^\/app\/([a-z0-9-]+)(?:\/(.*))?$/);
+    if (publicApplicationMatch && request.method === "GET") {
+      try {
+        await ensureApplicationPublicationSchema(env);
+        const slug = publicApplicationMatch[1];
+        const requestedFile = publicApplicationMatch[2] || "";
+        if (!requestedFile) {
+          return Response.redirect(new URL(`/app/${slug}/`, url), 308);
+        }
+        const fileName = requestedFile || "index.html";
+        if (!["index.html", "style.css", "script.js"].includes(fileName)) {
+          return new Response("Fichier introuvable.", { status: 404 });
+        }
+        const publication = await env.DB.prepare(`
+          SELECT versions.index_html, versions.style_css, versions.script_js
+          FROM application_publications AS publications
+          JOIN application_publication_versions AS versions
+            ON versions.id = publications.active_version_id
+          WHERE publications.slug = ?
+          LIMIT 1
+        `).bind(slug).first();
+        if (!publication) return new Response("Application non publiée ou introuvable.", { status: 404 });
+        const content = fileName === "index.html"
+          ? publication.index_html
+          : fileName === "style.css"
+            ? publication.style_css
+            : publication.script_js;
+        const contentType = fileName === "index.html"
+          ? "text/html; charset=utf-8"
+          : fileName === "style.css"
+            ? "text/css; charset=utf-8"
+            : "text/javascript; charset=utf-8";
+        return new Response(content, {
+          headers: {
+            "Content-Type": contentType,
+            "Cache-Control": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "strict-origin-when-cross-origin"
+          }
+        });
+      } catch (error) {
+        console.error("ERREUR PUBLICATION APPLICATION:", error);
+        return new Response("Publication temporairement indisponible.", { status: 503 });
+      }
+    }
 
     if (path === "/api/health") {
       return json({
@@ -2639,6 +2737,117 @@ hosting
       } catch (error) {
         console.error("ERREUR RESTAURATION PROJET:", error);
         return json({ error: "Impossible de restaurer ce projet." }, 500);
+      }
+    }
+
+
+    // APPLICATIONS : CONSULTER L'ÉTAT DE PUBLICATION
+    const applicationPublicationMatch = path.match(/^\/api\/projects\/([^/]+)\/application-publication$/);
+    if (applicationPublicationMatch && request.method === "GET") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureApplicationPublicationSchema(env);
+        const projectId = decodeURIComponent(applicationPublicationMatch[1]);
+        const project = await env.DB.prepare(
+          "SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
+        ).bind(projectId, user.id).first();
+        if (!project) return json({ error: "Application introuvable." }, 404);
+        const publication = await env.DB.prepare(`
+          SELECT id, slug, active_version_id, created_at, updated_at
+          FROM application_publications
+          WHERE project_id = ? AND user_id = ?
+          LIMIT 1
+        `).bind(projectId, user.id).first();
+        if (!publication) return json({ publication: null });
+        const version = await env.DB.prepare(
+          "SELECT version_number, created_at FROM application_publication_versions WHERE id = ? AND publication_id = ? LIMIT 1"
+        ).bind(publication.active_version_id, publication.id).first();
+        return json({
+          publication: {
+            ...publication,
+            version_number: version?.version_number || null,
+            published_at: version?.created_at || publication.updated_at,
+            url: `https://221cloud-platform.elhadjidame-sall.workers.dev/app/${publication.slug}/`
+          }
+        });
+      } catch (error) {
+        console.error("ERREUR ÉTAT PUBLICATION APPLICATION:", error);
+        return json({ error: "Impossible de charger l'état de publication." }, 500);
+      }
+    }
+
+    // APPLICATIONS : PUBLIER UNE VERSION ENREGISTRÉE
+    if (applicationPublicationMatch && request.method === "POST") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureApplicationPublicationSchema(env);
+        await ensureApplicationFilesSchema(env);
+        const projectId = decodeURIComponent(applicationPublicationMatch[1]);
+        const project = await env.DB.prepare(
+          "SELECT id, name FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
+        ).bind(projectId, user.id).first();
+        if (!project) return json({ error: "Application introuvable." }, 404);
+        const files = await env.DB.prepare(
+          "SELECT file_name, content FROM application_files WHERE project_id = ?"
+        ).bind(projectId).all();
+        const fileMap = Object.fromEntries((files.results || []).map(file => [file.file_name, file.content || ""]));
+        if (!fileMap["index.html"] || !fileMap["index.html"].trim()) {
+          return json({ error: "Le fichier index.html est vide. Ajoutez une page avant de publier." }, 400);
+        }
+        const indexHtml = fileMap["index.html"];
+        const styleCss = fileMap["style.css"] || "";
+        const scriptJs = fileMap["script.js"] || "";
+        const totalSize = new TextEncoder().encode(indexHtml).length +
+          new TextEncoder().encode(styleCss).length +
+          new TextEncoder().encode(scriptJs).length;
+        if (totalSize > 1048576) return json({ error: "L'application dépasse la limite de publication de 1 Mo." }, 413);
+
+        let publication = await env.DB.prepare(
+          "SELECT id, slug FROM application_publications WHERE project_id = ? AND user_id = ? LIMIT 1"
+        ).bind(projectId, user.id).first();
+        const isNewPublication = !publication;
+        if (!publication) {
+          publication = {
+            id: crypto.randomUUID(),
+            slug: await generateApplicationSlug(env, project.name)
+          };
+        }
+        const latest = await env.DB.prepare(
+          "SELECT COALESCE(MAX(version_number), 0) AS latest FROM application_publication_versions WHERE publication_id = ?"
+        ).bind(publication.id).first();
+        const versionNumber = Number(latest?.latest || 0) + 1;
+        const versionId = crypto.randomUUID();
+        const versionInsert = env.DB.prepare(`
+          INSERT INTO application_publication_versions
+            (id, publication_id, version_number, index_html, style_css, script_js)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).bind(versionId, publication.id, versionNumber, indexHtml, styleCss, scriptJs);
+        const publicationWrite = isNewPublication
+          ? env.DB.prepare(`
+              INSERT INTO application_publications
+                (id, user_id, project_id, slug, active_version_id)
+              VALUES (?, ?, ?, ?, ?)
+            `).bind(publication.id, user.id, projectId, publication.slug, versionId)
+          : env.DB.prepare(
+              "UPDATE application_publications SET active_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?"
+            ).bind(versionId, publication.id, user.id);
+        await env.DB.batch([versionInsert, publicationWrite]);
+        const publishedUrl = `https://221cloud-platform.elhadjidame-sall.workers.dev/app/${publication.slug}/`;
+        return json({
+          message: isNewPublication ? "Application publiée avec succès." : "Nouvelle version publiée avec succès.",
+          publication: {
+            id: publication.id,
+            slug: publication.slug,
+            version_number: versionNumber,
+            published_at: new Date().toISOString(),
+            url: publishedUrl
+          }
+        });
+      } catch (error) {
+        console.error("ERREUR PUBLICATION APPLICATION:", error);
+        return json({ error: "Impossible de publier l'application." }, 500);
       }
     }
 
