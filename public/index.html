@@ -1868,7 +1868,7 @@ function renderRecentActivities(projects, databases, files) {
           <div class="muted">${escapeHTML(activity.type)} · ${escapeHTML(formatDate(activity.date))}</div>
         </div>
       </div>
-      <button class="secondary" onclick="showPage('${activity.page}')">Ouvrir</button>
+      <button class="secondary" onclick="showPage(${escapeJSAttribute(activity.page)})">Ouvrir</button>
     </div>
   `).join("");
 }
