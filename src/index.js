@@ -972,8 +972,34 @@ if (path === "/api/admin/subscriptions" && request.method === "GET") {
     ORDER BY u.created_at DESC
   `).all();
 
+  const subscriptions = result.results || [];
+  const summary = {
+    free: 0,
+    starter: 0,
+    pro: 0,
+    active: 0,
+    expired: 0
+  };
+
+  for (const item of subscriptions) {
+    const status = String(item.status || "").toLowerCase();
+    const plan = status === "active"
+      ? String(item.plan || "free").toLowerCase()
+      : "free";
+
+    if (Object.prototype.hasOwnProperty.call(summary, plan)) {
+      summary[plan] += 1;
+    } else {
+      summary.free += 1;
+    }
+
+    if (status === "active") summary.active += 1;
+    if (status === "expired") summary.expired += 1;
+  }
+
   return json({
-    subscriptions: result.results || []
+    subscriptions,
+    summary
   });
 }
 if (path === "/api/admin/users" && request.method === "GET") {
