@@ -1155,14 +1155,30 @@ if (path === "/api/admin/subscriptions" && request.method === "GET") {
       latest.started_at,
       latest.expires_at,
       latest.auto_renew,
-      latest.created_at AS subscription_created_at
+      latest.created_at AS subscription_created_at,
+      CASE
+        WHEN latest.id IS NULL THEN 'free'
+        WHEN LOWER(latest.status) = 'active'
+          AND (latest.expires_at IS NULL OR datetime(latest.expires_at) > CURRENT_TIMESTAMP)
+        THEN LOWER(latest.plan)
+        ELSE 'free'
+      END AS effective_plan,
+      CASE
+        WHEN LOWER(latest.status) = 'active'
+          AND latest.expires_at IS NOT NULL
+          AND datetime(latest.expires_at) <= CURRENT_TIMESTAMP
+        THEN 'expired'
+        ELSE LOWER(COALESCE(latest.status, 'inactive'))
+      END AS effective_status
     FROM users u
     LEFT JOIN subscriptions latest
       ON latest.user_id = u.id
-      AND latest.created_at = (
-        SELECT MAX(s.created_at)
+      AND latest.id = (
+        SELECT s.id
         FROM subscriptions s
         WHERE s.user_id = u.id
+        ORDER BY datetime(s.created_at) DESC, s.id DESC
+        LIMIT 1
       )
     ORDER BY u.created_at DESC
   `).all();
@@ -1177,10 +1193,8 @@ if (path === "/api/admin/subscriptions" && request.method === "GET") {
   };
 
   for (const item of subscriptions) {
-    const status = String(item.status || "").toLowerCase();
-    const plan = status === "active"
-      ? String(item.plan || "free").toLowerCase()
-      : "free";
+    const status = String(item.effective_status || "inactive").toLowerCase();
+    const plan = String(item.effective_plan || "free").toLowerCase();
 
     if (Object.prototype.hasOwnProperty.call(summary, plan)) {
       summary[plan] += 1;
@@ -1646,7 +1660,22 @@ if (path === "/api/subscription" && request.method === "GET") {
       LIMIT 50
     `).bind(user.id).all();
 
-    const subscriptionHistory = subscriptionHistoryResult.results || [];
+    const subscriptionHistory = (subscriptionHistoryResult.results || []).map(item => {
+      const expiryTime = item.expires_at ? new Date(item.expires_at).getTime() : null;
+      const isExpired = String(item.status || "").toLowerCase() === "active"
+        && expiryTime !== null
+        && Number.isFinite(expiryTime)
+        && expiryTime <= Date.now();
+      const effectiveStatus = isExpired ? "expired" : String(item.status || "inactive").toLowerCase();
+      const effectivePlan = effectiveStatus === "active"
+        ? String(item.plan || "free").toLowerCase()
+        : "free";
+      return {
+        ...item,
+        plan: effectivePlan,
+        status: effectiveStatus
+      };
+    });
     const subscription = subscriptionHistory[0] || null;
 
     if (!subscription) {
@@ -1655,9 +1684,7 @@ if (path === "/api/subscription" && request.method === "GET") {
       }, 404);
     }
 
-    const plan = subscription.status === "active"
-      ? subscription.plan
-      : "free";
+    const plan = String(subscription.plan || "free").toLowerCase();
 
     const planLimits = {
       free: { storage_bytes: 1024 * 1024 * 1024, projects: 1 },
