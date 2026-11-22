@@ -2156,9 +2156,13 @@ async function openCustomerDatabaseTable(tableId, tableName) {
 function renderCustomerDatabaseTablePage() {
   const main = document.getElementById("mainContent");
   if (!main || !activeDatabaseStructure) return;
-  main.innerHTML = "<button class='secondary' type='button' onclick=\"openDatabaseStructure('" + escapeHTML(activeDatabaseStructure.databaseId) + "')\">← Retour aux tables</button>" +
+  activeDatabaseStructure.columns = activeDatabaseStructure.columns || [];
+  activeDatabaseStructure.rowsOffset = activeDatabaseStructure.rowsOffset || 0;
+  activeDatabaseStructure.rowsSearch = activeDatabaseStructure.rowsSearch || "";
+  main.innerHTML =
+    "<button class='secondary' type='button' onclick=\"openDatabaseStructure('" + escapeHTML(activeDatabaseStructure.databaseId) + "')\">← Retour aux tables</button>" +
     "<h1 class='page-title'>" + escapeHTML(activeDatabaseStructure.tableName) + "</h1>" +
-    "<p class='page-subtitle'>Colonnes de la table · " + escapeHTML(activeDatabaseStructure.databaseName) + "</p>" +
+    "<p class='page-subtitle'>Colonnes et données · " + escapeHTML(activeDatabaseStructure.databaseName) + "</p>" +
     "<div class='card form-card'><h3>Ajouter une colonne</h3><label for='customerColumnName'>Nom de la colonne</label>" +
     "<input id='customerColumnName' maxlength='80' placeholder='Exemple : prénom'>" +
     "<label for='customerColumnType'>Type de données</label>" +
@@ -2170,7 +2174,19 @@ function renderCustomerDatabaseTablePage() {
     "<button class='danger' type='button' onclick='deleteCustomerDatabaseTable()'>Supprimer cette table</button></div>" +
     "<div class='section-head'><h2>Colonnes</h2><span class='muted' id='customerColumnsTotal'>Chargement...</span></div>" +
     "<div id='customerColumnsList'><div class='empty'>Chargement des colonnes...</div></div>" +
-    "<div class='notice'>Chaque table possède aussi un identifiant technique et une date de création gérés automatiquement par 221Cloud.</div>";
+    "<div class='card form-card'><h3>Ajouter une ligne</h3><p class='muted'>Renseignez les champs souhaités. Les champs laissés vides resteront vides.</p>" +
+    "<div id='customerRowForm'><div class='empty'>Chargement des champs...</div></div>" +
+    "<button id='customerAddRowButton' type='button' onclick='createCustomerDatabaseRow()' disabled>＋ Ajouter la ligne</button>" +
+    "<div id='customerRowMessage' aria-live='polite'></div></div>" +
+    "<div class='section-head'><h2>Données de la table</h2><span class='muted' id='customerRowsTotal'>Chargement...</span></div>" +
+    "<div class='card'><label for='customerRowsSearch'>Rechercher dans les données</label>" +
+    "<input id='customerRowsSearch' maxlength='100' placeholder='Saisir un mot ou une valeur' value='" + escapeHTML(activeDatabaseStructure.rowsSearch) + "'>" +
+    "<button class='secondary' type='button' onclick='searchCustomerDatabaseRows()'>Rechercher</button>" +
+    "<div id='customerRowsList'><div class='empty'>Chargement des lignes...</div></div>" +
+    "<div class='item-actions'><button class='secondary' id='customerRowsPrevious' type='button' onclick='changeCustomerDatabaseRowsPage(-1)' disabled>← Précédent</button>" +
+    "<span class='muted' id='customerRowsPage'>Page 1</span>" +
+    "<button class='secondary' id='customerRowsNext' type='button' onclick='changeCustomerDatabaseRowsPage(1)' disabled>Suivant →</button></div></div>" +
+    "<div class='notice'>Chaque ligne possède un identifiant technique et une date de création gérés automatiquement par 221Cloud.</div>";
 }
 async function loadCustomerDatabaseColumns() {
   if (!activeDatabaseStructure || !activeDatabaseStructure.tableId) return;
@@ -2182,21 +2198,175 @@ async function loadCustomerDatabaseColumns() {
       "/tables/" + encodeURIComponent(activeDatabaseStructure.tableId) + "/columns");
     if (!activeDatabaseStructure || !activeDatabaseStructure.tableId || !document.getElementById("customerColumnsList")) return;
     const columns = Array.isArray(data.columns) ? data.columns : [];
+    activeDatabaseStructure.columns = columns;
     const total = document.getElementById("customerColumnsTotal");
     if (total) total.textContent = columns.length + " / 50 colonne(s)";
     if (!columns.length) {
-      container.innerHTML = "<div class='empty'>Aucune colonne personnalisée. Ajoutez vos premiers champs ci-dessus.</div>";
-      return;
+      container.innerHTML = "<div class='empty'>Aucune colonne personnalisée. Ajoutez vos premiers champs ci-dessus pour commencer à enregistrer des données.</div>";
+    } else {
+      const labels = { text: "Texte", number: "Nombre", boolean: "Booléen", date: "Date" };
+      container.innerHTML = columns.map(column =>
+        "<div class='item-card'><strong>" + escapeHTML(column.name) + "</strong>" +
+        "<div class='muted'>Type : " + escapeHTML(labels[column.data_type] || column.data_type) + "</div></div>"
+      ).join("");
     }
-    const labels = { text: "Texte", number: "Nombre", boolean: "Booléen", date: "Date" };
-    container.innerHTML = columns.map(column =>
-      "<div class='item-card'><strong>" + escapeHTML(column.name) + "</strong>" +
-      "<div class='muted'>Type : " + escapeHTML(labels[column.data_type] || column.data_type) + "</div></div>"
-    ).join("");
+    renderCustomerDatabaseRowForm();
+    await loadCustomerDatabaseRows();
   } catch (error) {
     container.innerHTML = "<div class='notice error-text'>" + escapeHTML(error.message) + "</div>";
   }
 }
+function renderCustomerDatabaseRowForm() {
+  if (!activeDatabaseStructure) return;
+  const container = document.getElementById("customerRowForm");
+  const button = document.getElementById("customerAddRowButton");
+  if (!container) return;
+  const columns = activeDatabaseStructure.columns || [];
+  if (!columns.length) {
+    container.innerHTML = "<p class='muted'>Ajoutez au moins une colonne avant de créer une ligne.</p>";
+    if (button) button.disabled = true;
+    return;
+  }
+  if (button) button.disabled = false;
+  container.innerHTML = columns.map((column, index) => {
+    const id = "customerRowValue" + index;
+    let input = "";
+    if (column.data_type === "boolean") {
+      input = "<select id='" + id + "'><option value=''>Non renseigné</option><option value='1'>Oui</option><option value='0'>Non</option></select>";
+    } else {
+      const type = column.data_type === "number" ? "number" : column.data_type === "date" ? "date" : "text";
+      input = "<input id='" + id + "' type='" + type + "' " + (type === "number" ? "step='any'" : "") + " maxlength='" + (type === "text" ? "5000" : "80") + "'>";
+    }
+    return "<label for='" + id + "'>" + escapeHTML(column.name) + " · " + escapeHTML(column.data_type) + "</label>" + input;
+  }).join("");
+}
+async function createCustomerDatabaseRow() {
+  if (!activeDatabaseStructure || !activeDatabaseStructure.columns?.length) return;
+  const values = {};
+  for (let i = 0; i < activeDatabaseStructure.columns.length; i++) {
+    const column = activeDatabaseStructure.columns[i];
+    const input = document.getElementById("customerRowValue" + i);
+    if (!input || input.value === "") continue;
+    values[column.name] = column.data_type === "number" || column.data_type === "boolean" ? Number(input.value) : input.value;
+  }
+  const message = document.getElementById("customerRowMessage");
+  try {
+    await api("/databases/" + encodeURIComponent(activeDatabaseStructure.databaseId) +
+      "/tables/" + encodeURIComponent(activeDatabaseStructure.tableId) + "/rows", {
+        method: "POST", body: JSON.stringify({ values: values })
+      });
+    if (message) message.innerHTML = "<p class='success-text'>Ligne ajoutée avec succès.</p>";
+    activeDatabaseStructure.columns.forEach((column, index) => {
+      const input = document.getElementById("customerRowValue" + index);
+      if (input) input.value = "";
+    });
+    activeDatabaseStructure.rowsOffset = 0;
+    await loadCustomerDatabaseRows();
+  } catch (error) {
+    if (message) message.innerHTML = "<p class='error-text'>" + escapeHTML(error.message) + "</p>";
+  }
+}
+async function loadCustomerDatabaseRows() {
+  if (!activeDatabaseStructure || !activeDatabaseStructure.tableId) return;
+  const container = document.getElementById("customerRowsList");
+  if (!container) return;
+  container.innerHTML = "<div class='empty'>Chargement des lignes...</div>";
+  const params = new URLSearchParams({
+    limit: "10",
+    offset: String(activeDatabaseStructure.rowsOffset || 0),
+    q: activeDatabaseStructure.rowsSearch || ""
+  });
+  try {
+    const data = await api("/databases/" + encodeURIComponent(activeDatabaseStructure.databaseId) +
+      "/tables/" + encodeURIComponent(activeDatabaseStructure.tableId) + "/rows?" + params.toString());
+    if (!activeDatabaseStructure || !document.getElementById("customerRowsList")) return;
+    const rows = Array.isArray(data.rows) ? data.rows : [];
+    const total = Number(data.total || 0);
+    const offset = Number(data.offset || 0);
+    const limit = Number(data.limit || 10);
+    const totalLabel = document.getElementById("customerRowsTotal");
+    if (totalLabel) totalLabel.textContent = total + " ligne(s)";
+    if (!rows.length) {
+      container.innerHTML = "<div class='empty'>" + (activeDatabaseStructure.rowsSearch ? "Aucun résultat pour cette recherche." : "Aucune ligne pour le moment.") + "</div>";
+    } else {
+      const columns = activeDatabaseStructure.columns || [];
+      container.innerHTML = rows.map(row => {
+        const details = columns.map(column => {
+          let value = row[column.name];
+          if (column.data_type === "boolean" && value !== null && value !== undefined) value = Number(value) ? "Oui" : "Non";
+          if (value === null || value === undefined || value === "") value = "—";
+          return "<div class='muted'><strong>" + escapeHTML(column.name) + " :</strong> " + escapeHTML(String(value)) + "</div>";
+        }).join("");
+        return "<div class='item-card' data-row-id='" + escapeHTML(row.row_id) + "'><div class='muted'>Créée le : " + escapeHTML(formatDate(row.created_at)) + "</div>" +
+          details + "<div class='item-actions'><button class='secondary' type='button' onclick=\"editCustomerDatabaseRow('" + escapeHTML(row.row_id) + "')\">Modifier</button>" +
+          "<button class='danger' type='button' onclick=\"deleteCustomerDatabaseRow('" + escapeHTML(row.row_id) + "')\">Supprimer</button></div></div>";
+      }).join("");
+    }
+    const page = Math.floor(offset / limit) + 1;
+    const pageLabel = document.getElementById("customerRowsPage");
+    const previous = document.getElementById("customerRowsPrevious");
+    const next = document.getElementById("customerRowsNext");
+    if (pageLabel) pageLabel.textContent = "Page " + page + " / " + Math.max(1, Math.ceil(total / limit));
+    if (previous) previous.disabled = offset <= 0;
+    if (next) next.disabled = offset + limit >= total;
+  } catch (error) {
+    container.innerHTML = "<div class='notice error-text'>" + escapeHTML(error.message) + "</div>";
+  }
+}
+function searchCustomerDatabaseRows() {
+  if (!activeDatabaseStructure) return;
+  const input = document.getElementById("customerRowsSearch");
+  activeDatabaseStructure.rowsSearch = input ? input.value.trim() : "";
+  activeDatabaseStructure.rowsOffset = 0;
+  loadCustomerDatabaseRows();
+}
+function changeCustomerDatabaseRowsPage(direction) {
+  if (!activeDatabaseStructure) return;
+  activeDatabaseStructure.rowsOffset = Math.max(0, (activeDatabaseStructure.rowsOffset || 0) + direction * 10);
+  loadCustomerDatabaseRows();
+}
+async function editCustomerDatabaseRow(rowId) {
+  if (!activeDatabaseStructure) return;
+  const columns = activeDatabaseStructure.columns || [];
+  const card = document.querySelector("[data-row-id='" + CSS.escape(rowId) + "']");
+  if (!card) return;
+  const values = {};
+  for (const column of columns) {
+    const label = Array.from(card.querySelectorAll(".muted")).find(item =>
+      item.querySelector("strong")?.textContent.startsWith(column.name + " :")
+    );
+    let current = label ? label.textContent.split(":").slice(1).join(":").trim() : "";
+    if (current === "—") current = "";
+    if (column.data_type === "boolean") current = current === "Oui" ? "1" : current === "Non" ? "0" : "";
+    const entered = prompt("Nouvelle valeur pour « " + column.name + " » :" +
+      (column.data_type === "boolean" ? " (1 = Oui, 0 = Non, vide = non renseigné)" : ""), current);
+    if (entered === null) return;
+    values[column.name] = entered === "" ? null :
+      column.data_type === "number" || column.data_type === "boolean" ? Number(entered) : entered;
+  }
+  try {
+    await api("/databases/" + encodeURIComponent(activeDatabaseStructure.databaseId) +
+      "/tables/" + encodeURIComponent(activeDatabaseStructure.tableId) + "/rows/" + encodeURIComponent(rowId), {
+        method: "PATCH", body: JSON.stringify({ values: values })
+      });
+    await loadCustomerDatabaseRows();
+  } catch (error) {
+    alert(error.message || "Impossible de modifier cette ligne.");
+  }
+}
+async function deleteCustomerDatabaseRow(rowId) {
+  if (!activeDatabaseStructure || !confirm("Supprimer définitivement cette ligne ?")) return;
+  try {
+    await api("/databases/" + encodeURIComponent(activeDatabaseStructure.databaseId) +
+      "/tables/" + encodeURIComponent(activeDatabaseStructure.tableId) + "/rows/" + encodeURIComponent(rowId), {
+        method: "DELETE"
+      });
+    await loadCustomerDatabaseRows();
+  } catch (error) {
+    alert(error.message || "Impossible de supprimer cette ligne.");
+  }
+}
+
 async function deleteCustomerDatabaseTable() {
   if (!activeDatabaseStructure || !activeDatabaseStructure.tableId) return;
   const tableName = activeDatabaseStructure.tableName;
