@@ -2416,7 +2416,7 @@ async function exportCustomerDatabaseCsv() {
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    const safeName = (activeDatabaseStructure.tableName || "table").normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").replace(/[^a-zA-Z0-9_-]+/g, "_");
+    const safeName = (activeDatabaseStructure.tableName || "table").replace(/[^a-zA-Z0-9_-]+/g, "_");
     link.href = url;
     link.download = safeName + ".csv";
     document.body.appendChild(link);
