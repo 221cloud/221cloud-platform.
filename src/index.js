@@ -250,26 +250,26 @@ async function currentUser(request, env) {
 async function generateWebsiteSlug(env, projectName) {
   const base = String(projectName || "site")
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\\u0300-\\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 50)
     .replace(/-+$/g, "") || "site";
 
-  let slug = base;
-  let suffix = 2;
-
-  while (
-    await env.DB.prepare(
+  // Un suffixe aléatoire réduit fortement le risque de collision simultanée.
+  // Les adresses des sites déjà existants ne sont jamais modifiées.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+    const slug = `${base}-${suffix}`;
+    const existing = await env.DB.prepare(
       "SELECT id FROM website_hostings WHERE slug = ? LIMIT 1"
-    ).bind(slug).first()
-  ) {
-    slug = `${base}-${suffix}`;
-    suffix++;
+    ).bind(slug).first();
+
+    if (!existing) return slug;
   }
 
-  return slug;
+  throw new Error("Impossible de générer une adresse publique.");
 }
 async function generateApplicationSlug(env, projectName) {
   const base = String(projectName || "application")
@@ -3172,24 +3172,25 @@ if (downloadRequested) {
           }, 403);
         }
         const id = crypto.randomUUID();
-
-await env.DB.prepare(
+const projectInsert = env.DB.prepare(
   `INSERT INTO projects (id, user_id, name, type, status)
    VALUES (?, ?, ?, ?, 'pending')`
-).bind(id, user.id, name, type).run();
+).bind(id, user.id, name, type);
 
 let hosting = null;
 
 if (type === "website") {
   const hostingId = crypto.randomUUID();
   const slug = await generateWebsiteSlug(env, name);
-
-  await env.DB.prepare(`
+  const hostingInsert = env.DB.prepare(`
     INSERT INTO website_hostings (
       id, user_id, project_id, slug, status
     )
     VALUES (?, ?, ?, ?, 'draft')
-  `).bind(hostingId, user.id, id, slug).run();
+  `).bind(hostingId, user.id, id, slug);
+
+  // Les deux insertions sont atomiques : aucun projet orphelin.
+  await env.DB.batch([projectInsert, hostingInsert]);
 
   hosting = {
     id: hostingId,
@@ -3197,6 +3198,8 @@ if (type === "website") {
     status: "draft",
     url: `https://221cloud-platform.elhadjidame-sall.workers.dev/site/${slug}`
   };
+} else {
+  await projectInsert.run();
 }
 
 const project = await env.DB.prepare(
