@@ -1468,14 +1468,13 @@ if (
       }
     }
 
-    // La création de nouveaux comptes reste bloquée tant qu'un service
-    // d'envoi et le parcours complet de vérification d'e-mail ne sont pas configurés.
-    // Cette protection n'affecte pas les comptes déjà existants ni leur connexion.
-    const EMAIL_VERIFICATION_DELIVERY_READY = false;
+    // Les inscriptions sont réactivées sans vérification de possession de l'adresse e-mail.
+    // Les utilisateurs doivent saisir une adresse qu'ils contrôlent.
+    const REGISTRATION_ENABLED = true;
 
     // INSCRIPTION
     if (path === "/api/register" && request.method === "POST") {
-      if (!EMAIL_VERIFICATION_DELIVERY_READY) {
+      if (!REGISTRATION_ENABLED) {
         return json({
           error: "Les nouvelles inscriptions sont temporairement suspendues. La vérification de l'adresse e-mail sera disponible après la configuration du service de messagerie 221Cloud."
         }, 503);
