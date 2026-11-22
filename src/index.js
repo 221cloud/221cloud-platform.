@@ -3362,6 +3362,147 @@ hosting
       }
     }
 
+    // DONNÉES DES TABLES CLIENT : LECTURE, AJOUT, MODIFICATION ET SUPPRESSION
+    const databaseRowsMatch = path.match(/^\/api\/databases\/([^/]+)\/tables\/([^/]+)\/rows(?:\/([^/]+))?$/);
+    if (databaseRowsMatch) {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureCustomerDatabaseStructureSchema(env);
+        const databaseId = decodeURIComponent(databaseRowsMatch[1]);
+        const tableId = decodeURIComponent(databaseRowsMatch[2]);
+        const rowId = databaseRowsMatch[3] ? decodeURIComponent(databaseRowsMatch[3]) : null;
+        const database = await env.DB.prepare(
+          "SELECT id FROM customer_databases WHERE id = ? AND user_id = ? LIMIT 1"
+        ).bind(databaseId, user.id).first();
+        if (!database) return json({ error: "Base de données introuvable." }, 404);
+        const table = await env.DB.prepare(
+          "SELECT id, physical_name FROM customer_database_tables WHERE id = ? AND database_id = ? AND user_id = ? LIMIT 1"
+        ).bind(tableId, databaseId, user.id).first();
+        if (!table || !safeInternalSqlIdentifier(table.physical_name)) {
+          return json({ error: "Table introuvable." }, 404);
+        }
+        const columnResult = await env.DB.prepare(
+          "SELECT name, data_type, physical_name, position FROM customer_database_columns WHERE table_id = ? AND database_id = ? AND user_id = ? ORDER BY position ASC"
+        ).bind(tableId, databaseId, user.id).all();
+        const columns = columnResult.results || [];
+        if (columns.some(column => !safeInternalSqlIdentifier(column.physical_name))) {
+          return json({ error: "Structure de colonne invalide." }, 500);
+        }
+        const quoteIdentifier = value => '"' + String(value).replace(/"/g, '""') + '"';
+        const validateValues = values => {
+          if (!values || typeof values !== "object" || Array.isArray(values)) {
+            return { error: "Les valeurs de la ligne sont invalides." };
+          }
+          const allowed = new Map(columns.map(column => [column.name, column]));
+          const entries = Object.entries(values);
+          if (!entries.length) return { error: "Renseignez au moins une valeur." };
+          if (entries.length > columns.length || entries.some(([name]) => !allowed.has(name))) {
+            return { error: "Une ou plusieurs colonnes sont inconnues." };
+          }
+          const normalized = [];
+          for (const [name, raw] of entries) {
+            const column = allowed.get(name);
+            if (raw === null || raw === "") {
+              normalized.push([column, null]);
+              continue;
+            }
+            if (column.data_type === "text") {
+              if (typeof raw !== "string" || raw.length > 5000) return { error: "Le champ « " + name + " » doit être un texte de 5 000 caractères maximum." };
+              normalized.push([column, raw]);
+            } else if (column.data_type === "number") {
+              const number = typeof raw === "number" ? raw : Number(raw);
+              if (!Number.isFinite(number)) return { error: "Le champ « " + name + " » doit contenir un nombre valide." };
+              normalized.push([column, number]);
+            } else if (column.data_type === "boolean") {
+              if (![true, false, 1, 0, "1", "0"].includes(raw)) return { error: "Le champ « " + name + " » doit être oui ou non." };
+              normalized.push([column, raw === true || raw === 1 || raw === "1" ? 1 : 0]);
+            } else if (column.data_type === "date") {
+              const date = String(raw);
+              if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date + "T00:00:00Z"))) {
+                return { error: "Le champ « " + name + " » doit être une date au format AAAA-MM-JJ." };
+              }
+              normalized.push([column, date]);
+            } else {
+              return { error: "Type de colonne non pris en charge." };
+            }
+          }
+          return { entries: normalized };
+        };
+
+        if (!rowId && request.method === "GET") {
+          const url = new URL(request.url);
+          const limit = Math.min(50, Math.max(1, Number.parseInt(url.searchParams.get("limit") || "20", 10) || 20));
+          const offset = Math.max(0, Number.parseInt(url.searchParams.get("offset") || "0", 10) || 0);
+          const search = String(url.searchParams.get("q") || "").trim().slice(0, 100);
+          const whereParts = [];
+          const bindings = [];
+          if (search && columns.length) {
+            whereParts.push("(" + columns.map(column => "CAST(" + quoteIdentifier(column.physical_name) + " AS TEXT) LIKE ?").join(" OR ") + ")");
+            for (let i = 0; i < columns.length; i++) bindings.push("%" + search + "%");
+          }
+          const whereSql = whereParts.length ? " WHERE " + whereParts.join(" AND ") : "";
+          const count = await env.DB.prepare(
+            "SELECT COUNT(*) AS total FROM " + quoteIdentifier(table.physical_name) + whereSql
+          ).bind(...bindings).first();
+          const selectColumns = columns.map(column =>
+            quoteIdentifier(column.physical_name) + " AS " + quoteIdentifier(column.name)
+          );
+          const selectSql = ["row_id", "created_at", ...selectColumns].map(quoteIdentifier).join(", ");
+          const result = await env.DB.prepare(
+            "SELECT " + selectSql + " FROM " + quoteIdentifier(table.physical_name) + whereSql +
+            " ORDER BY created_at DESC, row_id DESC LIMIT ? OFFSET ?"
+          ).bind(...bindings, limit, offset).all();
+          return json({
+            rows: result.results || [],
+            total: Number(count?.total || 0),
+            limit,
+            offset,
+            columns: columns.map(column => ({ name: column.name, data_type: column.data_type }))
+          });
+        }
+
+        if (!rowId && request.method === "POST") {
+          const body = await request.json();
+          const checked = validateValues(body.values);
+          if (checked.error) return json({ error: checked.error }, 400);
+          const newRowId = crypto.randomUUID();
+          const names = checked.entries.map(([column]) => quoteIdentifier(column.physical_name));
+          const placeholders = checked.entries.map(() => "?");
+          await env.DB.prepare(
+            "INSERT INTO " + quoteIdentifier(table.physical_name) +
+            " (row_id, " + names.join(", ") + ") VALUES (?, " + placeholders.join(", ") + ")"
+          ).bind(newRowId, ...checked.entries.map(([, value]) => value)).run();
+          return json({ message: "Ligne ajoutée avec succès.", row_id: newRowId }, 201);
+        }
+
+        if (rowId && request.method === "PATCH") {
+          const body = await request.json();
+          const checked = validateValues(body.values);
+          if (checked.error) return json({ error: checked.error }, 400);
+          const assignments = checked.entries.map(([column]) => quoteIdentifier(column.physical_name) + " = ?");
+          const result = await env.DB.prepare(
+            "UPDATE " + quoteIdentifier(table.physical_name) + " SET " + assignments.join(", ") +
+            " WHERE row_id = ?"
+          ).bind(...checked.entries.map(([, value]) => value), rowId).run();
+          if (!Number(result.meta?.changes || 0)) return json({ error: "Ligne introuvable." }, 404);
+          return json({ message: "Ligne modifiée avec succès." });
+        }
+
+        if (rowId && request.method === "DELETE") {
+          const result = await env.DB.prepare(
+            "DELETE FROM " + quoteIdentifier(table.physical_name) + " WHERE row_id = ?"
+          ).bind(rowId).run();
+          if (!Number(result.meta?.changes || 0)) return json({ error: "Ligne introuvable." }, 404);
+          return json({ message: "Ligne supprimée définitivement." });
+        }
+        return json({ error: "Méthode non autorisée." }, 405);
+      } catch (error) {
+        console.error("ERREUR DONNÉES TABLE CLIENT:", error);
+        return json({ error: "Impossible de traiter les données de cette table." }, 500);
+      }
+    }
+
     // STRUCTURE DES BASES CLIENT : TABLES ET COLONNES
     const databaseTablesMatch = path.match(/^\/api\/databases\/([^/]+)\/tables$/);
     const databaseColumnsMatch = path.match(/^\/api\/databases\/([^/]+)\/tables\/([^/]+)\/columns$/);
