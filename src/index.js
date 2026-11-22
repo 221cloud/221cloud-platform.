@@ -3314,16 +3314,14 @@ hosting
             slug: await generateApplicationSlug(env, project.name)
           };
         }
-        const latest = await env.DB.prepare(
-          "SELECT COALESCE(MAX(version_number), 0) AS latest FROM application_publication_versions WHERE publication_id = ?"
-        ).bind(publication.id).first();
-        const versionNumber = Number(latest?.latest || 0) + 1;
         const versionId = crypto.randomUUID();
         const versionInsert = env.DB.prepare(`
           INSERT INTO application_publication_versions
             (id, publication_id, version_number, index_html, style_css, script_js)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `).bind(versionId, publication.id, versionNumber, indexHtml, styleCss, scriptJs);
+          SELECT ?, ?, COALESCE(MAX(version_number), 0) + 1, ?, ?, ?
+          FROM application_publication_versions
+          WHERE publication_id = ?
+        `).bind(versionId, publication.id, indexHtml, styleCss, scriptJs, publication.id);
         const publicationWrite = isNewPublication
           ? env.DB.prepare(`
               INSERT INTO application_publications
@@ -3334,6 +3332,11 @@ hosting
               "UPDATE application_publications SET active_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?"
             ).bind(versionId, publication.id, user.id);
         await env.DB.batch([versionInsert, publicationWrite]);
+        const publishedVersion = await env.DB.prepare(
+          "SELECT version_number FROM application_publication_versions WHERE id = ? AND publication_id = ? LIMIT 1"
+        ).bind(versionId, publication.id).first();
+        const versionNumber = Number(publishedVersion?.version_number || 0);
+        if (!versionNumber) throw new Error("La version publiée est introuvable après son enregistrement.");
         const publishedUrl = `https://221cloud-platform.elhadjidame-sall.workers.dev/app/${publication.slug}/`;
         return json({
           message: isNewPublication ? "Application publiée avec succès." : "Nouvelle version publiée avec succès.",
