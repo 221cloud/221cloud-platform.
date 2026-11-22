@@ -1348,6 +1348,8 @@ async function renderAdmin() {
       suspended: "Suspendu"
     };
     const auditAdmins = [...new Set(auditEvents.map(item => item.actor_email).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    const auditPageSize = 10;
+    let auditPage = 1;
     auditContainer.innerHTML = `
       <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px">
         <label>
@@ -1401,8 +1403,13 @@ async function renderAdmin() {
         return;
       }
 
+      const totalPages = Math.ceil(filteredEvents.length / auditPageSize);
+      auditPage = Math.min(auditPage, totalPages);
+      const firstIndex = (auditPage - 1) * auditPageSize;
+      const pageEvents = filteredEvents.slice(firstIndex, firstIndex + auditPageSize);
+
       auditResults.innerHTML = `
-        <p class="muted">${filteredEvents.length} action(s) affichée(s) sur ${auditEvents.length}.</p>
+        <p class="muted">${firstIndex + 1}–${Math.min(firstIndex + auditPageSize, filteredEvents.length)} sur ${filteredEvents.length} action(s) filtrée(s), ${auditEvents.length} au total.</p>
         <div style="overflow-x:auto">
           <table style="width:100%;border-collapse:collapse">
             <thead>
@@ -1415,7 +1422,7 @@ async function renderAdmin() {
               </tr>
             </thead>
             <tbody>
-              ${filteredEvents.map(item => `
+              ${pageEvents.map(item => `
                 <tr>
                   <td style="padding:12px">${escapeHTML(item.created_at ? formatDate(item.created_at) : "—")}</td>
                   <td style="padding:12px">${escapeHTML(item.actor_email || "—")}</td>
@@ -1427,11 +1434,27 @@ async function renderAdmin() {
             </tbody>
           </table>
         </div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;margin-top:16px">
+          <button type="button" class="secondary" data-audit-page="${auditPage - 1}" ${auditPage === 1 ? "disabled" : ""}>Précédent</button>
+          <span class="muted">Page ${auditPage} / ${totalPages}</span>
+          <button type="button" class="secondary" data-audit-page="${auditPage + 1}" ${auditPage === totalPages ? "disabled" : ""}>Suivant</button>
+        </div>
       `;
     }
-    auditSearch.addEventListener("input", renderAdminAuditEvents);
-    auditActionFilter.addEventListener("change", renderAdminAuditEvents);
-    auditAdminFilter.addEventListener("change", renderAdminAuditEvents);
+
+    auditResults.addEventListener("click", event => {
+      const button = event.target.closest("[data-audit-page]");
+      if (!button || button.disabled) return;
+      auditPage = Number(button.dataset.auditPage);
+      renderAdminAuditEvents();
+    });
+    const resetAuditPage = () => {
+      auditPage = 1;
+      renderAdminAuditEvents();
+    };
+    auditSearch.addEventListener("input", resetAuditPage);
+    auditActionFilter.addEventListener("change", resetAuditPage);
+    auditAdminFilter.addEventListener("change", resetAuditPage);
     renderAdminAuditEvents();
 
     const subscriptions = subscriptionsData.subscriptions || [];
