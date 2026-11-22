@@ -2745,6 +2745,15 @@ if (downloadRequested) {
 }
         headers.set("X-Content-Type-Options", "nosniff");
 
+        // Les sites clients partagent le domaine technique de 221Cloud.
+        // Le sandbox CSP leur donne une origine opaque : leurs scripts ne
+        // peuvent donc pas accéder aux cookies, au stockage local ou aux API
+        // authentifiées de l'espace client sur ce même domaine.
+        headers.set(
+          "Content-Security-Policy",
+          "sandbox allow-scripts allow-forms allow-popups allow-downloads allow-modals allow-top-navigation-by-user-activation"
+        );
+
         headers.set(
           "Cache-Control",
           filePath === "index.html"
