@@ -4814,6 +4814,7 @@ async function publishApplication() {
   if (!confirmed) return;
   const button = document.getElementById("publishApplicationButton");
   const status = document.getElementById("applicationPublicationStatus");
+  const previousButtonText = button ? button.textContent : "Publier l'application";
   if (button) {
     button.disabled = true;
     button.textContent = "Publication...";
@@ -4831,7 +4832,10 @@ async function publishApplication() {
   } catch (error) {
     if (status) status.textContent = error.message;
   } finally {
-    if (button) button.disabled = false;
+    if (button) {
+      button.disabled = false;
+      if (button.textContent === "Publication...") button.textContent = previousButtonText;
+    }
   }
 }
 
