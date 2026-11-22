@@ -1672,11 +1672,18 @@ if (path === "/api/subscription" && request.method === "GET") {
         : "free";
       return {
         ...item,
-        plan: effectivePlan,
-        status: effectiveStatus
+        effective_plan: effectivePlan,
+        effective_status: effectiveStatus
       };
     });
-    const subscription = subscriptionHistory[0] || null;
+    const latestSubscription = subscriptionHistory[0] || null;
+    const subscription = latestSubscription
+      ? {
+          ...latestSubscription,
+          plan: latestSubscription.effective_plan,
+          status: latestSubscription.effective_status
+        }
+      : null;
 
     if (!subscription) {
       return json({
