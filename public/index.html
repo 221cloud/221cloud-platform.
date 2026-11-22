@@ -1372,18 +1372,22 @@ async function renderAdmin() {
           </select>
         </label>
       </div>
+      <div style="margin:0 0 14px">
+        <button type="button" class="secondary" id="adminAuditExport" ${auditEvents.length ? "" : "disabled"}>Exporter le journal en CSV</button>
+      </div>
       <div id="adminAuditResults"></div>
     `;
     const auditSearch = document.getElementById("adminAuditSearch");
     const auditActionFilter = document.getElementById("adminAuditActionFilter");
     const auditAdminFilter = document.getElementById("adminAuditAdminFilter");
     const auditResults = document.getElementById("adminAuditResults");
+    const auditExportButton = document.getElementById("adminAuditExport");
 
-    function renderAdminAuditEvents() {
+    function getFilteredAdminAuditEvents() {
       const query = auditSearch.value.trim().toLowerCase();
       const action = auditActionFilter.value;
       const admin = auditAdminFilter.value;
-      const filteredEvents = auditEvents.filter(item => {
+      return auditEvents.filter(item => {
         const searchable = [
           item.actor_email, item.target_email, item.action,
           auditActionNames[item.action], auditValueNames[item.old_value],
@@ -1393,6 +1397,39 @@ async function renderAdmin() {
           && (!action || item.action === action)
           && (!admin || item.actor_email === admin);
       });
+    }
+
+    auditExportButton.addEventListener("click", () => {
+      const rows = [
+        ["Date", "Administrateur", "Compte concerné", "Action", "Ancienne valeur", "Nouvelle valeur"],
+        ...getFilteredAdminAuditEvents().map(item => [
+          item.created_at ? formatDate(item.created_at) : "",
+          item.actor_email || "",
+          item.target_email || "",
+          auditActionNames[item.action] || item.action || "",
+          auditValueNames[item.old_value] || item.old_value || "",
+          auditValueNames[item.new_value] || item.new_value || ""
+        ])
+      ];
+      const csvCell = value => {
+        let text = String(value ?? "");
+        if (/^[=+@\\-\\t\\r]/.test(text)) text = "'" + text;
+        return '"' + text.replace(/"/g, '""') + '"';
+      };
+      const csv = "\\uFEFF" + rows.map(row => row.map(csvCell).join(";")).join("\\r\\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "221cloud-journal-administratif.csv";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    });
+
+    function renderAdminAuditEvents() {
+      const filteredEvents = getFilteredAdminAuditEvents();
 
       if (!auditEvents.length) {
         auditResults.innerHTML = '<p class="muted">Aucune action administrative enregistrée pour le moment. Les prochaines modifications de rôle ou de statut apparaîtront ici.</p>';
