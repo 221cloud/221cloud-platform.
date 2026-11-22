@@ -5898,15 +5898,26 @@ async function renderSubscriptionPage() {
     const limits = data.limits || { storage_bytes: 0, projects: 0 };
     const usage = data.usage || { storage_bytes: 0, projects: 0 };
     const history = Array.isArray(data.history) ? data.history : [];
+    const statusKey = String(subscription.status || "inconnu").toLowerCase();
+    const statusLabels = {
+      active: "Actif",
+      expired: "Expiré",
+      cancelled: "Annulé",
+      canceled: "Annulé",
+      pending: "En attente",
+      inactive: "Inactif"
+    };
+    const statusLabel = statusLabels[statusKey] || statusKey;
+    const statusClass = statusKey === "active" ? "online" : "offline";
 
     main.innerHTML = `
       <h1 class="page-title">Mon abonnement</h1>
       <p class="page-subtitle">Gérez votre forfait et découvrez nos offres.</p>
 
       <div class="card">
-        <div class="muted">Votre forfait actuel</div>
+        <div class="muted">Votre abonnement actuel</div>
         <h2>${escapeHTML(plan.name)}</h2>
-        <span class="status online">● ${escapeHTML(subscription.status)}</span>
+        <span class="status ${statusClass}">● ${escapeHTML(statusLabel)}</span>
         <p>${escapeHTML(plan.description)}</p>
         <div class="grid">
           <div>
@@ -5918,8 +5929,19 @@ async function renderSubscriptionPage() {
             <p class="muted">Projets autorisés</p>
           </div>
         </div>
-        <p class="muted">Début : ${escapeHTML(subscription.started_at || "Non renseigné")}</p>
-        <p class="muted">Expiration : ${escapeHTML(subscription.expires_at || "Aucune")}</p>
+        <div class="section-head">
+          <h3>Détails de l'abonnement</h3>
+        </div>
+        <div class="grid">
+          <div>
+            <strong>${escapeHTML(formatDate(subscription.started_at))}</strong>
+            <p class="muted">Date de début</p>
+          </div>
+          <div>
+            <strong>${escapeHTML(subscription.expires_at ? formatDate(subscription.expires_at) : "Aucune expiration prévue")}</strong>
+            <p class="muted">Date d'expiration</p>
+          </div>
+        </div>
         <div class="section-head">
           <h3>Votre consommation actuelle</h3>
         </div>
