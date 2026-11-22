@@ -2188,6 +2188,7 @@ function renderCustomerDatabaseTablePage() {
     "<label for='customerRowsSearch'>Rechercher dans les données</label>" +
     "<input id='customerRowsSearch' maxlength='100' placeholder='Saisir un mot ou une valeur' value='" + escapeHTML(activeDatabaseStructure.rowsSearch) + "'>" +
     "<button class='secondary' type='button' onclick='searchCustomerDatabaseRows()'>Rechercher</button>" +
+    "<button class='secondary' type='button' id='customerRowsExport' onclick='exportCustomerDatabaseCsv()'>↓ Exporter en CSV</button>" +
     "<div id='customerRowsList'><div class='empty'>Chargement des lignes...</div></div>" +
     "<div class='item-actions'><button class='secondary' id='customerRowsPrevious' type='button' onclick='changeCustomerDatabaseRowsPage(-1)' disabled>← Précédent</button>" +
     "<span class='muted' id='customerRowsPage'>Page 1</span>" +
@@ -2366,6 +2367,71 @@ function searchCustomerDatabaseRows() {
   activeDatabaseStructure.rowsSearch = input ? input.value.trim() : "";
   activeDatabaseStructure.rowsOffset = 0;
   loadCustomerDatabaseRows();
+}
+async function exportCustomerDatabaseCsv() {
+  if (!activeDatabaseStructure || !activeDatabaseStructure.tableId) return;
+  const button = document.getElementById("customerRowsExport");
+  const originalLabel = button ? button.textContent : "↓ Exporter en CSV";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Préparation du fichier...";
+  }
+  try {
+    const columns = activeDatabaseStructure.columns || [];
+    if (!columns.length) throw new Error("Cette table ne possède aucune colonne à exporter.");
+    const allRows = [];
+    let offset = 0;
+    let total = null;
+    do {
+      const params = new URLSearchParams({
+        limit: "50",
+        offset: String(offset),
+        q: "",
+        sort: activeDatabaseStructure.rowsSortColumn || "created_at",
+        direction: activeDatabaseStructure.rowsSortDirection || "desc"
+      });
+      const data = await api("/databases/" + encodeURIComponent(activeDatabaseStructure.databaseId) +
+        "/tables/" + encodeURIComponent(activeDatabaseStructure.tableId) + "/rows?" + params.toString());
+      const rows = Array.isArray(data.rows) ? data.rows : [];
+      if (total === null) total = Number(data.total || 0);
+      allRows.push(...rows);
+      offset += rows.length;
+      if (!rows.length) break;
+    } while (offset < total);
+    const headers = ["Date de création", ...columns.map(column => column.name)];
+    const csvCell = value => {
+      if (value === null || value === undefined) return '""';
+      let text = String(value);
+      return '"' + text.replace(/"/g, '""') + '"';
+    };
+    const lines = [headers.map(csvCell).join(",")];
+    for (const row of allRows) {
+      lines.push([row.created_at, ...columns.map(column => {
+        const value = row[column.name];
+        if (column.data_type === "boolean" && value !== null && value !== undefined) return Number(value) ? "Oui" : "Non";
+        return value;
+      })].map(csvCell).join(","));
+    }
+    const csv = "\uFEFF" + lines.join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const safeName = (activeDatabaseStructure.tableName || "table").normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").replace(/[^a-zA-Z0-9_-]+/g, "_");
+    link.href = url;
+    link.download = safeName + ".csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    alert(allRows.length + " ligne(s) exportée(s) au format CSV.");
+  } catch (error) {
+    alert(error.message || "Impossible de préparer le fichier CSV.");
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalLabel;
+    }
+  }
 }
 function changeCustomerDatabaseRowsPage(direction) {
   if (!activeDatabaseStructure) return;
