@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /accueil.html
+Disallow: /api/
+
+Sitemap: https://221cloud-platform.elhadjidame-sall.workers.dev/sitemap.xml
