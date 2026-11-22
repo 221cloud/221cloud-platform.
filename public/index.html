@@ -1142,6 +1142,13 @@ async function renderAdmin() {
     </div>
 
     <div class="section-head">
+      <h2>Journal des actions administratives</h2>
+    </div>
+    <div class="card" id="adminAuditLog">
+      Chargement du journal administratif...
+    </div>
+
+    <div class="section-head">
       <h2>Suivi des abonnements</h2>
     </div>
     <div class="grid" id="adminSubscriptionStats">
@@ -1153,10 +1160,11 @@ async function renderAdmin() {
   `;
 
   try {
-    const [stats, usersData, subscriptionsData] = await Promise.all([
+    const [stats, usersData, subscriptionsData, auditData] = await Promise.all([
       api("/admin/stats"),
       api("/admin/users"),
-      api("/admin/subscriptions")
+      api("/admin/subscriptions"),
+      api("/admin/audit")
     ]);
 
     document.getElementById("adminStats").innerHTML = `
@@ -1326,6 +1334,48 @@ async function renderAdmin() {
     roleFilter.addEventListener("change", renderFilteredAdminUsers);
     statusFilter.addEventListener("change", renderFilteredAdminUsers);
     renderFilteredAdminUsers();
+
+    const auditContainer = document.getElementById("adminAuditLog");
+    const auditEvents = auditData.events || [];
+    const auditActionNames = {
+      role_changed: "Changement de rôle",
+      status_changed: "Changement de statut"
+    };
+    const auditValueNames = {
+      admin: "Administrateur",
+      client: "Client",
+      active: "Actif",
+      suspended: "Suspendu"
+    };
+    auditContainer.innerHTML = auditEvents.length
+      ? `
+        <p class="muted">${auditEvents.length} dernière(s) action(s) enregistrée(s).</p>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr>
+                <th style="text-align:left;padding:12px">Date</th>
+                <th style="text-align:left;padding:12px">Administrateur</th>
+                <th style="text-align:left;padding:12px">Compte concerné</th>
+                <th style="text-align:left;padding:12px">Action</th>
+                <th style="text-align:left;padding:12px">Modification</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${auditEvents.map(item => `
+                <tr>
+                  <td style="padding:12px">${escapeHTML(item.created_at ? formatDate(item.created_at) : "—")}</td>
+                  <td style="padding:12px">${escapeHTML(item.actor_email || "—")}</td>
+                  <td style="padding:12px">${escapeHTML(item.target_email || "—")}</td>
+                  <td style="padding:12px">${escapeHTML(auditActionNames[item.action] || item.action || "—")}</td>
+                  <td style="padding:12px">${escapeHTML(auditValueNames[item.old_value] || item.old_value)} → ${escapeHTML(auditValueNames[item.new_value] || item.new_value)}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      `
+      : '<p class="muted">Aucune action administrative enregistrée pour le moment. Les prochaines modifications de rôle ou de statut apparaîtront ici.</p>';
 
     const subscriptions = subscriptionsData.subscriptions || [];
     const subscriptionSummary = subscriptionsData.summary || {};
