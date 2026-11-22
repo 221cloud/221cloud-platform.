@@ -4821,14 +4821,23 @@ const used = Number(usage?.used || 0);
 
         const previewRequested =
   new URL(request.url).searchParams.get("preview") === "1";
-const isImage = String(file.mime_type || "").toLowerCase().startsWith("image/");
-const disposition = previewRequested && isImage ? "inline" : "attachment";
+const safePreviewMimeTypes = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/avif"
+]);
+const normalizedMimeType = String(file.mime_type || "").toLowerCase().split(";")[0].trim();
+const isSafePreviewImage = safePreviewMimeTypes.has(normalizedMimeType);
+const disposition = previewRequested && isSafePreviewImage ? "inline" : "attachment";
 
 headers.set(
   "Content-Disposition",
-  `${disposition}; filename*=UTF-8''${encodeURIComponent(file.file_name)}`
+  `${disposition}; filename*=UTF-8''${encodeURIComponent(safeFileName(file.file_name))}`
 );
 
+        headers.set("X-Content-Type-Options", "nosniff");
         headers.set("Cache-Control", "private, no-store");
 
         return new Response(downloadedBytes, {
