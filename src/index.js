@@ -1255,18 +1255,22 @@ if (path === "/api/subscription" && request.method === "GET") {
       return json({ error: "Non connecté." }, 401);
     }
 
-    const subscription = await env.DB.prepare(`
+    const subscriptionHistoryResult = await env.DB.prepare(`
       SELECT
         plan,
         status,
+        created_at,
         started_at,
         expires_at,
         auto_renew
       FROM subscriptions
       WHERE user_id = ?
       ORDER BY created_at DESC
-      LIMIT 1
-    `).bind(user.id).first();
+      LIMIT 50
+    `).bind(user.id).all();
+
+    const subscriptionHistory = subscriptionHistoryResult.results || [];
+    const subscription = subscriptionHistory[0] || null;
 
     if (!subscription) {
       return json({
@@ -1309,6 +1313,7 @@ if (path === "/api/subscription" && request.method === "GET") {
 
     return json({
       subscription,
+      history: subscriptionHistory,
       limits,
       usage: {
         storage_bytes: Number(storageUsage?.used || 0),
