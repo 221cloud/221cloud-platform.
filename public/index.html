@@ -6591,7 +6591,7 @@ async function renderSubscriptionPage() {
             <div class="section-head">
               <div>
                 <strong>${escapeHTML(historyPlan.name)}</strong>
-                <p class="muted">Statut : ${escapeHTML(item.status || "inconnu")}</p>
+                <p class="muted">Statut : ${escapeHTML(item.effective_status || item.status || "inconnu")}</p>
               </div>
               <span class="muted">${escapeHTML(formatDate(item.started_at || item.created_at))}</span>
             </div>
