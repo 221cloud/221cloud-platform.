@@ -738,13 +738,13 @@ const downloadUrl = `${fileUrl}?download=1`;
         file.file_path === "index.html"
         ? ""
         : `<p>
-            <button type="button" onclick="renameWebsiteFile('${escapeHTML(projectId)}', '${escapeHTML(file.id)}', '${escapeHTML(name)}')">
+            <button type="button" onclick="renameWebsiteFile(${escapeJSAttribute(projectId)}, ${escapeJSAttribute(file.id)}, ${escapeJSAttribute(name)})">
   Renommer
 </button>
-<button type="button" onclick="moveWebsiteFile('${escapeHTML(projectId)}', '${escapeHTML(file.id)}', '${escapeHTML(file.file_path)}')">
+<button type="button" onclick="moveWebsiteFile(${escapeJSAttribute(projectId)}, ${escapeJSAttribute(file.id)}, ${escapeJSAttribute(file.file_path)})">
   Déplacer
 </button>
-<button type="button" onclick="deleteWebsiteFile('${escapeHTML(projectId)}', '${escapeHTML(file.id)}')">
+<button type="button" onclick="deleteWebsiteFile(${escapeJSAttribute(projectId)}, ${escapeJSAttribute(file.id)})">
   Supprimer
 </button>
 </p>`
@@ -853,6 +853,10 @@ function escapeHTML(value) {
     '"':"&quot;",
     "'":"&#039;"
   })[char]);
+}
+
+function escapeJSAttribute(value) {
+  return escapeHTML(JSON.stringify(String(value ?? "")));
 }
 
 function showMessage(message, type = "error") {
@@ -2247,11 +2251,11 @@ function renderProjects() {
       <p><span class="status">${escapeHTML(project.status || "pending")}</span></p>
       <div class="muted">Créé le : ${escapeHTML(formatDate(project.created_at))}</div>
       <div class="item-actions">
-  <button class="secondary" onclick="editProject('${escapeHTML(project.id)}')">Modifier</button>
+  <button class="secondary" onclick="editProject(${escapeJSAttribute(project.id)})">Modifier</button>
   ${project.type === "website" ? `
-    <button onclick="enableProjectHosting('${escapeHTML(project.id)}')">Activer l'hébergement</button>
+    <button onclick="enableProjectHosting(${escapeJSAttribute(project.id)})">Activer l'hébergement</button>
   ` : ""}
-  <button class="danger" onclick="deleteProject('${escapeHTML(project.id)}')">Mettre à la corbeille</button>
+  <button class="danger" onclick="deleteProject(${escapeJSAttribute(project.id)})">Mettre à la corbeille</button>
 </div>
     </div>
   `).join("");
@@ -2463,7 +2467,7 @@ async function loadProjectTrash() {
         <div class="muted">${escapeHTML(projectTypeLabel(project.type))}</div>
         <div class="muted">Mis à la corbeille le : ${escapeHTML(formatDate(project.deleted_at))}</div>
         <div class="item-actions">
-          <button class="secondary" type="button" onclick="restoreProject('${escapeHTML(project.id)}')">Restaurer le projet</button>
+          <button class="secondary" type="button" onclick="restoreProject(${escapeJSAttribute(project.id)})">Restaurer le projet</button>
         </div>
       </div>
     `).join("");
@@ -2566,8 +2570,8 @@ function renderDatabases() {
         <h3>▤ ${escapeHTML(database.name)}</h3>
         <div class="muted">Projet associé : ${escapeHTML(project ? project.name : (database.project_name || "Aucun"))}</div>
         <div class="muted">Créée le : ${escapeHTML(formatDate(database.created_at))}</div>
-        <button type="button" onclick="openDatabaseStructure('${escapeHTML(database.id)}')">Gérer les tables</button>
-        <button type="button" class="danger" onclick="deleteDatabase('${escapeHTML(database.id)}')">Supprimer la base vide</button>
+        <button type="button" onclick="openDatabaseStructure(${escapeJSAttribute(database.id)})">Gérer les tables</button>
+        <button type="button" class="danger" onclick="deleteDatabase(${escapeJSAttribute(database.id)})">Supprimer la base vide</button>
       </div>
     `;
   }).join("");
@@ -2611,7 +2615,7 @@ async function loadCustomerDatabaseTables() {
     container.innerHTML = tables.map(table =>
       "<div class='item-card'><h3>▦ " + escapeHTML(table.name) + "</h3>" +
       "<div class='muted'>Créée le : " + escapeHTML(formatDate(table.created_at)) + "</div>" +
-      "<button type='button' onclick=\"openCustomerDatabaseTable('" + escapeHTML(table.id) + "','" + escapeHTML(table.name) + "')\">Gérer les colonnes</button></div>"
+      "<button type='button' onclick=\"openCustomerDatabaseTable(" + escapeJSAttribute(table.id) + "," + escapeJSAttribute(table.name) + ")\">Gérer les colonnes</button></div>"
     ).join("");
   } catch (error) {
     container.innerHTML = "<div class='notice error-text'>" + escapeHTML(error.message) + "</div>";
@@ -2654,7 +2658,7 @@ function renderCustomerDatabaseTablePage() {
   activeDatabaseStructure.rowsSortDirection = activeDatabaseStructure.rowsSortDirection || "desc";
   activeDatabaseStructure.rowsPageSize = [10, 20, 50].includes(Number(activeDatabaseStructure.rowsPageSize)) ? Number(activeDatabaseStructure.rowsPageSize) : 10;
   main.innerHTML =
-    "<button class='secondary' type='button' onclick=\"openDatabaseStructure('" + escapeHTML(activeDatabaseStructure.databaseId) + "')\">← Retour aux tables</button>" +
+    "<button class='secondary' type='button' onclick=\"openDatabaseStructure(" + escapeJSAttribute(activeDatabaseStructure.databaseId) + ")\">← Retour aux tables</button>" +
     "<h1 class='page-title'>" + escapeHTML(activeDatabaseStructure.tableName) + "</h1>" +
     "<p class='page-subtitle'>Colonnes et données · " + escapeHTML(activeDatabaseStructure.databaseName) + "</p>" +
     "<div class='card form-card'><h3>Ajouter une colonne</h3><label for='customerColumnName'>Nom de la colonne</label>" +
@@ -2808,8 +2812,8 @@ async function loadCustomerDatabaseRows() {
           return "<div class='muted'><strong>" + escapeHTML(column.name) + " :</strong> " + escapeHTML(String(value)) + "</div>";
         }).join("");
         return "<div class='item-card' data-row-id='" + escapeHTML(row.row_id) + "'><div class='muted'>Créée le : " + escapeHTML(formatDate(row.created_at)) + "</div>" +
-          details + "<div class='item-actions'><button class='secondary' type='button' onclick=\"editCustomerDatabaseRow('" + escapeHTML(row.row_id) + "')\">Modifier</button>" +
-          "<button class='danger' type='button' onclick=\"deleteCustomerDatabaseRow('" + escapeHTML(row.row_id) + "')\">Supprimer</button></div></div>";
+          details + "<div class='item-actions'><button class='secondary' type='button' onclick=\"editCustomerDatabaseRow(" + escapeJSAttribute(row.row_id) + ")\">Modifier</button>" +
+          "<button class='danger' type='button' onclick=\"deleteCustomerDatabaseRow(" + escapeJSAttribute(row.row_id) + ")\">Supprimer</button></div></div>";
       }).join("");
     }
     const page = Math.floor(offset / limit) + 1;
@@ -3474,7 +3478,7 @@ function renderStorageFolderStats() {
       "<div style=\"display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--border, rgba(128,128,128,.2));\">" +
         "<div style=\"min-width:0;flex:1;\"><strong>📁 " + escapeHTML(folder.name) + "</strong>" +
         "<div class=\"muted\" style=\"font-size:12px;\">" + folder.stats.count + " fichier(s), sous-dossiers inclus · " + formatBytes(folder.stats.bytes) + "</div></div>" +
-        "<button type=\"button\" class=\"secondary\" onclick=\"openStorageFolder('" + escapeHTML(folder.id) + "')\">Ouvrir</button>" +
+        "<button type=\"button\" class=\"secondary\" onclick=\"openStorageFolder(" + escapeJSAttribute(folder.id) + ")\">Ouvrir</button>" +
       "</div>"
     ).join("") : "<div class=\"empty\">Aucun dossier créé pour le moment.</div>") +
     (ranked.length > 5 ? "<p class=\"muted\" style=\"margin-top:10px;\">Les 5 dossiers les plus volumineux sont affichés.</p>" : "");
@@ -4946,7 +4950,7 @@ function renderStorageFolders() {
         const isCurrent = index === path.length - 1;
         return isCurrent
           ? `<span aria-current="location" style="font-weight:700;color:#fff;">› ${folderName}</span>`
-          : `<button type="button" class="secondary" onclick="openStorageFolder('${folderId}')">› ${folderName}</button>`;
+          : `<button type="button" class="secondary" onclick="openStorageFolder(${escapeJSAttribute(folder.id)})">› ${folderName}</button>`;
       })
     ].join(' ');
   }
@@ -4984,9 +4988,9 @@ function renderStorageFolders() {
             </div>
           </div>
           <div class="storage-folder-actions">
-            <button type="button" class="secondary" onclick="toggleStorageFolderDetails('${folderId}')">Détails</button>
-            <button type="button" class="secondary" onclick="renameStorageFolder('${folderId}')">Renommer</button>
-            <button type="button" class="danger" onclick="deleteStorageFolder('${folderId}')">Supprimer</button>
+            <button type="button" class="secondary" onclick="toggleStorageFolderDetails(${escapeJSAttribute(folder.id)})">Détails</button>
+            <button type="button" class="secondary" onclick="renameStorageFolder(${escapeJSAttribute(folder.id)})">Renommer</button>
+            <button type="button" class="danger" onclick="deleteStorageFolder(${escapeJSAttribute(folder.id)})">Supprimer</button>
           </div>
           <div id="storageFolderDetails-${folderId}" class="hidden" style="margin:12px 4px 4px;padding:14px;border:1px solid var(--border);border-radius:12px;background:rgba(8,17,33,.55);"></div>
         </div>
@@ -5034,7 +5038,7 @@ function toggleStorageFolderDetails(folderId) {
         return `
           <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 0;border-top:1px solid var(--border);">
             <div><strong>📁 ${escapeHTML(child.name)}</strong><div class="muted" style="font-size:12px;">${childStats.count} fichier(s) · ${formatBytes(childStats.bytes)}</div></div>
-            <button type="button" class="secondary" onclick="openStorageFolder('${childId}')">Ouvrir</button>
+            <button type="button" class="secondary" onclick="openStorageFolder(${escapeJSAttribute(child.id)})">Ouvrir</button>
           </div>
         `;
       }).join("")
@@ -5191,7 +5195,7 @@ function renderStorageFiles() {
     return `
     <div class="item-card storage-file-card">
       ${mimeType.startsWith("image/") ? `
-        <button type="button" class="storage-thumbnail-button" onclick="previewStorageImage('${escapeHTML(file.id)}')" aria-label="Afficher ${escapeHTML(file.file_name || "l'image")} en grand">
+        <button type="button" class="storage-thumbnail-button" onclick="previewStorageImage(${escapeJSAttribute(file.id)})" aria-label="Afficher ${escapeHTML(file.file_name || "l'image")} en grand">
           <img class="storage-thumbnail" src="${API}/storage/${encodeURIComponent(file.id)}/download?preview=1" alt="${escapeHTML(file.file_name || "Aperçu de l'image")}" loading="lazy" onerror="this.closest('.storage-thumbnail-button').classList.add('thumbnail-error'); this.remove();">
           <span class="storage-thumbnail-fallback">🖼️ Aperçu indisponible</span>
         </button>
@@ -5206,10 +5210,10 @@ function renderStorageFiles() {
       </div>
       <div class="item-actions">
         ${String(file.mime_type || "").toLowerCase().startsWith("image/") ? `<button class="secondary" onclick="previewStorageImage('${escapeHTML(file.id)}')">Aperçu</button>` : ""}
-<button class="secondary" onclick="renameStorageFile('${escapeHTML(file.id)}', '${escapeHTML(file.file_name || "")}')">Renommer</button>
-        <button class="secondary" onclick="moveStorageFile('${escapeHTML(file.id)}')">Déplacer</button>
-        <button class="secondary" onclick="downloadStorageFile('${escapeHTML(file.id)}')">Télécharger</button>
-        <button class="danger" onclick="deleteStorageFile('${escapeHTML(file.id)}')">Supprimer</button>
+<button class="secondary" onclick="renameStorageFile(${escapeJSAttribute(file.id)}, ${escapeJSAttribute(file.file_name || "")})">Renommer</button>
+        <button class="secondary" onclick="moveStorageFile(${escapeJSAttribute(file.id)})">Déplacer</button>
+        <button class="secondary" onclick="downloadStorageFile(${escapeJSAttribute(file.id)})">Télécharger</button>
+        <button class="danger" onclick="deleteStorageFile(${escapeJSAttribute(file.id)})">Supprimer</button>
       </div>
     </div>
   `;
@@ -5313,8 +5317,8 @@ function renderStorageTrash() {
           </div>
         </div>
         <div class="item-actions">
-          <button class="secondary" onclick="restoreStorageFile('${escapeHTML(file.id)}')">Restaurer</button>
-          <button class="danger" onclick="permanentlyDeleteStorageFile('${escapeHTML(file.id)}')">Supprimer définitivement</button>
+          <button class="secondary" onclick="restoreStorageFile(${escapeJSAttribute(file.id)})">Restaurer</button>
+          <button class="danger" onclick="permanentlyDeleteStorageFile(${escapeJSAttribute(file.id)})">Supprimer définitivement</button>
         </div>
       </div>
     `;
@@ -5756,7 +5760,7 @@ async function renderHostingPage() {
 
 <button
   class="primary-btn"
-  onclick="startWebsiteDeployment('${escapeHTML(project.id)}')"
+  onclick="startWebsiteDeployment(${escapeJSAttribute(project.id)})"
 >
   Envoyer et publier le site
 </button>
@@ -5814,7 +5818,7 @@ ${
                         Créé le : ${escapeHTML(formatDate(deployment.created_at))}
                       </p>
                       ${deployment.status === "published" && deployment.id !== hosting?.active_deployment_id
-                        ? `<button class="primary-btn" onclick="restoreWebsiteDeployment('${escapeHTML(project.id)}','${escapeHTML(deployment.id)}')">Restaurer cette version</button>`
+                        ? `<button class="primary-btn" onclick="restoreWebsiteDeployment(${escapeJSAttribute(project.id)},${escapeJSAttribute(deployment.id)})">Restaurer cette version</button>`
                         : deployment.id === hosting?.active_deployment_id
                           ? `<p class="muted">Version actuellement publiée</p>`
                           : ""}
@@ -5923,9 +5927,9 @@ function renderApplications(applications) {
         <p><span class="status">${escapeHTML(status)}</span></p>
         <div class="muted">Créée le : ${escapeHTML(formatDate(application.created_at))}</div>
         <div class="item-actions">
-          <button type="button" onclick="openApplicationEditor('${escapeHTML(application.id)}')">Ouvrir l'éditeur</button>
-          <button class="secondary" type="button" onclick="renameApplication('${escapeHTML(application.id)}')">Modifier le nom</button>
-          <button class="danger" type="button" onclick="moveApplicationToTrash('${escapeHTML(application.id)}')">Mettre à la corbeille</button>
+          <button type="button" onclick="openApplicationEditor(${escapeJSAttribute(application.id)})">Ouvrir l'éditeur</button>
+          <button class="secondary" type="button" onclick="renameApplication(${escapeJSAttribute(application.id)})">Modifier le nom</button>
+          <button class="danger" type="button" onclick="moveApplicationToTrash(${escapeJSAttribute(application.id)})">Mettre à la corbeille</button>
         </div>
       </div>
     `;
@@ -6121,7 +6125,7 @@ function renderApplicationEditorFile() {
   const fileNames = ["index.html", "style.css", "script.js"];
   tabs.innerHTML = fileNames.map(name =>
     "<button type=\"button\" class=\"" + (applicationEditorState.activeFile === name ? "primary-btn" : "secondary") +
-    "\" onclick=\"selectApplicationEditorFile('" + name + "')\">" + name + "</button>"
+    "\" onclick=\"selectApplicationEditorFile(" + escapeJSAttribute(name) + ")\">" + name + "</button>"
   ).join("");
   editor.value = applicationEditorState.files[applicationEditorState.activeFile] || "";
   loadApplicationFileVersions();
