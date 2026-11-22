@@ -1140,12 +1140,20 @@ async function renderAdmin() {
     <div class="card" id="adminUsers">
       Chargement des utilisateurs...
     </div>
+
+    <div class="section-head">
+      <h2>Suivi des abonnements</h2>
+    </div>
+    <div class="card" id="adminSubscriptions">
+      Chargement des abonnements...
+    </div>
   `;
 
   try {
-    const [stats, usersData] = await Promise.all([
+    const [stats, usersData, subscriptionsData] = await Promise.all([
       api("/admin/stats"),
-      api("/admin/users")
+      api("/admin/users"),
+      api("/admin/subscriptions")
     ]);
 
     document.getElementById("adminStats").innerHTML = `
@@ -1247,6 +1255,43 @@ async function renderAdmin() {
         </div>
       `
       : "Aucun utilisateur trouvé.";
+
+    const subscriptions = subscriptionsData.subscriptions || [];
+    const subscriptionsContainer = document.getElementById("adminSubscriptions");
+    subscriptionsContainer.innerHTML = subscriptions.length
+      ? `
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr>
+                <th style="text-align:left;padding:12px">Utilisateur</th>
+                <th style="text-align:left;padding:12px">Forfait</th>
+                <th style="text-align:left;padding:12px">Statut</th>
+                <th style="text-align:left;padding:12px">Début</th>
+                <th style="text-align:left;padding:12px">Expiration</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${subscriptions.map(item => {
+                const planNames = { free: "Free", starter: "Starter", pro: "Pro" };
+                return `
+                  <tr>
+                    <td style="padding:12px">
+                      <strong>${escapeHTML(item.full_name || "—")}</strong>
+                      <div class="muted">${escapeHTML(item.email || "")}</div>
+                    </td>
+                    <td style="padding:12px">${escapeHTML(planNames[item.plan] || item.plan || "Aucun")}</td>
+                    <td style="padding:12px">${escapeHTML(item.status || "Aucun abonnement")}</td>
+                    <td style="padding:12px">${escapeHTML(item.started_at ? formatDate(item.started_at) : "—")}</td>
+                    <td style="padding:12px">${escapeHTML(item.expires_at ? formatDate(item.expires_at) : "Aucune")}</td>
+                  </tr>
+                `;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      `
+      : "Aucun abonnement trouvé.";
 
     usersContainer.onclick = async function(event) {
       const button = event.target.closest("button[data-action]");
