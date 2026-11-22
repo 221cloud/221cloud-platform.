@@ -3735,7 +3735,7 @@ hosting
         }
 
         const existing = await env.DB.prepare(
-          "SELECT id FROM customer_databases WHERE user_id = ? AND name = ?"
+          "SELECT id FROM customer_databases WHERE user_id = ? AND name = ? COLLATE NOCASE"
         ).bind(user.id, name).first();
 
         if (existing) {
