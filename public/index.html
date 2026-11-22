@@ -1189,75 +1189,100 @@ async function renderAdmin() {
     const users = usersData.users || [];
     const usersContainer = document.getElementById("adminUsers");
 
-    usersContainer.innerHTML = users.length
-      ? `
-        <div style="overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse">
-            <thead>
-              <tr>
-                <th style="text-align:left;padding:12px">Nom</th>
-                <th style="text-align:left;padding:12px">Email</th>
-                <th style="text-align:left;padding:12px">Rôle</th>
-                <th style="text-align:left;padding:12px">Statut</th>
-                <th style="text-align:left;padding:12px">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${users.map(user => {
-                const isSelf = currentUser && currentUser.id === user.id;
-                const encodedId = encodeURIComponent(user.id);
-
-                return `
-                  <tr>
-                    <td style="padding:12px">
-                      ${escapeHTML(user.full_name || "—")}
-                    </td>
-
-                    <td style="padding:12px">
-                      ${escapeHTML(user.email)}
-                    </td>
-
-                    <td style="padding:12px">
-                      ${user.role === "admin" ? "Administrateur" : "Client"}
-                    </td>
-
-                    <td style="padding:12px">
-                      ${user.status === "active" ? "Actif" : "Suspendu"}
-                    </td>
-
-                    <td style="padding:12px">
-                      <div style="display:flex;gap:8px;flex-wrap:wrap;min-width:190px">
-
-                        <button
-                          type="button"
-                          data-action="role"
-                          data-user-id="${encodedId}"
-                          data-value="${user.role === "admin" ? "client" : "admin"}"
-                          ${isSelf ? "disabled" : ""}
-                        >
-                          ${user.role === "admin" ? "Rétrograder" : "Promouvoir"}
-                        </button>
-
-                        <button
-                          type="button"
-                          data-action="status"
-                          data-user-id="${encodedId}"
-                          data-value="${user.status === "active" ? "suspended" : "active"}"
-                          ${isSelf ? "disabled" : ""}
-                        >
-                          ${user.status === "active" ? "Suspendre" : "Réactiver"}
-                        </button>
-
-                      </div>
-                    </td>
-                  </tr>
-                `;
-              }).join("")}
-            </tbody>
-          </table>
+    usersContainer.innerHTML = `
+      <div class="grid" style="margin-bottom:16px">
+        <div>
+          <label for="adminUserSearch">Rechercher un compte</label>
+          <input id="adminUserSearch" type="search" placeholder="Nom ou adresse e-mail">
         </div>
-      `
-      : "Aucun utilisateur trouvé.";
+        <div>
+          <label for="adminUserRoleFilter">Rôle</label>
+          <select id="adminUserRoleFilter">
+            <option value="all">Tous les rôles</option>
+            <option value="client">Clients</option>
+            <option value="admin">Administrateurs</option>
+          </select>
+        </div>
+        <div>
+          <label for="adminUserStatusFilter">Statut</label>
+          <select id="adminUserStatusFilter">
+            <option value="all">Tous les statuts</option>
+            <option value="active">Actifs</option>
+            <option value="suspended">Suspendus</option>
+          </select>
+        </div>
+      </div>
+      <p class="muted" id="adminUserCount"></p>
+      <div id="adminUsersTable"></div>
+    `;
+
+    const searchInput = document.getElementById("adminUserSearch");
+    const roleFilter = document.getElementById("adminUserRoleFilter");
+    const statusFilter = document.getElementById("adminUserStatusFilter");
+    const userCount = document.getElementById("adminUserCount");
+    const usersTable = document.getElementById("adminUsersTable");
+
+    function renderFilteredAdminUsers() {
+      const query = searchInput.value.trim().toLowerCase();
+      const selectedRole = roleFilter.value;
+      const selectedStatus = statusFilter.value;
+      const filteredUsers = users.filter(user => {
+        const matchesQuery = !query ||
+          String(user.full_name || "").toLowerCase().includes(query) ||
+          String(user.email || "").toLowerCase().includes(query);
+        const matchesRole = selectedRole === "all" || user.role === selectedRole;
+        const matchesStatus = selectedStatus === "all" || user.status === selectedStatus;
+        return matchesQuery && matchesRole && matchesStatus;
+      });
+
+      userCount.textContent = filteredUsers.length + " compte(s) affiché(s) sur " + users.length + ".";
+      usersTable.innerHTML = filteredUsers.length
+        ? `
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse">
+              <thead>
+                <tr>
+                  <th style="text-align:left;padding:12px">Nom</th>
+                  <th style="text-align:left;padding:12px">Email</th>
+                  <th style="text-align:left;padding:12px">Rôle</th>
+                  <th style="text-align:left;padding:12px">Statut</th>
+                  <th style="text-align:left;padding:12px">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${filteredUsers.map(user => {
+                  const isSelf = currentUser && currentUser.id === user.id;
+                  const encodedId = encodeURIComponent(user.id);
+                  return `
+                    <tr>
+                      <td style="padding:12px">${escapeHTML(user.full_name || "—")}</td>
+                      <td style="padding:12px">${escapeHTML(user.email)}</td>
+                      <td style="padding:12px">${user.role === "admin" ? "Administrateur" : "Client"}</td>
+                      <td style="padding:12px">${user.status === "active" ? "Actif" : "Suspendu"}</td>
+                      <td style="padding:12px">
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;min-width:190px">
+                          <button type="button" data-action="role" data-user-id="${encodedId}" data-value="${user.role === "admin" ? "client" : "admin"}" ${isSelf ? "disabled" : ""}>
+                            ${user.role === "admin" ? "Rétrograder" : "Promouvoir"}
+                          </button>
+                          <button type="button" data-action="status" data-user-id="${encodedId}" data-value="${user.status === "active" ? "suspended" : "active"}" ${isSelf ? "disabled" : ""}>
+                            ${user.status === "active" ? "Suspendre" : "Réactiver"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  `;
+                }).join("")}
+              </tbody>
+            </table>
+          </div>
+        `
+        : '<p class="muted">Aucun compte ne correspond à ces critères.</p>';
+    }
+
+    searchInput.addEventListener("input", renderFilteredAdminUsers);
+    roleFilter.addEventListener("change", renderFilteredAdminUsers);
+    statusFilter.addEventListener("change", renderFilteredAdminUsers);
+    renderFilteredAdminUsers();
 
     const subscriptions = subscriptionsData.subscriptions || [];
     const subscriptionSummary = subscriptionsData.summary || {};
