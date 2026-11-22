@@ -922,7 +922,7 @@ async function register() {
   button.textContent = "Création...";
 
   try {
-    await api("/register", {
+    const data = await api("/register", {
       method:"POST",
       body:JSON.stringify({
         full_name:name,
@@ -931,9 +931,8 @@ async function register() {
         password
       })
     });
-    showMessage("Compte créé. Vous pouvez maintenant vous connecter.", "success");
-    showAuthForm("login");
-    document.getElementById("loginEmail").value = email;
+    document.getElementById("registerPassword").value = "";
+    setLoggedIn(data.user || data);
   } catch(error) {
     showMessage(error.message);
   } finally {
