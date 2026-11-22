@@ -3479,19 +3479,22 @@ hosting
           return json({ error: "L'espace de code de cette application est limité à 1 Mo pour le moment." }, 413);
         }
         const mimeType = fileName === "index.html" ? "text/html; charset=utf-8" : fileName === "style.css" ? "text/css" : "text/javascript";
-        await env.DB.prepare(
-          "INSERT INTO application_files (id, project_id, file_name, content, mime_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) ON CONFLICT(project_id, file_name) DO UPDATE SET content = excluded.content, mime_type = excluded.mime_type, updated_at = CURRENT_TIMESTAMP"
-        ).bind(crypto.randomUUID(), projectId, fileName, content, mimeType).run();
-        const latestVersion = await env.DB.prepare(
-          "SELECT COALESCE(MAX(version_number), 0) AS latest FROM application_file_versions WHERE project_id = ? AND file_name = ?"
-        ).bind(projectId, fileName).first();
-        const nextVersion = Number(latestVersion?.latest || 0) + 1;
-        await env.DB.prepare(
-          "INSERT INTO application_file_versions (id, project_id, file_name, version_number, content, mime_type) VALUES (?, ?, ?, ?, ?, ?)"
-        ).bind(crypto.randomUUID(), projectId, fileName, nextVersion, content, mimeType).run();
-        await env.DB.prepare(
-          "DELETE FROM application_file_versions WHERE project_id = ? AND file_name = ? AND version_number NOT IN (SELECT version_number FROM application_file_versions WHERE project_id = ? AND file_name = ? ORDER BY version_number DESC LIMIT 30)"
-        ).bind(projectId, fileName, projectId, fileName).run();
+        const nextFileVersionId = crypto.randomUUID();
+        await env.DB.batch([
+          env.DB.prepare(
+            "INSERT INTO application_files (id, project_id, file_name, content, mime_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) ON CONFLICT(project_id, file_name) DO UPDATE SET content = excluded.content, mime_type = excluded.mime_type, updated_at = CURRENT_TIMESTAMP"
+          ).bind(crypto.randomUUID(), projectId, fileName, content, mimeType),
+          env.DB.prepare(
+            "INSERT INTO application_file_versions (id, project_id, file_name, version_number, content, mime_type) SELECT ?, ?, ?, COALESCE(MAX(version_number), 0) + 1, ?, ? FROM application_file_versions WHERE project_id = ? AND file_name = ?"
+          ).bind(nextFileVersionId, projectId, fileName, content, mimeType, projectId, fileName),
+          env.DB.prepare(
+            "DELETE FROM application_file_versions WHERE project_id = ? AND file_name = ? AND version_number NOT IN (SELECT version_number FROM application_file_versions WHERE project_id = ? AND file_name = ? ORDER BY version_number DESC LIMIT 30)"
+          ).bind(projectId, fileName, projectId, fileName)
+        ]);
+        const savedVersion = await env.DB.prepare(
+          "SELECT version_number FROM application_file_versions WHERE id = ? AND project_id = ? AND file_name = ? LIMIT 1"
+        ).bind(nextFileVersionId, projectId, fileName).first();
+        const nextVersion = Number(savedVersion?.version_number || 0);
         return json({ message: "Fichier enregistré et version conservée.", file_name: fileName, size, version_number: nextVersion });
       } catch (error) {
         if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
@@ -3558,19 +3561,22 @@ hosting
         if (Number(usage?.total || 0) + contentSize > 1048576) {
           return json({ error: "La restauration dépasserait la limite de 1 Mo." }, 413);
         }
-        await env.DB.prepare(
-          "UPDATE application_files SET content = ?, mime_type = ?, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND file_name = ?"
-        ).bind(version.content, version.mime_type, projectId, fileName).run();
-        const latestVersion = await env.DB.prepare(
-          "SELECT COALESCE(MAX(version_number), 0) AS latest FROM application_file_versions WHERE project_id = ? AND file_name = ?"
-        ).bind(projectId, fileName).first();
-        const nextVersion = Number(latestVersion?.latest || 0) + 1;
-        await env.DB.prepare(
-          "INSERT INTO application_file_versions (id, project_id, file_name, version_number, content, mime_type) VALUES (?, ?, ?, ?, ?, ?)"
-        ).bind(crypto.randomUUID(), projectId, fileName, nextVersion, version.content, version.mime_type).run();
-        await env.DB.prepare(
-          "DELETE FROM application_file_versions WHERE project_id = ? AND file_name = ? AND version_number NOT IN (SELECT version_number FROM application_file_versions WHERE project_id = ? AND file_name = ? ORDER BY version_number DESC LIMIT 30)"
-        ).bind(projectId, fileName, projectId, fileName).run();
+        const restoredVersionId = crypto.randomUUID();
+        await env.DB.batch([
+          env.DB.prepare(
+            "INSERT INTO application_files (id, project_id, file_name, content, mime_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) ON CONFLICT(project_id, file_name) DO UPDATE SET content = excluded.content, mime_type = excluded.mime_type, updated_at = CURRENT_TIMESTAMP"
+          ).bind(crypto.randomUUID(), projectId, fileName, version.content, version.mime_type),
+          env.DB.prepare(
+            "INSERT INTO application_file_versions (id, project_id, file_name, version_number, content, mime_type) SELECT ?, ?, ?, COALESCE(MAX(version_number), 0) + 1, ?, ? FROM application_file_versions WHERE project_id = ? AND file_name = ?"
+          ).bind(restoredVersionId, projectId, fileName, version.content, version.mime_type, projectId, fileName),
+          env.DB.prepare(
+            "DELETE FROM application_file_versions WHERE project_id = ? AND file_name = ? AND version_number NOT IN (SELECT version_number FROM application_file_versions WHERE project_id = ? AND file_name = ? ORDER BY version_number DESC LIMIT 30)"
+          ).bind(projectId, fileName, projectId, fileName)
+        ]);
+        const restoredVersion = await env.DB.prepare(
+          "SELECT version_number FROM application_file_versions WHERE id = ? AND project_id = ? AND file_name = ? LIMIT 1"
+        ).bind(restoredVersionId, projectId, fileName).first();
+        const nextVersion = Number(restoredVersion?.version_number || 0);
         return json({
           message: "Version restaurée. Une nouvelle version a été conservée dans l'historique.",
           file: { file_name: fileName, content: version.content, mime_type: version.mime_type, version_number: nextVersion }
