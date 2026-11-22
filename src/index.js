@@ -3862,7 +3862,13 @@ hosting
               if (typeof raw !== "string" || raw.length > 5000) return { error: "Le champ « " + name + " » doit être un texte de 5 000 caractères maximum." };
               normalized.push([column, raw]);
             } else if (column.data_type === "number") {
-              const number = typeof raw === "number" ? raw : Number(raw);
+              if (
+                typeof raw !== "number" &&
+                (typeof raw !== "string" || raw.trim() === "")
+              ) {
+                return { error: "Le champ « " + name + " » doit contenir un nombre valide." };
+              }
+              const number = typeof raw === "number" ? raw : Number(raw.trim());
               if (!Number.isFinite(number)) return { error: "Le champ « " + name + " » doit contenir un nombre valide." };
               normalized.push([column, number]);
             } else if (column.data_type === "boolean") {
