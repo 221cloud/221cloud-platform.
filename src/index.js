@@ -946,6 +946,36 @@ if (path === "/api/admin/stats") {
     storageUsed: files.storage_used
   });
 }
+if (path === "/api/admin/subscriptions" && request.method === "GET") {
+  const auth = await requireAdmin(request, env);
+  if (auth.response) return auth.response;
+
+  const result = await env.DB.prepare(`
+    SELECT
+      u.id AS user_id,
+      u.full_name,
+      u.email,
+      latest.plan,
+      latest.status,
+      latest.started_at,
+      latest.expires_at,
+      latest.auto_renew,
+      latest.created_at AS subscription_created_at
+    FROM users u
+    LEFT JOIN subscriptions latest
+      ON latest.user_id = u.id
+      AND latest.created_at = (
+        SELECT MAX(s.created_at)
+        FROM subscriptions s
+        WHERE s.user_id = u.id
+      )
+    ORDER BY u.created_at DESC
+  `).all();
+
+  return json({
+    subscriptions: result.results || []
+  });
+}
 if (path === "/api/admin/users" && request.method === "GET") {
   const auth = await requireAdmin(request, env);
 
