@@ -801,7 +801,6 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    if (path === "/api/health") {
     // PUBLICATION D'APPLICATION : SERVIR UNIQUEMENT LA VERSION ACTIVE
     const publicApplicationMatch = path.match(/^\/app\/([a-z0-9-]+)(?:\/(.*))?$/);
     if (publicApplicationMatch && request.method === "GET") {
