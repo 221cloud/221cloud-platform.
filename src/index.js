@@ -3470,6 +3470,63 @@ hosting
           });
         }
 
+        if (rowId === "import" && request.method === "POST") {
+          const body = await request.json();
+          const rows = body.rows;
+          if (!Array.isArray(rows) || rows.length < 1 || rows.length > 500) {
+            return json({ error: "Le fichier doit contenir entre 1 et 500 lignes de données par import." }, 400);
+          }
+          if (!columns.length) {
+            return json({ error: "Ajoutez au moins une colonne à cette table avant l'import." }, 400);
+          }
+          const preparedRows = [];
+          const rowErrors = [];
+          for (let index = 0; index < rows.length; index++) {
+            const source = rows[index];
+            if (!source || typeof source !== "object" || Array.isArray(source)) {
+              rowErrors.push({ row: index + 1, error: "Ligne invalide." });
+              continue;
+            }
+            const values = {};
+            for (const column of columns) {
+              values[column.name] = Object.prototype.hasOwnProperty.call(source, column.name)
+                ? source[column.name]
+                : null;
+            }
+            const checked = validateValues(values);
+            if (checked.error) {
+              rowErrors.push({ row: index + 1, error: checked.error });
+              continue;
+            }
+            preparedRows.push(checked.entries);
+          }
+          if (rowErrors.length) {
+            return json({
+              error: "Aucune ligne n'a été importée : certaines valeurs doivent être corrigées.",
+              imported: 0,
+              invalid_rows: rowErrors.slice(0, 20),
+              invalid_count: rowErrors.length
+            }, 400);
+          }
+          const insertStatements = preparedRows.map(entries => {
+            const newRowId = crypto.randomUUID();
+            const names = entries.map(([column]) => quoteIdentifier(column.physical_name));
+            const placeholders = entries.map(() => "?");
+            return env.DB.prepare(
+              "INSERT INTO " + quoteIdentifier(table.physical_name) +
+              " (row_id, " + names.join(", ") + ") VALUES (?, " + placeholders.join(", ") + ")"
+            ).bind(newRowId, ...entries.map(([, value]) => value));
+          });
+          for (let start = 0; start < insertStatements.length; start += 50) {
+            await env.DB.batch(insertStatements.slice(start, start + 50));
+          }
+          return json({
+            message: "Import CSV terminé.",
+            imported: preparedRows.length,
+            invalid_count: 0
+          }, 201);
+        }
+
         if (!rowId && request.method === "POST") {
           const body = await request.json();
           const checked = validateValues(body.values);
