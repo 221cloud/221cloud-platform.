@@ -1476,7 +1476,7 @@ if (
     if (path === "/api/register" && request.method === "POST") {
       if (!REGISTRATION_ENABLED) {
         return json({
-          error: "Les nouvelles inscriptions sont temporairement suspendues. La vérification de l'adresse e-mail sera disponible après la configuration du service de messagerie 221Cloud."
+          error: "Les nouvelles inscriptions sont temporairement suspendues."
         }, 503);
       }
 
@@ -1496,13 +1496,18 @@ if (
         }
 
         const body = await readLimitedJsonBody(request);
-
         const email = String(body.email || "").trim().toLowerCase();
         const password = String(body.password || "");
         const fullName = String(body.full_name || body.name || "").trim();
 
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
           return json({ error: "Adresse e-mail invalide." }, 400);
+        }
+
+        if (fullName.length < 2 || fullName.length > 80) {
+          return json({
+            error: "Le nom complet doit contenir entre 2 et 80 caractères."
+          }, 400);
         }
 
         if (password.length < 12 || password.length > 128) {
@@ -1524,44 +1529,19 @@ if (
         const userId = crypto.randomUUID();
         const passwordHash = await hashPassword(password);
 
-        await env.DB.prepare(
-          "INSERT INTO users (id, email, full_name, password_hash, role) VALUES (?, ?, ?, ?, 'client')"
-        ).bind(
-          userId,
-          email,
-          fullName || null,
-          passwordHash
-                ).run();
-
-        // Créer automatiquement l'abonnement Free
-        await env.DB.prepare(`
-          INSERT INTO subscriptions (
-            id,
-            user_id,
-            plan,
-            status,
-            created_at,
-            started_at,
-            expires_at,
-            auto_renew
-          )
-          SELECT
-            ?,
-            ?,
-            'free',
-            'active',
-            CURRENT_TIMESTAMP,
-            CURRENT_TIMESTAMP,
-            NULL,
-            0
-          WHERE NOT EXISTS (
-            SELECT 1 FROM subscriptions WHERE user_id = ?
-          )
-        `).bind(
-          crypto.randomUUID(),
-          userId,
-          userId
-        ).run();
+        // D1 batch exécute les deux opérations dans une transaction :
+        // aucun compte ne reste créé sans son abonnement Free.
+        await env.DB.batch([
+          env.DB.prepare(
+            "INSERT INTO users (id, email, full_name, password_hash, role) VALUES (?, ?, ?, ?, 'client')"
+          ).bind(userId, email, fullName, passwordHash),
+          env.DB.prepare(`
+            INSERT INTO subscriptions (
+              id, user_id, plan, status, created_at, started_at, expires_at, auto_renew
+            )
+            VALUES (?, ?, 'free', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, 0)
+          `).bind(crypto.randomUUID(), userId)
+        ]);
 
         const token = await createSession(env, userId);
 
@@ -1570,7 +1550,7 @@ if (
           user: {
             id: userId,
             email,
-            full_name: fullName || null,
+            full_name: fullName,
             role: "client"
           }
         }, 201, {
@@ -1578,7 +1558,12 @@ if (
         });
 
       } catch (error) {
-        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
+        if (error?.status === 413) {
+          return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
+        }
+        if (String(error?.message || "").includes("UNIQUE constraint failed: users.email")) {
+          return json({ error: "Cette adresse e-mail est déjà utilisée." }, 409);
+        }
         console.error("ERREUR INSCRIPTION 221CLOUD:", error);
         return json({
           error: "Impossible de créer le compte."
