@@ -3870,8 +3870,22 @@ hosting
               normalized.push([column, raw === true || raw === 1 || raw === "1" ? 1 : 0]);
             } else if (column.data_type === "date") {
               const date = String(raw);
-              if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date + "T00:00:00Z"))) {
-                return { error: "Le champ « " + name + " » doit être une date au format AAAA-MM-JJ." };
+              const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+              let validDate = false;
+              if (match) {
+                const year = Number(match[1]);
+                const month = Number(match[2]);
+                const day = Number(match[3]);
+                const parsed = new Date(Date.UTC(year, month - 1, day));
+                validDate =
+                  month >= 1 && month <= 12 &&
+                  day >= 1 &&
+                  parsed.getUTCFullYear() === year &&
+                  parsed.getUTCMonth() === month - 1 &&
+                  parsed.getUTCDate() === day;
+              }
+              if (!validDate) {
+                return { error: "Le champ « " + name + " » doit être une date réelle au format AAAA-MM-JJ." };
               }
               normalized.push([column, date]);
             } else {
