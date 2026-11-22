@@ -1951,16 +1951,23 @@ if (path === "/api/subscription" && request.method === "GET") {
 
         // Récupération du forfait
         const subscription = await env.DB.prepare(`
-          SELECT plan, status
+          SELECT
+            plan,
+            status,
+            expires_at,
+            CASE
+              WHEN LOWER(status) = 'active'
+                AND (expires_at IS NULL OR datetime(expires_at) > CURRENT_TIMESTAMP)
+              THEN LOWER(plan)
+              ELSE 'free'
+            END AS effective_plan
           FROM subscriptions
           WHERE user_id = ?
-          ORDER BY created_at DESC
+          ORDER BY datetime(created_at) DESC, id DESC
           LIMIT 1
         `).bind(user.id).first();
 
-        const plan = subscription?.status === "active"
-          ? subscription.plan
-          : "free";
+        const plan = String(subscription?.effective_plan || "free").toLowerCase();
 
         const storageLimits = {
           free: 1024 * 1024 * 1024,
@@ -2218,10 +2225,22 @@ if (path === "/api/subscription" && request.method === "GET") {
         const cloneBytes = files.reduce((sum, file) => sum + Math.max(0, Number(file.file_size) || 0), 0);
 
         const subscription = await env.DB.prepare(`
-          SELECT plan, status FROM subscriptions
-          WHERE user_id = ? ORDER BY created_at DESC LIMIT 1
+          SELECT
+            plan,
+            status,
+            expires_at,
+            CASE
+              WHEN LOWER(status) = 'active'
+                AND (expires_at IS NULL OR datetime(expires_at) > CURRENT_TIMESTAMP)
+              THEN LOWER(plan)
+              ELSE 'free'
+            END AS effective_plan
+          FROM subscriptions
+          WHERE user_id = ?
+          ORDER BY datetime(created_at) DESC, id DESC
+          LIMIT 1
         `).bind(user.id).first();
-        const plan = subscription?.status === "active" ? subscription.plan : "free";
+        const plan = String(subscription?.effective_plan || "free").toLowerCase();
         const storageLimits = {
           free: 1024 * 1024 * 1024,
           starter: 5 * 1024 * 1024 * 1024,
@@ -3141,16 +3160,23 @@ if (downloadRequested) {
         }
         // Vérification de la limite de projets selon l'abonnement
         const subscription = await env.DB.prepare(`
-          SELECT plan, status
+          SELECT
+            plan,
+            status,
+            expires_at,
+            CASE
+              WHEN LOWER(status) = 'active'
+                AND (expires_at IS NULL OR datetime(expires_at) > CURRENT_TIMESTAMP)
+              THEN LOWER(plan)
+              ELSE 'free'
+            END AS effective_plan
           FROM subscriptions
           WHERE user_id = ?
-          ORDER BY created_at DESC
+          ORDER BY datetime(created_at) DESC, id DESC
           LIMIT 1
         `).bind(user.id).first();
 
-        const plan = subscription?.status === "active"
-          ? subscription.plan
-          : "free";
+        const plan = String(subscription?.effective_plan || "free").toLowerCase();
 
         const projectLimits = {
           free: 1,
@@ -3253,13 +3279,22 @@ hosting
         if (!project) return json({ error: "Projet introuvable dans la corbeille." }, 404);
 
         const subscription = await env.DB.prepare(`
-          SELECT plan, status
+          SELECT
+            plan,
+            status,
+            expires_at,
+            CASE
+              WHEN LOWER(status) = 'active'
+                AND (expires_at IS NULL OR datetime(expires_at) > CURRENT_TIMESTAMP)
+              THEN LOWER(plan)
+              ELSE 'free'
+            END AS effective_plan
           FROM subscriptions
           WHERE user_id = ?
-          ORDER BY created_at DESC
+          ORDER BY datetime(created_at) DESC, id DESC
           LIMIT 1
         `).bind(user.id).first();
-        const plan = subscription?.status === "active" ? subscription.plan : "free";
+        const plan = String(subscription?.effective_plan || "free").toLowerCase();
         const projectLimits = { free: 1, starter: 5, pro: 20 };
         const maxProjects = projectLimits[plan] ?? 1;
         const activeCount = await env.DB.prepare(`
@@ -4683,16 +4718,23 @@ hosting
 const used = Number(usage?.used || 0);
         // Récupération du forfait actuel
         const subscription = await env.DB.prepare(`
-          SELECT plan, status
+          SELECT
+            plan,
+            status,
+            expires_at,
+            CASE
+              WHEN LOWER(status) = 'active'
+                AND (expires_at IS NULL OR datetime(expires_at) > CURRENT_TIMESTAMP)
+              THEN LOWER(plan)
+              ELSE 'free'
+            END AS effective_plan
           FROM subscriptions
           WHERE user_id = ?
-          ORDER BY created_at DESC
+          ORDER BY datetime(created_at) DESC, id DESC
           LIMIT 1
         `).bind(user.id).first();
 
-        const plan = subscription?.status === "active"
-          ? subscription.plan
-          : "free";
+        const plan = String(subscription?.effective_plan || "free").toLowerCase();
 
         // Limites selon le forfait
         const storageLimits = {
@@ -4788,16 +4830,23 @@ const used = Number(usage?.used || 0);
 
                 // Récupération du forfait de l'utilisateur
         const subscription = await env.DB.prepare(`
-          SELECT plan, status
+          SELECT
+            plan,
+            status,
+            expires_at,
+            CASE
+              WHEN LOWER(status) = 'active'
+                AND (expires_at IS NULL OR datetime(expires_at) > CURRENT_TIMESTAMP)
+              THEN LOWER(plan)
+              ELSE 'free'
+            END AS effective_plan
           FROM subscriptions
           WHERE user_id = ?
-          ORDER BY created_at DESC
+          ORDER BY datetime(created_at) DESC, id DESC
           LIMIT 1
         `).bind(user.id).first();
 
-        const plan = subscription?.status === "active"
-          ? subscription.plan
-          : "free";
+        const plan = String(subscription?.effective_plan || "free").toLowerCase();
 
         // Quotas de stockage en octets
         const storageLimits = {
