@@ -281,15 +281,18 @@ async function generateApplicationSlug(env, projectName) {
     .slice(0, 50)
     .replace(/-+$/g, "") || "application";
 
-  let slug = base;
-  let suffix = 2;
-  while (await env.DB.prepare(
-    "SELECT id FROM application_publications WHERE slug = ? LIMIT 1"
-  ).bind(slug).first()) {
-    slug = `${base}-${suffix}`;
-    suffix++;
+  // Le suffixe aléatoire évite qu'une publication simultanée portant
+  // le même nom choisisse le même slug avant l'insertion en base.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+    const slug = `${base}-${suffix}`;
+    const existing = await env.DB.prepare(
+      "SELECT id FROM application_publications WHERE slug = ? LIMIT 1"
+    ).bind(slug).first();
+    if (!existing) return slug;
   }
-  return slug;
+
+  throw new Error("Impossible de générer une adresse publique unique.");
 }
 
 async function requireAdmin(request, env) {
