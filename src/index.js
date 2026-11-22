@@ -348,6 +348,10 @@ async function ensureCustomerDatabaseStructureSchema(env) {
     ON customer_database_tables(database_id, user_id, created_at)
   `).run();
   await env.DB.prepare(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_database_tables_unique_name
+    ON customer_database_tables(database_id, user_id, name COLLATE NOCASE)
+  `).run();
+  await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS customer_database_columns (
       id TEXT PRIMARY KEY,
       table_id TEXT NOT NULL,
@@ -364,6 +368,10 @@ async function ensureCustomerDatabaseStructureSchema(env) {
   await env.DB.prepare(`
     CREATE INDEX IF NOT EXISTS idx_customer_database_columns_table
     ON customer_database_columns(table_id, user_id, position)
+  `).run();
+  await env.DB.prepare(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_database_columns_unique_name
+    ON customer_database_columns(table_id, user_id, name COLLATE NOCASE)
   `).run();
 }
 
@@ -4104,24 +4112,19 @@ hosting
             return json({ error: "Impossible de préparer la table." }, 500);
           }
 
-          await env.DB.prepare(
-            `CREATE TABLE "${physicalName}" (
-              row_id TEXT PRIMARY KEY,
-              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )`
-          ).run();
-
-          try {
-            await env.DB.prepare(
+          await env.DB.batch([
+            env.DB.prepare(
+              `CREATE TABLE "${physicalName}" (
+                row_id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+              )`
+            ),
+            env.DB.prepare(
               `INSERT INTO customer_database_tables
                (id, database_id, user_id, name, physical_name)
                VALUES (?, ?, ?, ?, ?)`
-            ).bind(id, databaseId, user.id, name, physicalName).run();
-          } catch (error) {
-        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
-            await env.DB.prepare(`DROP TABLE IF EXISTS "${physicalName}"`).run();
-            throw error;
-          }
+            ).bind(id, databaseId, user.id, name, physicalName)
+          ]);
 
           return json({
             message: "Table créée avec succès.",
@@ -4179,23 +4182,18 @@ hosting
         const physicalColumn = "col_" + columnId.replace(/-/g, "");
         const position = Number(columnCount?.total || 0);
 
-        await env.DB.prepare(
-          `ALTER TABLE "${table.physical_name}" ADD COLUMN "${physicalColumn}" ${sqlType}`
-        ).run();
-
-        try {
-          await env.DB.prepare(
+        await env.DB.batch([
+          env.DB.prepare(
+            `ALTER TABLE "${table.physical_name}" ADD COLUMN "${physicalColumn}" ${sqlType}`
+          ),
+          env.DB.prepare(
             `INSERT INTO customer_database_columns
              (id, table_id, database_id, user_id, name, data_type, physical_name, position)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
           ).bind(
             columnId, tableId, databaseId, user.id, name, dataType, physicalColumn, position
-          ).run();
-        } catch (error) {
-        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
-          // La colonne ajoutée reste vide si l'enregistrement des métadonnées échoue.
-          throw error;
-        }
+          )
+        ]);
 
         return json({
           message: "Colonne ajoutée avec succès.",
@@ -4206,6 +4204,9 @@ hosting
         }, 201);
       } catch (error) {
         if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
+        if (String(error?.message || "").includes("UNIQUE constraint failed")) {
+          return json({ error: "Un élément portant déjà ce nom existe dans cette base ou cette table." }, 409);
+        }
         console.error("ERREUR STRUCTURE BASE CLIENT:", error);
         return json({ error: "Impossible de traiter la structure de cette base de données." }, 500);
       }
