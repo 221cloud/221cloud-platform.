@@ -699,6 +699,25 @@ async function clearLoginFailures(env, keys) {
 }
 
 
+async function ensureAdminAuditSchema(env) {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS admin_audit_events (
+      id TEXT PRIMARY KEY,
+      actor_id TEXT NOT NULL,
+      actor_email TEXT NOT NULL,
+      target_user_id TEXT NOT NULL,
+      target_email TEXT NOT NULL,
+      action TEXT NOT NULL,
+      old_value TEXT NOT NULL,
+      new_value TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit_events(created_at DESC)"
+  ).run();
+}
+
 async function ensureAccountSecuritySchema(env) {
   await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS account_security_events (
@@ -1045,6 +1064,22 @@ if (path.startsWith("/api/admin/subscriptions/") && request.method === "GET") {
     history: result.results || []
   });
 }
+if (path === "/api/admin/audit" && request.method === "GET") {
+  const auth = await requireAdmin(request, env);
+  if (auth.response) return auth.response;
+
+  await ensureAdminAuditSchema(env);
+  const result = await env.DB.prepare(`
+    SELECT
+      id, actor_email, target_email, action,
+      old_value, new_value, created_at
+    FROM admin_audit_events
+    ORDER BY created_at DESC
+    LIMIT 100
+  `).all();
+
+  return json({ events: result.results || [] });
+}
 if (path === "/api/admin/users" && request.method === "GET") {
   const auth = await requireAdmin(request, env);
 
@@ -1134,11 +1169,42 @@ if (
     }
   }
 
+  const changedFields = [];
+  if (role !== target.role) changedFields.push(["role", target.role, role]);
+  if (status !== target.status) changedFields.push(["status", target.status, status]);
+
   await env.DB.prepare(
     `UPDATE users
      SET role = ?, status = ?
      WHERE id = ?`
   ).bind(role, status, userId).run();
+
+  if (changedFields.length) {
+    try {
+      await ensureAdminAuditSchema(env);
+      const targetEmail = await env.DB.prepare(
+        "SELECT email FROM users WHERE id = ? LIMIT 1"
+      ).bind(userId).first();
+      for (const [field, oldValue, newValue] of changedFields) {
+        await env.DB.prepare(`
+          INSERT INTO admin_audit_events
+            (id, actor_id, actor_email, target_user_id, target_email, action, old_value, new_value)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+          crypto.randomUUID(),
+          auth.user.id,
+          String(auth.user.email || "Administrateur"),
+          userId,
+          String(targetEmail?.email || "Compte inconnu"),
+          field === "role" ? "role_changed" : "status_changed",
+          String(oldValue),
+          String(newValue)
+        ).run();
+      }
+    } catch (error) {
+      console.error("ERREUR JOURNAL ADMINISTRATION:", error);
+    }
+  }
 
   return json({
     success: true,
