@@ -3958,6 +3958,16 @@ hosting
               rowErrors.push({ row: index + 1, error: "Ligne invalide." });
               continue;
             }
+            const unknownColumns = Object.keys(source).filter(name =>
+              !columns.some(column => column.name === name)
+            );
+            if (unknownColumns.length) {
+              rowErrors.push({
+                row: index + 1,
+                error: "Une ou plusieurs colonnes du fichier CSV sont inconnues."
+              });
+              continue;
+            }
             const values = {};
             for (const column of columns) {
               values[column.name] = Object.prototype.hasOwnProperty.call(source, column.name)
