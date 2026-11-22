@@ -6157,18 +6157,36 @@ async function saveApplicationFiles() {
     button.textContent = "Enregistrement...";
   }
   if (status) status.textContent = "Sauvegarde et création des versions...";
+  let savedCount = 0;
+  let failedFile = null;
   try {
     for (const fileName of changedFiles) {
-      await api("/projects/" + encodeURIComponent(applicationEditorState.projectId) + "/application-files/" + encodeURIComponent(fileName), {
-        method: "PUT",
-        body: JSON.stringify({ content: applicationEditorState.files[fileName] || "" })
-      });
-      applicationEditorState.savedFiles[fileName] = applicationEditorState.files[fileName];
+      try {
+        await api("/projects/" + encodeURIComponent(applicationEditorState.projectId) + "/application-files/" + encodeURIComponent(fileName), {
+          method: "PUT",
+          body: JSON.stringify({ content: applicationEditorState.files[fileName] || "" })
+        });
+        applicationEditorState.savedFiles[fileName] = applicationEditorState.files[fileName];
+        savedCount++;
+      } catch (error) {
+        failedFile = fileName;
+        const remainingCount = changedFiles.length - savedCount;
+        if (status) {
+          status.textContent = savedCount > 0
+            ? savedCount + " fichier(s) enregistré(s). Échec pour " + fileName + " : " + error.message + " " + remainingCount + " fichier(s) restent à sauvegarder."
+            : "Échec de l'enregistrement de " + fileName + " : " + error.message + " Aucun fichier n'a été confirmé comme enregistré.";
+        }
+        break;
+      }
     }
-    if (status) status.textContent = changedFiles.length + " fichier(s) enregistré(s). Nouvelle(s) version(s) conservée(s).";
-    await loadApplicationFileVersions();
+    if (!failedFile) {
+      if (status) status.textContent = savedCount + " fichier(s) enregistré(s). Nouvelle(s) version(s) conservée(s).";
+    }
+    if (savedCount > 0) await loadApplicationFileVersions();
   } catch (error) {
-    if (status) status.textContent = error.message;
+    if (status) status.textContent = savedCount > 0
+      ? savedCount + " fichier(s) enregistré(s), mais l'historique n'a pas pu être actualisé : " + error.message
+      : error.message;
   } finally {
     if (button) {
       button.disabled = false;
