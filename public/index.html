@@ -1287,6 +1287,7 @@ async function renderAdmin() {
                 <th style="text-align:left;padding:12px">Statut</th>
                 <th style="text-align:left;padding:12px">Début</th>
                 <th style="text-align:left;padding:12px">Expiration</th>
+                <th style="text-align:left;padding:12px">Détails</th>
               </tr>
             </thead>
             <tbody>
@@ -1302,6 +1303,11 @@ async function renderAdmin() {
                     <td style="padding:12px">${escapeHTML(item.status || "Aucun abonnement")}</td>
                     <td style="padding:12px">${escapeHTML(item.started_at ? formatDate(item.started_at) : "—")}</td>
                     <td style="padding:12px">${escapeHTML(item.expires_at ? formatDate(item.expires_at) : "Aucune")}</td>
+                    <td style="padding:12px">
+                      <button type="button" class="secondary" data-subscription-user="${encodeURIComponent(item.user_id)}">
+                        Détails
+                      </button>
+                    </td>
                   </tr>
                 `;
               }).join("")}
@@ -1310,6 +1316,85 @@ async function renderAdmin() {
         </div>
       `
       : "Aucun abonnement trouvé.";
+
+    subscriptionsContainer.insertAdjacentHTML("afterend", `
+      <div class="card" id="adminSubscriptionDetails" style="margin-top:16px">
+        Sélectionnez « Détails » sur un compte pour consulter son historique.
+      </div>
+    `);
+
+    subscriptionsContainer.onclick = async function(event) {
+      const button = event.target.closest("button[data-subscription-user]");
+      if (!button) return;
+
+      const userId = decodeURIComponent(button.dataset.subscriptionUser);
+      const details = document.getElementById("adminSubscriptionDetails");
+      if (!details) return;
+
+      details.innerHTML = "Chargement des détails...";
+      button.disabled = true;
+
+      try {
+        const data = await api("/admin/subscriptions/" + encodeURIComponent(userId));
+        const user = data.user || {};
+        const history = data.history || [];
+        const planNames = { free: "Free", starter: "Starter, pro: "Pro" };
+        const statusNames = {
+          active: "Actif",
+          expired: "Expiré",
+          cancelled: "Annulé",
+          canceled: "Annulé",
+          pending: "En attente",
+          inactive: "Inactif"
+        };
+
+        details.innerHTML = `
+          <div class="section-head">
+            <h3>Détails de l'abonnement</h3>
+          </div>
+          <p><strong>Compte :</strong> ${escapeHTML(user.full_name || "—")}</p>
+          <p><strong>E-mail :</strong> ${escapeHTML(user.email || "—")}</p>
+          <p><strong>Rôle :</strong> ${escapeHTML(user.role === "admin" ? "Administrateur" : "Client")}</p>
+          <p><strong>Compte créé le :</strong> ${escapeHTML(user.created_at ? formatDate(user.created_at) : "—")}</p>
+          <div class="section-head">
+            <h3>Historique des abonnements (${history.length})</h3>
+          </div>
+          ${history.length ? `
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse">
+                <thead>
+                  <tr>
+                    <th style="text-align:left;padding:12px">Forfait</th>
+                    <th style="text-align:left;padding:12px">Statut</th>
+                    <th style="text-align:left;padding:12px">Début</th>
+                    <th style="text-align:left;padding:12px">Expiration</th>
+                    <th style="text-align:left;padding:12px">Renouvellement auto</th>
+                    <th style="text-align:left;padding:12px">Enregistré le</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${history.map(item => `
+                    <tr>
+                      <td style="padding:12px">${escapeHTML(planNames[item.plan] || item.plan || "—")}</td>
+                      <td style="padding:12px">${escapeHTML(statusNames[String(item.status || "").toLowerCase()] || item.status || "—")}</td>
+                      <td style="padding:12px">${escapeHTML(item.started_at ? formatDate(item.started_at) : "—")}</td>
+                      <td style="padding:12px">${escapeHTML(item.expires_at ? formatDate(item.expires_at) : "Aucune")}</td>
+                      <td style="padding:12px">${Number(item.auto_renew) === 1 ? "Oui" : "Non"}</td>
+                      <td style="padding:12px">${escapeHTML(item.created_at ? formatDate(item.created_at) : "—")}</td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            </div>
+          ` : '<p class="muted">Aucun historique d’abonnement pour ce compte.</p>'}
+        `;
+        details.scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch (error) {
+        details.textContent = "Impossible de charger les détails : " + error.message;
+      } finally {
+        button.disabled = false;
+      }
+    };
 
     usersContainer.onclick = async function(event) {
       const button = event.target.closest("button[data-action]");
