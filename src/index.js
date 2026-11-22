@@ -715,6 +715,21 @@ async function ensureApplicationFilesSchema(env) {
   await env.DB.prepare(
     "CREATE INDEX IF NOT EXISTS idx_application_files_project ON application_files(project_id, file_name)"
   ).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS application_file_versions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      version_number INTEGER NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      mime_type TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(project_id, file_name, version_number)
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_application_file_versions_lookup ON application_file_versions(project_id, file_name, version_number DESC)"
+  ).run();
 }
 
 async function ensureProjectTrashSchema(env) {
@@ -2708,6 +2723,16 @@ hosting
             "SELECT file_name, content, mime_type, created_at, updated_at FROM application_files WHERE project_id = ? ORDER BY file_name ASC"
           ).bind(projectId).all();
         }
+        for (const file of (files.results || [])) {
+          const existingVersion = await env.DB.prepare(
+            "SELECT id FROM application_file_versions WHERE project_id = ? AND file_name = ? LIMIT 1"
+          ).bind(projectId, file.file_name).first();
+          if (!existingVersion) {
+            await env.DB.prepare(
+              "INSERT INTO application_file_versions (id, project_id, file_name, version_number, content, mime_type) VALUES (?, ?, ?, 1, ?, ?)"
+            ).bind(crypto.randomUUID(), projectId, file.file_name, file.content || "", file.mime_type).run();
+          }
+        }
         return json({ files: files.results || [] });
       } catch (error) {
         console.error("ERREUR FICHIERS APPLICATION:", error);
@@ -2746,10 +2771,100 @@ hosting
         await env.DB.prepare(
           "INSERT INTO application_files (id, project_id, file_name, content, mime_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) ON CONFLICT(project_id, file_name) DO UPDATE SET content = excluded.content, mime_type = excluded.mime_type, updated_at = CURRENT_TIMESTAMP"
         ).bind(crypto.randomUUID(), projectId, fileName, content, mimeType).run();
-        return json({ message: "Fichier enregistré.", file_name: fileName, size });
+        const latestVersion = await env.DB.prepare(
+          "SELECT COALESCE(MAX(version_number), 0) AS latest FROM application_file_versions WHERE project_id = ? AND file_name = ?"
+        ).bind(projectId, fileName).first();
+        const nextVersion = Number(latestVersion?.latest || 0) + 1;
+        await env.DB.prepare(
+          "INSERT INTO application_file_versions (id, project_id, file_name, version_number, content, mime_type) VALUES (?, ?, ?, ?, ?, ?)"
+        ).bind(crypto.randomUUID(), projectId, fileName, nextVersion, content, mimeType).run();
+        await env.DB.prepare(
+          "DELETE FROM application_file_versions WHERE project_id = ? AND file_name = ? AND version_number NOT IN (SELECT version_number FROM application_file_versions WHERE project_id = ? AND file_name = ? ORDER BY version_number DESC LIMIT 30)"
+        ).bind(projectId, fileName, projectId, fileName).run();
+        return json({ message: "Fichier enregistré et version conservée.", file_name: fileName, size, version_number: nextVersion });
       } catch (error) {
         console.error("ERREUR ENREGISTREMENT FICHIER APPLICATION:", error);
         return json({ error: "Impossible d'enregistrer ce fichier." }, 500);
+      }
+    }
+
+    // APPLICATIONS : CONSULTER L'HISTORIQUE DES VERSIONS D'UN FICHIER
+    const applicationVersionsMatch = path.match(/^\/api\/projects\/([^/]+)\/application-files\/([^/]+)\/versions$/);
+    if (applicationVersionsMatch && request.method === "GET") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureApplicationFilesSchema(env);
+        const projectId = decodeURIComponent(applicationVersionsMatch[1]);
+        const fileName = decodeURIComponent(applicationVersionsMatch[2]);
+        if (!["index.html", "style.css", "script.js"].includes(fileName)) {
+          return json({ error: "Nom de fichier non autorisé." }, 400);
+        }
+        const project = await env.DB.prepare(
+          "SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
+        ).bind(projectId, user.id).first();
+        if (!project) return json({ error: "Application introuvable." }, 404);
+        const versions = await env.DB.prepare(
+          "SELECT id, version_number, length(CAST(content AS BLOB)) AS size, created_at FROM application_file_versions WHERE project_id = ? AND file_name = ? ORDER BY version_number DESC LIMIT 30"
+        ).bind(projectId, fileName).all();
+        return json({ versions: versions.results || [] });
+      } catch (error) {
+        console.error("ERREUR HISTORIQUE VERSIONS APPLICATION:", error);
+        return json({ error: "Impossible de charger l'historique de ce fichier." }, 500);
+      }
+    }
+
+    // APPLICATIONS : RESTAURER UNE VERSION PRÉCÉDENTE
+    const applicationRestoreVersionMatch = path.match(/^\/api\/projects\/([^/]+)\/application-files\/([^/]+)\/restore$/);
+    if (applicationRestoreVersionMatch && request.method === "POST") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureApplicationFilesSchema(env);
+        const projectId = decodeURIComponent(applicationRestoreVersionMatch[1]);
+        const fileName = decodeURIComponent(applicationRestoreVersionMatch[2]);
+        if (!["index.html", "style.css", "script.js"].includes(fileName)) {
+          return json({ error: "Nom de fichier non autorisé." }, 400);
+        }
+        const project = await env.DB.prepare(
+          "SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
+        ).bind(projectId, user.id).first();
+        if (!project) return json({ error: "Application introuvable." }, 404);
+        const body = await request.json();
+        const versionId = String(body.version_id || "");
+        if (!versionId) return json({ error: "Version non indiquée." }, 400);
+        const version = await env.DB.prepare(
+          "SELECT id, content, mime_type, version_number FROM application_file_versions WHERE id = ? AND project_id = ? AND file_name = ? LIMIT 1"
+        ).bind(versionId, projectId, fileName).first();
+        if (!version) return json({ error: "Cette version est introuvable." }, 404);
+        const contentSize = new TextEncoder().encode(version.content || "").length;
+        if (contentSize > 262144) return json({ error: "Cette version dépasse la limite autorisée." }, 413);
+        const usage = await env.DB.prepare(
+          "SELECT COALESCE(SUM(length(CAST(content AS BLOB))), 0) AS total FROM application_files WHERE project_id = ? AND file_name <> ?"
+        ).bind(projectId, fileName).first();
+        if (Number(usage?.total || 0) + contentSize > 1048576) {
+          return json({ error: "La restauration dépasserait la limite de 1 Mo." }, 413);
+        }
+        await env.DB.prepare(
+          "UPDATE application_files SET content = ?, mime_type = ?, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND file_name = ?"
+        ).bind(version.content, version.mime_type, projectId, fileName).run();
+        const latestVersion = await env.DB.prepare(
+          "SELECT COALESCE(MAX(version_number), 0) AS latest FROM application_file_versions WHERE project_id = ? AND file_name = ?"
+        ).bind(projectId, fileName).first();
+        const nextVersion = Number(latestVersion?.latest || 0) + 1;
+        await env.DB.prepare(
+          "INSERT INTO application_file_versions (id, project_id, file_name, version_number, content, mime_type) VALUES (?, ?, ?, ?, ?, ?)"
+        ).bind(crypto.randomUUID(), projectId, fileName, nextVersion, version.content, version.mime_type).run();
+        await env.DB.prepare(
+          "DELETE FROM application_file_versions WHERE project_id = ? AND file_name = ? AND version_number NOT IN (SELECT version_number FROM application_file_versions WHERE project_id = ? AND file_name = ? ORDER BY version_number DESC LIMIT 30)"
+        ).bind(projectId, fileName, projectId, fileName).run();
+        return json({
+          message: "Version restaurée. Une nouvelle version a été conservée dans l'historique.",
+          file: { file_name: fileName, content: version.content, mime_type: version.mime_type, version_number: nextVersion }
+        });
+      } catch (error) {
+        console.error("ERREUR RESTAURATION VERSION APPLICATION:", error);
+        return json({ error: "Impossible de restaurer cette version." }, 500);
       }
     }
 
