@@ -3322,6 +3322,46 @@ hosting
       }
     }
 
+    // SUPPRESSION SÉCURISÉE D'UNE TABLE CLIENT
+    const databaseTableDeleteMatch = path.match(/^\/api\/databases\/([^/]+)\/tables\/([^/]+)$/);
+    if (databaseTableDeleteMatch) {
+      if (request.method !== "DELETE") return json({ error: "Méthode non autorisée." }, 405);
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureCustomerDatabaseStructureSchema(env);
+        const databaseId = decodeURIComponent(databaseTableDeleteMatch[1]);
+        const tableId = decodeURIComponent(databaseTableDeleteMatch[2]);
+        const database = await env.DB.prepare(
+          "SELECT id FROM customer_databases WHERE id = ? AND user_id = ? LIMIT 1"
+        ).bind(databaseId, user.id).first();
+        if (!database) return json({ error: "Base de données introuvable." }, 404);
+        const table = await env.DB.prepare(
+          "SELECT id, name, physical_name FROM customer_database_tables WHERE id = ? AND database_id = ? AND user_id = ? LIMIT 1"
+        ).bind(tableId, databaseId, user.id).first();
+        if (!table || !safeInternalSqlIdentifier(table.physical_name)) {
+          return json({ error: "Table introuvable." }, 404);
+        }
+        const body = await request.json();
+        if (String(body.confirm_name || "").trim() !== table.name) {
+          return json({ error: "Confirmation invalide. Le nom exact de la table est requis." }, 400);
+        }
+        await env.DB.batch([
+          env.DB.prepare(`DROP TABLE IF EXISTS "${table.physical_name}"`),
+          env.DB.prepare(
+            "DELETE FROM customer_database_columns WHERE table_id = ? AND database_id = ? AND user_id = ?"
+          ).bind(tableId, databaseId, user.id),
+          env.DB.prepare(
+            "DELETE FROM customer_database_tables WHERE id = ? AND database_id = ? AND user_id = ?"
+          ).bind(tableId, databaseId, user.id)
+        ]);
+        return json({ message: "Table et ses données supprimées définitivement." });
+      } catch (error) {
+        console.error("ERREUR SUPPRESSION TABLE CLIENT:", error);
+        return json({ error: "Impossible de supprimer cette table." }, 500);
+      }
+    }
+
     // STRUCTURE DES BASES CLIENT : TABLES ET COLONNES
     const databaseTablesMatch = path.match(/^\/api\/databases\/([^/]+)\/tables$/);
     const databaseColumnsMatch = path.match(/^\/api\/databases\/([^/]+)\/tables\/([^/]+)\/columns$/);
