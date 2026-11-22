@@ -1057,6 +1057,7 @@ export default {
           FROM application_publications AS publications
           JOIN application_publication_versions AS versions
             ON versions.id = publications.active_version_id
+            AND versions.publication_id = publications.id
           WHERE publications.slug = ?
           LIMIT 1
         `).bind(slug).first();
