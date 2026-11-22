@@ -1217,6 +1217,9 @@ if (
   });
 }
     if (path === "/api/database-test") {
+      const auth = await requireAdmin(request, env);
+      if (auth.response) return auth.response;
+
       try {
         const result = await env.DB.prepare(
           "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
