@@ -1274,7 +1274,47 @@ if (path === "/api/subscription" && request.method === "GET") {
       }, 404);
     }
 
-    return json({ subscription });
+    const plan = subscription.status === "active"
+      ? subscription.plan
+      : "free";
+
+    const planLimits = {
+      free: { storage_bytes: 1024 * 1024 * 1024, projects: 1 },
+      starter: { storage_bytes: 5 * 1024 * 1024 * 1024, projects: 5 },
+      pro: { storage_bytes: 20 * 1024 * 1024 * 1024, projects: 20 }
+    };
+    const limits = planLimits[plan] || planLimits.free;
+
+    const storageUsage = await env.DB.prepare(`
+      SELECT
+        COALESCE((
+          SELECT SUM(file_size)
+          FROM cloud_files
+          WHERE user_id = ?
+        ), 0) +
+        COALESCE((
+          SELECT SUM(website_files.file_size)
+          FROM website_files
+          JOIN website_hostings
+            ON website_hostings.id = website_files.hosting_id
+          WHERE website_hostings.user_id = ?
+        ), 0) AS used
+    `).bind(user.id, user.id).first();
+
+    const projectUsage = await env.DB.prepare(`
+      SELECT COUNT(*) AS total
+      FROM projects
+      WHERE user_id = ? AND deleted_at IS NULL
+    `).bind(user.id).first();
+
+    return json({
+      subscription,
+      limits,
+      usage: {
+        storage_bytes: Number(storageUsage?.used || 0),
+        projects: Number(projectUsage?.total || 0)
+      }
+    });
 
   } catch (error) {
     console.error("ERREUR ABONNEMENT 221CLOUD:", error);
