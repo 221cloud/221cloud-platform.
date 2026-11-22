@@ -4024,27 +4024,49 @@ async function downloadStorageMetadataBackup() {
 function read221ZipArchive(buffer) {
   const bytes = new Uint8Array(buffer);
   const view = new DataView(buffer);
-  const decoder = new TextDecoder("utf-8");
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+
+  if (bytes.length < 22) throw new Error("Archive ZIP invalide : fichier trop court.");
+
   let endOffset = -1;
   const minOffset = Math.max(0, bytes.length - 65557);
   for (let offset = bytes.length - 22; offset >= minOffset; offset--) {
     if (view.getUint32(offset, true) === 0x06054B50) {
-      endOffset = offset;
-      break;
+      const commentLength = view.getUint16(offset + 20, true);
+      if (offset + 22 + commentLength === bytes.length) {
+        endOffset = offset;
+        break;
+      }
     }
   }
-  if (endOffset < 0) throw new Error("Archive ZIP invalide : fin du fichier introuvable.");
+  if (endOffset < 0) throw new Error("Archive ZIP invalide : fin du fichier introuvable ou commentaire incorrect.");
+
+  const diskNumber = view.getUint16(endOffset + 4, true);
+  const centralDisk = view.getUint16(endOffset + 6, true);
+  const diskEntryCount = view.getUint16(endOffset + 8, true);
   const entryCount = view.getUint16(endOffset + 10, true);
   const centralSize = view.getUint32(endOffset + 12, true);
   const centralOffset = view.getUint32(endOffset + 16, true);
+
+  if (diskNumber !== 0 || centralDisk !== 0 || diskEntryCount !== entryCount) {
+    throw new Error("Les archives ZIP réparties sur plusieurs volumes ne sont pas prises en charge.");
+  }
   if (entryCount === 0xFFFF || centralSize === 0xFFFFFFFF || centralOffset === 0xFFFFFFFF) {
     throw new Error("Ce format ZIP volumineux n'est pas pris en charge.");
   }
-  if (centralOffset + centralSize > bytes.length) throw new Error("Index ZIP incomplet ou endommagé.");
+  if (entryCount > 20000) throw new Error("Cette archive contient trop d'entrées ZIP.");
+  if (centralOffset + centralSize !== endOffset || centralOffset > bytes.length || centralSize > bytes.length) {
+    throw new Error("Index ZIP invalide : limites incohérentes.");
+  }
+
   const entries = new Map();
   let cursor = centralOffset;
+
   for (let i = 0; i < entryCount; i++) {
-    if (view.getUint32(cursor, true) !== 0x02014B50) throw new Error("Index ZIP invalide.");
+    if (cursor + 46 > endOffset || view.getUint32(cursor, true) !== 0x02014B50) {
+      throw new Error("Index ZIP invalide ou tronqué.");
+    }
+
     const flags = view.getUint16(cursor + 8, true);
     const method = view.getUint16(cursor + 10, true);
     const crc = view.getUint32(cursor + 16, true);
@@ -4054,25 +4076,78 @@ function read221ZipArchive(buffer) {
     const extraLength = view.getUint16(cursor + 30, true);
     const commentLength = view.getUint16(cursor + 32, true);
     const localOffset = view.getUint32(cursor + 42, true);
-    const name = decoder.decode(bytes.slice(cursor + 46, cursor + 46 + nameLength));
-    cursor += 46 + nameLength + extraLength + commentLength;
-    if (flags & 1) throw new Error("Archive protégée par mot de passe non prise en charge.");
-    if (method !== 0) throw new Error("Cette archive utilise une compression non prise en charge. Utilisez une sauvegarde ZIP créée par 221Cloud.");
+    const centralRecordEnd = cursor + 46 + nameLength + extraLength + commentLength;
+
+    if (!nameLength || nameLength > 4096 || centralRecordEnd > endOffset) {
+      throw new Error("Nom ou longueur d'entrée ZIP invalide.");
+    }
+    if (flags !== 0x0800) {
+      throw new Error("Cette archive utilise des options ZIP non prises en charge.");
+    }
+    if (method !== 0) {
+      throw new Error("Cette archive utilise une compression non prise en charge. Utilisez une sauvegarde ZIP créée par 221Cloud.");
+    }
     if (compressedSize !== uncompressedSize) throw new Error("Taille ZIP incohérente.");
-    if (view.getUint32(localOffset, true) !== 0x04034B50) throw new Error("Entrée ZIP invalide.");
+    if (localOffset + 30 > centralOffset) throw new Error("En-tête local ZIP situé hors de la zone des fichiers.");
+
+    let name;
+    try {
+      name = decoder.decode(bytes.slice(cursor + 46, cursor + 46 + nameLength));
+    } catch (error) {
+      throw new Error("Un nom de fichier ZIP n'est pas un texte UTF-8 valide.");
+    }
+    if (!name || name.includes("\\") || name.startsWith("/") || name.split("/").some(part => part === "..")) {
+      throw new Error("Chemin dangereux détecté dans l'archive ZIP.");
+    }
+
+    const localSignature = view.getUint32(localOffset, true);
+    if (localSignature !== 0x04034B50) throw new Error("En-tête local ZIP invalide.");
+
+    const localFlags = view.getUint16(localOffset + 6, true);
+    const localMethod = view.getUint16(localOffset + 8, true);
+    const localCrc = view.getUint32(localOffset + 14, true);
+    const localCompressedSize = view.getUint32(localOffset + 18, true);
+    const localUncompressedSize = view.getUint32(localOffset + 22, true);
     const localNameLength = view.getUint16(localOffset + 26, true);
     const localExtraLength = view.getUint16(localOffset + 28, true);
-    const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+    const localNameStart = localOffset + 30;
+    const dataStart = localNameStart + localNameLength + localExtraLength;
     const dataEnd = dataStart + compressedSize;
-    if (dataEnd > bytes.length) throw new Error("Fichier tronqué dans l'archive ZIP.");
+
+    if (dataStart > centralOffset || dataEnd > centralOffset || dataEnd < dataStart) {
+      throw new Error("Données ZIP situées hors des limites autorisées.");
+    }
+    if (
+      localFlags !== flags ||
+      localMethod !== method ||
+      localCrc !== crc ||
+      localCompressedSize !== compressedSize ||
+      localUncompressedSize !== uncompressedSize ||
+      localNameLength !== nameLength
+    ) {
+      throw new Error("Les en-têtes ZIP central et local ne correspondent pas pour : " + name);
+    }
+
+    const localNameBytes = bytes.slice(localNameStart, localNameStart + localNameLength);
+    const centralNameBytes = bytes.slice(cursor + 46, cursor + 46 + nameLength);
+    if (localNameBytes.length !== centralNameBytes.length ||
+        localNameBytes.some((value, index) => value !== centralNameBytes[index])) {
+      throw new Error("Le nom de l'entrée ZIP diffère entre les deux en-têtes : " + name);
+    }
+
     const data = bytes.slice(dataStart, dataEnd);
     if (zip221Crc32(data) !== crc) throw new Error("Vérification d'intégrité échouée pour : " + name);
     if (!entries.has(name)) entries.set(name, []);
     entries.get(name).push(data);
+    cursor = centralRecordEnd;
   }
+
+  if (cursor !== centralOffset + centralSize) {
+    throw new Error("La taille réelle de l'index ZIP ne correspond pas à sa déclaration.");
+  }
+
   return entries;
 }
-
 async function restoreStorageBackup() {
   const button = document.querySelector('#storageHistoryCard button[onclick="restoreStorageBackup()"]');
   const originalLabel = button?.textContent || "↥ Restaurer une sauvegarde ZIP";
