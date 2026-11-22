@@ -1953,11 +1953,11 @@ function renderDashboardNotificationsFromCache() {
     const isRead = readIds.has(item.id);
     const dateLabel = item.date ? " · " + formatDate(item.date) : "";
     const action = item.page
-      ? `<button class="secondary" onclick="showPage('${item.page}')">Ouvrir</button>`
+      ? `<button class="secondary" onclick="showPage(${escapeJSAttribute(item.page)})">Ouvrir</button>`
       : "";
     const readAction = isRead
       ? '<span class="status">✓ Lue</span>'
-      : `<button class="secondary" onclick="markDashboardNotificationRead('${item.id}')">Marquer comme lue</button>`;
+      : `<button class="secondary" onclick="markDashboardNotificationRead(${escapeJSAttribute(item.id)})">Marquer comme lue</button>`;
     const border = item.level === "warning"
       ? "border-left:4px solid #f59e0b;"
       : (isRead ? "opacity:.72;" : "border-left:4px solid #438cff;");
