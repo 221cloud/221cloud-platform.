@@ -3888,7 +3888,18 @@ hosting
         const databaseId = decodeURIComponent(databaseTableDeleteMatch[1]);
         const tableId = decodeURIComponent(databaseTableDeleteMatch[2]);
         const database = await env.DB.prepare(
-          "SELECT id FROM customer_databases WHERE id = ? AND user_id = ? LIMIT 1"
+          `SELECT cd.id
+           FROM customer_databases cd
+           LEFT JOIN projects p
+             ON p.id = cd.project_id
+             AND p.user_id = cd.user_id
+           WHERE cd.id = ?
+             AND cd.user_id = ?
+             AND (
+               cd.project_id IS NULL
+               OR (p.id IS NOT NULL AND p.deleted_at IS NULL)
+             )
+           LIMIT 1`
         ).bind(databaseId, user.id).first();
         if (!database) return json({ error: "Base de données introuvable." }, 404);
         const table = await env.DB.prepare(
@@ -3929,7 +3940,18 @@ hosting
         const tableId = decodeURIComponent(databaseRowsMatch[2]);
         const rowId = databaseRowsMatch[3] ? decodeURIComponent(databaseRowsMatch[3]) : null;
         const database = await env.DB.prepare(
-          "SELECT id FROM customer_databases WHERE id = ? AND user_id = ? LIMIT 1"
+          `SELECT cd.id
+           FROM customer_databases cd
+           LEFT JOIN projects p
+             ON p.id = cd.project_id
+             AND p.user_id = cd.user_id
+           WHERE cd.id = ?
+             AND cd.user_id = ?
+             AND (
+               cd.project_id IS NULL
+               OR (p.id IS NOT NULL AND p.deleted_at IS NULL)
+             )
+           LIMIT 1`
         ).bind(databaseId, user.id).first();
         if (!database) return json({ error: "Base de données introuvable." }, 404);
         const table = await env.DB.prepare(
@@ -4173,7 +4195,18 @@ hosting
           (databaseTablesMatch || databaseColumnsMatch)[1]
         );
         const database = await env.DB.prepare(
-          "SELECT id FROM customer_databases WHERE id = ? AND user_id = ? LIMIT 1"
+          `SELECT cd.id
+           FROM customer_databases cd
+           LEFT JOIN projects p
+             ON p.id = cd.project_id
+             AND p.user_id = cd.user_id
+           WHERE cd.id = ?
+             AND cd.user_id = ?
+             AND (
+               cd.project_id IS NULL
+               OR (p.id IS NOT NULL AND p.deleted_at IS NULL)
+             )
+           LIMIT 1`
         ).bind(databaseId, user.id).first();
         if (!database) return json({ error: "Base de données introuvable." }, 404);
 
@@ -4327,8 +4360,17 @@ hosting
         const databaseId = decodeURIComponent(databaseMatch[1]);
 
         const existing = await env.DB.prepare(
-          `SELECT id, name FROM customer_databases
-           WHERE id = ? AND user_id = ?`
+          `SELECT cd.id, cd.name
+           FROM customer_databases cd
+           LEFT JOIN projects p
+             ON p.id = cd.project_id
+             AND p.user_id = cd.user_id
+           WHERE cd.id = ?
+             AND cd.user_id = ?
+             AND (
+               cd.project_id IS NULL
+               OR (p.id IS NOT NULL AND p.deleted_at IS NULL)
+             )`
         ).bind(databaseId, user.id).first();
 
         if (!existing) {
