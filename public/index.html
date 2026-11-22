@@ -1311,7 +1311,8 @@ async function loadOverviewStats() {
     api("/projects"),
     api("/databases"),
     api("/storage"),
-    api("/account/security-log")
+    api("/account/security-log"),
+    api("/subscription")
   ]);
 
   if (results[0].status === "fulfilled") {
@@ -1361,7 +1362,8 @@ async function loadOverviewStats() {
     results[0].status === "fulfilled" ? projectsCache : [],
     results[1].status === "fulfilled" ? databasesCache : [],
     results[2].status === "fulfilled" ? results[2].value : null,
-    results[3].status === "fulfilled" ? results[3].value : null
+    results[3].status === "fulfilled" ? results[3].value : null,
+    results[4].status === "fulfilled" ? results[4].value : null
   );
 
   if (refreshStatus) {
@@ -1575,7 +1577,7 @@ async function renderAllNotificationsPage() {
   renderDashboardNotificationsFromCache();
 }
 
-function renderDashboardNotifications(projects, databases, storageData, securityData) {
+function renderDashboardNotifications(projects, databases, storageData, securityData, subscriptionData) {
   const notifications = [];
   const now = Date.now();
   const recentWindow = 7 * 24 * 60 * 60 * 1000;
@@ -1635,6 +1637,43 @@ function renderDashboardNotifications(projects, databases, storageData, security
         priority: 2,
         page: "storage",
         category: "storage"
+      });
+    }
+  }
+
+  const currentSubscription = subscriptionData?.subscription;
+  if (currentSubscription) {
+    const expiryTime = currentSubscription.expires_at
+      ? new Date(currentSubscription.expires_at).getTime()
+      : null;
+    const remainingDays = Number.isFinite(expiryTime)
+      ? Math.ceil((expiryTime - now) / (24 * 60 * 60 * 1000))
+      : null;
+
+    if (currentSubscription.status !== "active") {
+      notifications.push({
+        id: "subscription-status-" + String(currentSubscription.started_at || currentSubscription.plan),
+        title: "Votre abonnement nécessite une attention",
+        message: "Le statut actuel est : " + String(currentSubscription.status || "inconnu"),
+        icon: "⚠",
+        level: "warning",
+        priority: 4,
+        page: "subscription",
+        category: "subscription"
+      });
+    } else if (remainingDays !== null && remainingDays <= 7) {
+      notifications.push({
+        id: "subscription-expiry-" + String(currentSubscription.started_at || currentSubscription.plan),
+        title: remainingDays < 0 ? "Votre abonnement a expiré" : (remainingDays === 0 ? "Votre abonnement expire aujourd'hui" : "Votre abonnement expire bientôt"),
+        message: remainingDays < 0
+          ? "La date de fin de votre forfait est dépassée."
+          : "Il reste " + remainingDays + " jour(s) avant la date de fin prévue.",
+        icon: "📅",
+        level: "warning",
+        priority: 4,
+        date: currentSubscription.expires_at,
+        page: "subscription",
+        category: "subscription"
       });
     }
   }
