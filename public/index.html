@@ -1144,6 +1144,9 @@ async function renderAdmin() {
     <div class="section-head">
       <h2>Suivi des abonnements</h2>
     </div>
+    <div class="grid" id="adminSubscriptionStats">
+      <div class="card">Chargement des indicateurs...</div>
+    </div>
     <div class="card" id="adminSubscriptions">
       Chargement des abonnements...
     </div>
@@ -1257,6 +1260,21 @@ async function renderAdmin() {
       : "Aucun utilisateur trouvé.";
 
     const subscriptions = subscriptionsData.subscriptions || [];
+    const subscriptionSummary = subscriptionsData.summary || {};
+    const subscriptionStatsContainer = document.getElementById("adminSubscriptionStats");
+    subscriptionStatsContainer.innerHTML = [
+      ["Comptes Free", subscriptionSummary.free],
+      ["Comptes Starter", subscriptionSummary.starter],
+      ["Comptes Pro", subscriptionSummary.pro],
+      ["Abonnements actifs", subscriptionSummary.active],
+      ["Abonnements expirés", subscriptionSummary.expired]
+    ].map(([label, value]) => `
+      <div class="card">
+        <div class="muted">${escapeHTML(label)}</div>
+        <div class="stat">${Number(value || 0)}</div>
+      </div>
+    `).join("");
+
     const subscriptionsContainer = document.getElementById("adminSubscriptions");
     subscriptionsContainer.innerHTML = subscriptions.length
       ? `
