@@ -1277,7 +1277,15 @@ if (
     path.slice("/api/admin/users/".length)
   );
 
-  const body = await readLimitedJsonBody(request);
+  let body;
+  try {
+    body = await readLimitedJsonBody(request);
+  } catch (error) {
+    if (error?.status === 413) {
+      return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
+    }
+    throw error;
+  }
 
   const target = await env.DB.prepare(
     `SELECT id, role, status
