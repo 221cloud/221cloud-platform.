@@ -6542,6 +6542,31 @@ function toggleProPanel(type) {
   }
 }
 
+async function deleteProClient(clientId, clientName) {
+  const confirmed = window.confirm(
+    "Voulez-vous vraiment supprimer le client « " + clientName + " » ? Cette action est définitive. Un client qui possède déjà des devis ne pourra pas être supprimé."
+  );
+  if (!confirmed) return;
+
+  const message = document.getElementById("proClientDeleteMessage");
+  const button = document.querySelector('button[onclick^="deleteProClient("]');
+  if (button) button.disabled = true;
+  if (message) message.textContent = "Suppression en cours…";
+
+  try {
+    await api("/pro/clients/" + encodeURIComponent(clientId), { method: "DELETE" });
+    await renderProClientsPage();
+  } catch (error) {
+    if (message) {
+      message.textContent = error.message || "Impossible de supprimer ce client.";
+      message.classList.add("error-text");
+    } else {
+      window.alert(error.message || "Impossible de supprimer ce client.");
+    }
+    if (button) button.disabled = false;
+  }
+}
+
 async function renderProClientEditPage(clientId) {
   const main = document.getElementById("mainContent");
   if (!main) return;
@@ -6654,7 +6679,11 @@ async function openProClientDetail(clientId) {
           <div style="margin-top:8px"><strong>Note :</strong> ${client.notes ? escapeHTML(client.notes) : '<span class="muted">Aucune note</span>'}</div>
           <div class="muted" style="margin-top:8px;font-size:12px">Client ajouté le : ${escapeHTML(formatDate(client.created_at))}</div>
         </div>
-        <div class="item-actions"><button type="button" class="secondary" onclick="renderProClientEditPage('${escapeHTML(client.id)}')">✏️ Modifier les informations</button></div>
+        <div class="item-actions">
+          <button type="button" class="secondary" onclick="renderProClientEditPage('${escapeHTML(client.id)}')">✏️ Modifier les informations</button>
+          <button type="button" class="secondary" style="color:#d94848;border-color:#d94848" onclick="deleteProClient('${escapeHTML(client.id)}', '${escapeHTML(client.name)}')">🗑️ Supprimer le client</button>
+        </div>
+        <div id="proClientDeleteMessage" class="notice" role="status" aria-live="polite"></div>
       </div>
       <div class="section-head"><h2>📄 Ses devis (${clientQuotes.length})</h2></div>
       ${quoteCards}
