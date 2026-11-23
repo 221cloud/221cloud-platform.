@@ -1905,6 +1905,8 @@ async function oauthTokenEndpoint(request, env) {
   if (!contentType.toLowerCase().includes("application/x-www-form-urlencoded")) {
     return json({ error: "invalid_request", error_description: "Form URL encoded body required." }, 400);
   }
+  const contentLength = Number(request.headers.get("Content-Length") || 0);
+  if (contentLength > 16384) return json({ error: "invalid_request" }, 413);
   const raw = await request.text();
   if (raw.length > 16384) return json({ error: "invalid_request" }, 413);
   const form = new URLSearchParams(raw);
@@ -2309,7 +2311,7 @@ export default {
         if (!user) return json({ error: "Vous devez être connecté." }, 401);
         await ensureOAuthSchema(env);
         const result = await env.DB.prepare(
-          "SELECT c.client_id, c.client_name, MAX(r.created_at) AS last_authorized_at FROM oauth_refresh_tokens r JOIN oauth_clients c ON c.client_id = r.client_id WHERE r.user_id = ? AND r.revoked_at IS NULL AND datetime(r.expires_at) > CURRENT_TIMESTAMP GROUP BY c.client_id, c.client_name ORDER BY last_authorized_at DESC"
+          "SELECT c.client_id, c.client_name, MAX(t.created_at) AS last_authorized_at FROM oauth_clients c JOIN (SELECT client_id, user_id, created_at FROM oauth_refresh_tokens WHERE revoked_at IS NULL AND datetime(expires_at) > CURRENT_TIMESTAMP UNION SELECT client_id, user_id, created_at FROM oauth_access_tokens WHERE revoked_at IS NULL AND datetime(expires_at) > CURRENT_TIMESTAMP) t ON t.client_id = c.client_id WHERE t.user_id = ? GROUP BY c.client_id, c.client_name ORDER BY last_authorized_at DESC"
         ).bind(user.id).all();
         return json({ connections: result.results || [] });
       } catch (error) {
