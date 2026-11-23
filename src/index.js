@@ -2498,7 +2498,7 @@ export default {
 
 
     // ADMINISTRATION PRIVÉE DES DONNÉES FUTPULSE
-    const futPulseAdminApiMatch = path.match(/^\\/api\\/private\\/applications\\/([a-z0-9-]+)\\/rows(?:\\/([^/]+))?$/);
+    const futPulseAdminApiMatch = path.match(/^\/api\/private\/applications\/([a-z0-9-]+)\/rows(?:\/([^/]+))?$/);
     if (futPulseAdminApiMatch) {
       try {
         const user = await currentUser(request, env);
@@ -2771,7 +2771,7 @@ export default {
 
 
     // PAGE D'ADMINISTRATION FUTPULSE : SERVIE SUR L'ORIGINE 221CLOUD, HORS IFRAME SANDBOX
-    const futPulseAdminPageMatch = path.match(/^\\/manage\\/([a-z0-9-]+)\\/?$/);
+    const futPulseAdminPageMatch = path.match(/^\/manage\/([a-z0-9-]+)\/?$/);
     if (futPulseAdminPageMatch && request.method === "GET") {
       const user = await currentUser(request, env);
       if (!user) return Response.redirect(new URL("/", url), 302);
