@@ -1248,6 +1248,51 @@ async function ensureAutomationTasksSchema(env) {
   return automationTasksSchemaPromise;
 }
 
+async function ensureAssistantAccessSchema(env) {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS assistant_access_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      label TEXT NOT NULL,
+      scopes TEXT NOT NULL DEFAULT '["projects:read","applications:read","files:read"]',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      expires_at TEXT,
+      last_used_at TEXT,
+      revoked_at TEXT
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_assistant_access_user ON assistant_access_tokens(user_id, created_at DESC)"
+  ).run();
+}
+
+async function authenticateAssistantAccess(request, env) {
+  const authorization = request.headers.get("Authorization") || "";
+  const match = authorization.match(/^Bearer (221c_[a-f0-9]{64})$/i);
+  if (!match) return null;
+
+  await ensureAssistantAccessSchema(env);
+  const tokenHash = await hashToken(match[1]);
+  const access = await env.DB.prepare(`
+    SELECT id, user_id, scopes
+    FROM assistant_access_tokens
+    WHERE token_hash = ?
+      AND revoked_at IS NULL
+      AND (expires_at IS NULL OR datetime(expires_at) > CURRENT_TIMESTAMP)
+    LIMIT 1
+  `).bind(tokenHash).first();
+
+  if (!access) return null;
+  await env.DB.prepare(
+    "UPDATE assistant_access_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE id = ? AND revoked_at IS NULL"
+  ).bind(access.id).run();
+
+  let scopes = [];
+  try { scopes = JSON.parse(access.scopes || "[]"); } catch { return null; }
+  return { id: access.id, user_id: access.user_id, scopes };
+}
+
 async function ensureApplicationFilesSchema(env) {
   await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS application_files (
@@ -1699,6 +1744,162 @@ export default {
         return json({
           error: "Requête refusée : origine non autorisée."
         }, 403);
+      }
+    }
+
+    // GESTION DES ACCÈS DÉVELOPPEUR : CRÉATION ET RÉVOCATION DES CLÉS
+    if (path === "/api/assistant-access/tokens") {
+      if (!["GET", "POST"].includes(request.method)) {
+        return json({ error: "Méthode non autorisée." }, 405);
+      }
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureAssistantAccessSchema(env);
+
+        if (request.method === "GET") {
+          const result = await env.DB.prepare(`
+            SELECT id, label, scopes, created_at, expires_at, last_used_at, revoked_at
+            FROM assistant_access_tokens
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+          `).bind(user.id).all();
+          return json({ tokens: result.results || [] });
+        }
+
+        const body = await readLimitedJsonBody(request);
+        const label = String(body.label || "Accès assistant").trim().slice(0, 60);
+        const requestedDays = Number(body.expires_in_days ?? 90);
+        if (!label) return json({ error: "Donnez un nom à cet accès." }, 400);
+        if (!Number.isInteger(requestedDays) || requestedDays < 1 || requestedDays > 365) {
+          return json({ error: "La durée doit être comprise entre 1 et 365 jours." }, 400);
+        }
+
+        const id = crypto.randomUUID();
+        const secret = "221c_" + randomToken();
+        const expiresAt = new Date(Date.now() + requestedDays * 86400000).toISOString();
+        await env.DB.prepare(`
+          INSERT INTO assistant_access_tokens (id, user_id, token_hash, label, scopes, expires_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).bind(
+          id, user.id, await hashToken(secret), label,
+          JSON.stringify(["projects:read", "applications:read", "files:read"]),
+          expiresAt
+        ).run();
+
+        return json({
+          message: "Clé d'accès créée. Copiez-la maintenant : elle ne sera plus affichée.",
+          token: secret,
+          access: { id, label, scopes: ["projects:read", "applications:read", "files:read"], expires_at: expiresAt }
+        }, 201);
+      } catch (error) {
+        console.error("ERREUR GESTION ACCÈS ASSISTANT:", error);
+        return json({ error: "Impossible de gérer cet accès développeur." }, 500);
+      }
+    }
+
+    const assistantRevokeMatch = path.match(/^\/api\/assistant-access\/tokens\/([a-f0-9-]+)\/revoke$/i);
+    if (assistantRevokeMatch && request.method === "POST") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureAssistantAccessSchema(env);
+        const result = await env.DB.prepare(`
+          UPDATE assistant_access_tokens
+          SET revoked_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND user_id = ? AND revoked_at IS NULL
+        `).bind(assistantRevokeMatch[1], user.id).run();
+        if (!result.meta?.changes) return json({ error: "Accès introuvable ou déjà révoqué." }, 404);
+        return json({ message: "Accès développeur révoqué." });
+      } catch (error) {
+        console.error("ERREUR RÉVOCATION ACCÈS ASSISTANT:", error);
+        return json({ error: "Impossible de révoquer cet accès." }, 500);
+      }
+    }
+
+    // API ASSISTANT : LECTURE STRICTEMENT LIMITÉE AUX PROJETS DU PROPRIÉTAIRE DE LA CLÉ
+    if (path.startsWith("/api/assistant/v1/")) {
+      if (request.method !== "GET") return json({ error: "Cette API est en lecture seule." }, 405);
+      try {
+        const access = await authenticateAssistantAccess(request, env);
+        if (!access) return json({ error: "Clé d'accès invalide, expirée ou révoquée." }, 401);
+
+        if (path === "/api/assistant/v1/projects") {
+          if (!access.scopes.includes("projects:read")) return json({ error: "Autorisation insuffisante." }, 403);
+          const result = await env.DB.prepare(`
+            SELECT id, name, type, status, created_at
+            FROM projects
+            WHERE user_id = ? AND deleted_at IS NULL
+            ORDER BY created_at DESC
+          `).bind(access.user_id).all();
+          return json({ projects: result.results || [] });
+        }
+
+        const assistantProjectMatch = path.match(/^\/api\/assistant\/v1\/projects\/([^/]+)$/);
+        if (assistantProjectMatch) {
+          if (!access.scopes.includes("projects:read")) return json({ error: "Autorisation insuffisante." }, 403);
+          const projectId = decodeURIComponent(assistantProjectMatch[1]);
+          const project = await env.DB.prepare(`
+            SELECT id, name, type, status, created_at
+            FROM projects
+            WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+            LIMIT 1
+          `).bind(projectId, access.user_id).first();
+          if (!project) return json({ error: "Projet introuvable." }, 404);
+          return json({ project });
+        }
+
+        const assistantFilesMatch = path.match(/^\/api\/assistant\/v1\/projects\/([^/]+)\/files$/);
+        if (assistantFilesMatch) {
+          if (!access.scopes.includes("applications:read") || !access.scopes.includes("files:read")) {
+            return json({ error: "Autorisation insuffisante." }, 403);
+          }
+          await ensureApplicationFilesSchema(env);
+          await ensureApplicationDirectoriesSchema(env);
+          const projectId = decodeURIComponent(assistantFilesMatch[1]);
+          const project = await env.DB.prepare(`
+            SELECT id FROM projects
+            WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL
+            LIMIT 1
+          `).bind(projectId, access.user_id).first();
+          if (!project) return json({ error: "Application introuvable." }, 404);
+
+          const requestedPath = url.searchParams.get("path");
+          if (requestedPath !== null) {
+            if (!validApplicationFilePath(requestedPath)) {
+              return json({ error: "Chemin de fichier non autorisé." }, 400);
+            }
+            const file = await env.DB.prepare(`
+              SELECT file_name, content, mime_type, updated_at
+              FROM application_files
+              WHERE project_id = ? AND file_name = ? AND deleted_at IS NULL
+              LIMIT 1
+            `).bind(projectId, requestedPath).first();
+            if (!file) return json({ error: "Fichier introuvable." }, 404);
+            return json({ file });
+          }
+
+          const [files, directories] = await Promise.all([
+            env.DB.prepare(`
+              SELECT file_name, mime_type, created_at, updated_at
+              FROM application_files
+              WHERE project_id = ? AND deleted_at IS NULL
+              ORDER BY file_name ASC
+            `).bind(projectId).all(),
+            env.DB.prepare(`
+              SELECT directory_path, created_at
+              FROM application_directories
+              WHERE project_id = ? AND deleted_at IS NULL
+              ORDER BY directory_path ASC
+            `).bind(projectId).all()
+          ]);
+          return json({ files: files.results || [], directories: directories.results || [] });
+        }
+
+        return json({ error: "Route assistant introuvable." }, 404);
+      } catch (error) {
+        console.error("ERREUR API ASSISTANT:", error);
+        return json({ error: "Impossible de traiter cette demande de lecture." }, 500);
       }
     }
 
