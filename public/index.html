@@ -3074,36 +3074,41 @@ function renderCustomerDatabaseRowForm() {
   if (button) button.disabled = false;
   container.innerHTML = columns.map((column, index) => {
     const id = "customerRowValue" + index;
+    const columnName = escapeHTML(column.name);
+    const columnType = escapeHTML(column.data_type);
     let input = "";
     if (column.data_type === "boolean") {
-      input = "<select id='" + id + "'><option value=''>Non renseigné</option><option value='1'>Oui</option><option value='0'>Non</option></select>";
+      input = "<select id='" + id + "' data-column-name='" + columnName + "' data-column-type='" + columnType + "'><option value=''>Non renseigné</option><option value='1'>Oui</option><option value='0'>Non</option></select>";
     } else {
       const type = column.data_type === "number" ? "number" : column.data_type === "date" ? "date" : "text";
-      input = "<input id='" + id + "' type='" + type + "' " + (type === "number" ? "step='any'" : "") + " maxlength='" + (type === "text" ? "5000" : "80") + "'>";
+      input = "<input id='" + id + "' data-column-name='" + columnName + "' data-column-type='" + columnType + "' type='" + type + "' " + (type === "number" ? "step='any'" : "") + " maxlength='" + (type === "text" ? "5000" : "80") + "'>";
     }
-    return "<label for='" + id + "'>" + escapeHTML(column.name) + " · " + escapeHTML(column.data_type) + "</label>" + input;
+    return "<label for='" + id + "'>" + columnName + " · " + columnType + "</label>" + input;
   }).join("");
 }
 async function createCustomerDatabaseRow() {
   if (!activeDatabaseStructure || !activeDatabaseStructure.columns?.length) return;
-  const values = {};
-  for (let i = 0; i < activeDatabaseStructure.columns.length; i++) {
-    const column = activeDatabaseStructure.columns[i];
-    const input = document.getElementById("customerRowValue" + i);
-    if (!input || input.value === "") continue;
-    values[column.name] = column.data_type === "number" || column.data_type === "boolean" ? Number(input.value) : input.value;
-  }
+  const container = document.getElementById("customerRowForm");
   const message = document.getElementById("customerRowMessage");
+  if (!container) return;
+  const values = {};
+  container.querySelectorAll("[data-column-name][data-column-type]").forEach(input => {
+    if (input.value === "") return;
+    const name = input.getAttribute("data-column-name");
+    const type = input.getAttribute("data-column-type");
+    values[name] = type === "number" || type === "boolean" ? Number(input.value) : input.value;
+  });
+  if (!Object.keys(values).length) {
+    if (message) message.innerHTML = "<p class='error-text'>Aucune valeur saisie. Remplissez au moins un champ avant d'ajouter la ligne.</p>";
+    return;
+  }
   try {
     await api("/databases/" + encodeURIComponent(activeDatabaseStructure.databaseId) +
       "/tables/" + encodeURIComponent(activeDatabaseStructure.tableId) + "/rows", {
         method: "POST", body: JSON.stringify({ values: values })
       });
     if (message) message.innerHTML = "<p class='success-text'>Ligne ajoutée avec succès.</p>";
-    activeDatabaseStructure.columns.forEach((column, index) => {
-      const input = document.getElementById("customerRowValue" + index);
-      if (input) input.value = "";
-    });
+    container.querySelectorAll("input, select").forEach(input => { input.value = ""; });
     activeDatabaseStructure.rowsOffset = 0;
     await loadCustomerDatabaseRows();
   } catch (error) {
