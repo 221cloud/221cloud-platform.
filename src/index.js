@@ -3791,7 +3791,7 @@ hosting
         await ensureApplicationFilesSchema(env);
         const projectId = decodeURIComponent(applicationFileMatch[1]);
         const fileName = decodeURIComponent(applicationFileMatch[2]);
-        if (!["index.html", "style.css", "script.js"].includes(fileName)) {
+        if (!validApplicationFilePath(fileName)) {
           return json({ error: "Nom de fichier non autorisé." }, 400);
         }
         const project = await env.DB.prepare(
@@ -3844,7 +3844,7 @@ hosting
         await ensureApplicationFilesSchema(env);
         const projectId = decodeURIComponent(applicationVersionsMatch[1]);
         const fileName = decodeURIComponent(applicationVersionsMatch[2]);
-        if (!["index.html", "style.css", "script.js"].includes(fileName)) {
+        if (!validApplicationFilePath(fileName)) {
           return json({ error: "Nom de fichier non autorisé." }, 400);
         }
         const project = await env.DB.prepare(
@@ -3871,7 +3871,7 @@ hosting
         await ensureApplicationFilesSchema(env);
         const projectId = decodeURIComponent(applicationRestoreVersionMatch[1]);
         const fileName = decodeURIComponent(applicationRestoreVersionMatch[2]);
-        if (!["index.html", "style.css", "script.js"].includes(fileName)) {
+        if (!validApplicationFilePath(fileName)) {
           return json({ error: "Nom de fichier non autorisé." }, 400);
         }
         const project = await env.DB.prepare(
