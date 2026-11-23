@@ -2508,7 +2508,7 @@ function renderProjectAutomationTasks() {
       '<h4>' + escapeHTML(task.task_type || "Tâche") + '</h4>' +
       '<div class="muted">Prévue le : ' + escapeHTML(dateLabel) + '</div>' +
       '<div class="muted">Démarrée le : ' + escapeHTML(formatTaskDate(task.started_at)) + '</div>' +
-      '<div class="muted">Terminée le : ' + escapeHTML(formatTaskDate(task.completed_at)) + '</div>' +
+      '<div class="muted">Fin de tâche le : ' + escapeHTML(formatTaskDate(task.completed_at)) + '</div>' +
       '<div class="muted">Durée : ' + escapeHTML(durationLabel) + '</div>' +
       '<p><span class="status">' + escapeHTML(statusLabels[task.status] || task.status || "Inconnue") + '</span></p>' +
       '<div class="muted">Tentatives : ' + Number(task.attempts || 0) + ' / ' + Number(task.max_attempts || 0) + '</div>' +
