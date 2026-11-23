@@ -1128,6 +1128,51 @@ async function recordStorageActivity(env, userId, action, file, details = "") {
     console.error("ERREUR HISTORIQUE STOCKAGE:", error);
   }
 }
+let automationTasksSchemaPromise = null;
+
+async function ensureAutomationTasksSchema(env) {
+  if (!automationTasksSchemaPromise) {
+    automationTasksSchemaPromise = (async () => {
+      await env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS automation_tasks (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          task_type TEXT NOT NULL CHECK (length(task_type) BETWEEN 1 AND 80),
+          payload_json TEXT NOT NULL DEFAULT '{}' CHECK (length(payload_json) <= 16384),
+          status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
+          scheduled_at INTEGER NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+          max_attempts INTEGER NOT NULL DEFAULT 3 CHECK (max_attempts BETWEEN 1 AND 10),
+          lock_token TEXT,
+          locked_until INTEGER,
+          last_error TEXT CHECK (last_error IS NULL OR length(last_error) <= 1000),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          completed_at TEXT,
+          cancelled_at TEXT,
+          CHECK (
+            (status = 'running' AND lock_token IS NOT NULL AND locked_until IS NOT NULL)
+            OR
+            (status != 'running' AND lock_token IS NULL AND locked_until IS NULL)
+          )
+        )
+      `).run();
+      await env.DB.prepare(
+        "CREATE INDEX IF NOT EXISTS idx_automation_tasks_due ON automation_tasks(status, scheduled_at, locked_until)"
+      ).run();
+      await env.DB.prepare(
+        "CREATE INDEX IF NOT EXISTS idx_automation_tasks_project_owner ON automation_tasks(user_id, project_id, created_at DESC)"
+      ).run();
+    })().catch(error => {
+      automationTasksSchemaPromise = null;
+      throw error;
+    });
+  }
+  return automationTasksSchemaPromise;
+}
+
 async function ensureApplicationFilesSchema(env) {
   await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS application_files (
