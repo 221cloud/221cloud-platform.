@@ -6139,6 +6139,7 @@ async function openApplicationEditor(projectId) {
     "<label for=\"applicationCodeEditor\">Contenu du fichier</label>" +
     "<p class=\"muted\">Tab : indentation · Maj+Tab : réduire · Entrée : indentation automatique · Ctrl/Cmd+S : enregistrer</p>" +
     "<textarea id=\"applicationCodeEditor\" spellcheck=\"false\" autocapitalize=\"off\" autocomplete=\"off\" style=\"width:100%;min-height:320px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.5;white-space:pre;overflow:auto\" placeholder=\"Chargement du code...\"></textarea>" +
+    "<div class=\"item-card\" style=\"margin:12px 0\"><label for=\"applicationSearchInput\">Rechercher dans le fichier ouvert</label><input id=\"applicationSearchInput\" type=\"search\" placeholder=\"Mot ou expression à rechercher\" style=\"width:100%\"><label for=\"applicationReplaceInput\">Remplacer par</label><input id=\"applicationReplaceInput\" type=\"text\" placeholder=\"Nouveau texte\" style=\"width:100%\"><div class=\"item-actions\"><button class=\"secondary\" type=\"button\" onclick=\"findApplicationEditorMatch(-1)\">Précédent</button><button class=\"secondary\" type=\"button\" onclick=\"findApplicationEditorMatch(1)\">Suivant</button><button class=\"secondary\" type=\"button\" onclick=\"replaceApplicationEditorMatch()\">Remplacer</button><button class=\"secondary\" type=\"button\" onclick=\"replaceAllApplicationEditorMatches()\">Tout remplacer</button></div><p id=\"applicationSearchStatus\" class=\"muted\" aria-live=\"polite\">Recherche limitée au fichier ouvert. Les remplacements restent non enregistrés jusqu'à la sauvegarde.</p></div>" +
     "<div class=\"item-actions\" style=\"margin-top:12px\"><button id=\"saveApplicationFilesButton\" type=\"button\" onclick=\"saveApplicationFiles()\">Enregistrer tous les fichiers</button>" +
     "<button class=\"secondary\" type=\"button\" onclick=\"refreshApplicationPreview()\">Actualiser l'aperçu</button><span id=\"applicationSaveStatus\" class=\"muted\" aria-live=\"polite\"></span></div>" +
     "<p class=\"muted\">Les modifications restent dans votre espace 221Cloud. Enregistrez-les avant de quitter cette page.</p></div>" +
@@ -6155,6 +6156,8 @@ async function openApplicationEditor(projectId) {
 
   const codeEditor = document.getElementById("applicationCodeEditor");
   if (codeEditor) codeEditor.addEventListener("keydown", handleApplicationEditorKeydown);
+  const searchInput = document.getElementById("applicationSearchInput");
+  if (searchInput) searchInput.addEventListener("input", updateApplicationSearchStatus);
 
   const status = document.getElementById("applicationSaveStatus");
   status.textContent = "Chargement des fichiers...";
@@ -6179,6 +6182,116 @@ async function openApplicationEditor(projectId) {
   }
 }
 
+
+function getApplicationEditorSearchMatches(value, query) {
+  const matches = [];
+  if (!query) return matches;
+  const source = value.toLocaleLowerCase();
+  const needle = query.toLocaleLowerCase();
+  let position = 0;
+  while ((position = source.indexOf(needle, position)) !== -1) {
+    matches.push({ start: position, end: position + query.length });
+    position += Math.max(1, query.length);
+  }
+  return matches;
+}
+
+function updateApplicationSearchStatus() {
+  const input = document.getElementById("applicationSearchInput");
+  const status = document.getElementById("applicationSearchStatus");
+  const editor = document.getElementById("applicationCodeEditor");
+  if (!input || !status || !editor) return;
+  const query = input.value;
+  if (!query) {
+    status.textContent = "Saisissez un terme pour lancer la recherche.";
+    return;
+  }
+  const count = getApplicationEditorSearchMatches(editor.value, query).length;
+  status.textContent = count + " résultat(s) dans le fichier ouvert.";
+}
+
+function findApplicationEditorMatch(direction = 1) {
+  const input = document.getElementById("applicationSearchInput");
+  const status = document.getElementById("applicationSearchStatus");
+  const editor = document.getElementById("applicationCodeEditor");
+  if (!input || !editor || !input.value) {
+    if (status) status.textContent = "Saisissez un terme à rechercher.";
+    return;
+  }
+  const matches = getApplicationEditorSearchMatches(editor.value, input.value);
+  if (!matches.length) {
+    if (status) status.textContent = "Aucun résultat trouvé.";
+    return;
+  }
+  const start = editor.selectionStart;
+  const end = editor.selectionEnd;
+  let match;
+  if (direction < 0) {
+    match = [...matches].reverse().find(item => item.end <= start) || matches[matches.length - 1];
+  } else {
+    match = matches.find(item => item.start >= (end > start ? end : start)) || matches[0];
+  }
+  editor.focus();
+  editor.setSelectionRange(match.start, match.end);
+  if (status) {
+    const index = matches.findIndex(item => item.start === match.start);
+    status.textContent = "Résultat " + (index + 1) + " sur " + matches.length + ".";
+  }
+}
+
+function replaceApplicationEditorMatch() {
+  const input = document.getElementById("applicationSearchInput");
+  const replacement = document.getElementById("applicationReplaceInput");
+  const editor = document.getElementById("applicationCodeEditor");
+  const status = document.getElementById("applicationSearchStatus");
+  if (!input || !replacement || !editor || !input.value) {
+    if (status) status.textContent = "Saisissez un terme à rechercher.";
+    return;
+  }
+  const selected = editor.value.slice(editor.selectionStart, editor.selectionEnd);
+  if (selected.toLocaleLowerCase() !== input.value.toLocaleLowerCase()) {
+    findApplicationEditorMatch(1);
+    return;
+  }
+  editor.setRangeText(replacement.value, editor.selectionStart, editor.selectionEnd, "end");
+  if (applicationEditorState && applicationEditorState.activeFile) {
+    applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
+  }
+  updateApplicationSearchStatus();
+  findApplicationEditorMatch(1);
+}
+
+function replaceAllApplicationEditorMatches() {
+  const input = document.getElementById("applicationSearchInput");
+  const replacement = document.getElementById("applicationReplaceInput");
+  const editor = document.getElementById("applicationCodeEditor");
+  const status = document.getElementById("applicationSearchStatus");
+  if (!input || !replacement || !editor || !input.value) {
+    if (status) status.textContent = "Saisissez un terme à rechercher.";
+    return;
+  }
+  const matches = getApplicationEditorSearchMatches(editor.value, input.value);
+  if (!matches.length) {
+    if (status) status.textContent = "Aucun résultat à remplacer.";
+    return;
+  }
+  const source = editor.value;
+  const lowerSource = source.toLocaleLowerCase();
+  const needle = input.value.toLocaleLowerCase();
+  let output = "";
+  let cursor = 0;
+  let position;
+  while ((position = lowerSource.indexOf(needle, cursor)) !== -1) {
+    output += source.slice(cursor, position) + replacement.value;
+    cursor = position + input.value.length;
+  }
+  editor.value = output + source.slice(cursor);
+  editor.setSelectionRange(0, 0);
+  if (applicationEditorState && applicationEditorState.activeFile) {
+    applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
+  }
+  if (status) status.textContent = matches.length + " remplacement(s) effectué(s). Pensez à enregistrer.";
+}
 
 function handleApplicationEditorKeydown(event) {
   const editor = event.currentTarget;
