@@ -628,6 +628,18 @@ body.pro-mode #mainContent .dashboard-hero h1 {
   font-size: clamp(24px, 6vw, 32px);
   line-height: 1.2;
 }
+body.pro-mode #mainContent .pro-shortcut-card {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform .15s ease, border-color .15s ease;
+}
+body.pro-mode #mainContent .pro-shortcut-card:active {
+  transform: scale(.985);
+}
+body.pro-mode #mainContent .pro-shortcut-card:focus-visible {
+  outline: 3px solid rgba(36,214,160,.8);
+  outline-offset: 3px;
+}
 body.pro-mode #mainContent .card {
   border-radius: 16px;
   padding: 18px;
@@ -6303,14 +6315,14 @@ function renderProPage() {
 
     <div class="section-head"><h2>Que souhaitez-vous faire ?</h2></div>
     <div class="grid">
-      <div class="card"><div class="shortcut"><div class="shortcut-icon">📄</div><div><h3>Faire un devis</h3><p>Préparer le prix d'un travail pour un client.</p><span class="status online">Disponible</span></div></div></div>
+      <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir le formulaire de devis" onclick="document.getElementById('proQuoteSection').scrollIntoView({behavior:'smooth',block:'start'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">📄</div><div><h3>Faire un devis</h3><p>Préparer le prix d'un travail pour un client.</p><span class="status online">Disponible</span></div></div></div>
       <div class="card"><div class="shortcut"><div class="shortcut-icon">🧾</div><div><h3>Faire une facture</h3><p>Créer un document après un travail.</p><span class="status">En préparation</span></div></div></div>
-      <div class="card"><div class="shortcut"><div class="shortcut-icon">👥</div><div><h3>Mes clients</h3><p>Enregistrer et retrouver vos clients.</p><span class="status online">Disponible</span></div></div></div>
+      <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir la rubrique clients" onclick="document.getElementById('proClientsSection').scrollIntoView({behavior:'smooth',block:'start'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">👥</div><div><h3>Mes clients</h3><p>Enregistrer et retrouver vos clients.</p><span class="status online">Disponible</span></div></div></div>
       <div class="card"><div class="shortcut"><div class="shortcut-icon">💰</div><div><h3>Mon argent</h3><p>Suivre les paiements, les avances et les sommes restantes.</p><span class="status">En préparation</span></div></div></div>
       <div class="card"><div class="shortcut"><div class="shortcut-icon">🔌</div><div><h3>Mon matériel</h3><p>Retrouver vos prises, câbles, disjoncteurs et fournitures.</p><span class="status">En préparation</span></div></div></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="proClientsSection">
       <div class="section-head"><h2>👥 Mes clients</h2><span class="muted" id="proClientCount">Chargement…</span></div>
       <p class="muted">Enregistrez les personnes pour qui vous faites des travaux.</p>
       <form id="proClientForm" class="form-card" onsubmit="saveProClient(event)">
@@ -6329,7 +6341,7 @@ function renderProPage() {
       <div id="proClientsList"><div class="empty">Chargement des clients…</div></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="proQuoteSection">
       <div class="section-head"><h2>📄 Faire un devis</h2><span class="status online">Disponible</span></div>
       <p class="muted">Préparez le prix d'un travail. Le devis sera gardé en brouillon.</p>
       <form id="proQuoteForm" class="form-card" onsubmit="saveProQuote(event)">
