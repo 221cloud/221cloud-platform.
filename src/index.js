@@ -1269,25 +1269,35 @@ async function ensureAssistantAccessSchema(env) {
 
 async function authenticateAssistantAccess(request, env) {
   const authorization = request.headers.get("Authorization") || "";
-  const match = authorization.match(/^Bearer (221c_[a-f0-9]{64})$/i);
+  const match = authorization.match(/^Bearer (221c_[a-f0-9]{64}|221oauth_[a-f0-9]{64})$/i);
   if (!match) return null;
 
-  await ensureAssistantAccessSchema(env);
   const tokenHash = await hashToken(match[1]);
-  const access = await env.DB.prepare(`
-    SELECT id, user_id, scopes
-    FROM assistant_access_tokens
-    WHERE token_hash = ?
-      AND revoked_at IS NULL
-      AND (expires_at IS NULL OR datetime(expires_at) > CURRENT_TIMESTAMP)
-    LIMIT 1
-  `).bind(tokenHash).first();
+  if (match[1].startsWith("221oauth_")) {
+    await ensureOAuthSchema(env);
+    const expectedResource = new URL("/mcp", request.url).href;
+    const oauthAccess = await env.DB.prepare(
+      "SELECT token_hash, user_id, scope FROM oauth_access_tokens WHERE token_hash = ? AND revoked_at IS NULL AND datetime(expires_at) > CURRENT_TIMESTAMP AND resource = ? LIMIT 1"
+    ).bind(tokenHash, expectedResource).first();
+    if (!oauthAccess) return null;
+    await env.DB.prepare(
+      "UPDATE oauth_access_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE token_hash = ? AND revoked_at IS NULL"
+    ).bind(tokenHash).run();
+    return {
+      id: tokenHash,
+      user_id: oauthAccess.user_id,
+      scopes: String(oauthAccess.scope || "").split(" ").filter(scope => scope && scope !== "offline_access")
+    };
+  }
 
+  await ensureAssistantAccessSchema(env);
+  const access = await env.DB.prepare(
+    "SELECT id, user_id, scopes FROM assistant_access_tokens WHERE token_hash = ? AND revoked_at IS NULL AND (expires_at IS NULL OR datetime(expires_at) > CURRENT_TIMESTAMP) LIMIT 1"
+  ).bind(tokenHash).first();
   if (!access) return null;
   await env.DB.prepare(
     "UPDATE assistant_access_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE id = ? AND revoked_at IS NULL"
   ).bind(access.id).run();
-
   let scopes = [];
   try { scopes = JSON.parse(access.scopes || "[]"); } catch { return null; }
   return { id: access.id, user_id: access.user_id, scopes };
@@ -1696,6 +1706,299 @@ async function runAutomationScheduler(env, scheduledTime) {
 }
 
 
+
+const OAUTH_ALLOWED_SCOPES = ["projects:read", "applications:read", "files:read", "offline_access"];
+
+async function ensureOAuthSchema(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS oauth_clients (client_id TEXT PRIMARY KEY, client_name TEXT NOT NULL, redirect_uris TEXT NOT NULL, grant_types TEXT NOT NULL, response_types TEXT NOT NULL, token_endpoint_auth_method TEXT NOT NULL DEFAULT 'none', created_at TEXT DEFAULT CURRENT_TIMESTAMP)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS oauth_authorization_codes (code_hash TEXT PRIMARY KEY, client_id TEXT NOT NULL, user_id TEXT NOT NULL, redirect_uri TEXT NOT NULL, code_challenge TEXT NOT NULL, scope TEXT NOT NULL, resource TEXT NOT NULL, expires_at TEXT NOT NULL, used_at TEXT)").run();
+  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_oauth_codes_expiry ON oauth_authorization_codes(expires_at)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS oauth_access_tokens (token_hash TEXT PRIMARY KEY, family_id TEXT NOT NULL, client_id TEXT NOT NULL, user_id TEXT NOT NULL, scope TEXT NOT NULL, resource TEXT NOT NULL, expires_at TEXT NOT NULL, revoked_at TEXT, last_used_at TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)").run();
+  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_oauth_access_family ON oauth_access_tokens(family_id)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS oauth_refresh_tokens (token_hash TEXT PRIMARY KEY, family_id TEXT NOT NULL, client_id TEXT NOT NULL, user_id TEXT NOT NULL, scope TEXT NOT NULL, resource TEXT NOT NULL, expires_at TEXT NOT NULL, revoked_at TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)").run();
+  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_oauth_refresh_family ON oauth_refresh_tokens(family_id)").run();
+}
+
+function oauthHtmlEscape(value) {
+  return String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[char]);
+}
+
+function oauthHtmlResponse(html, status = 200) {
+  return new Response(html, {
+    status,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer"
+    }
+  });
+}
+
+function oauthLoginPage() {
+  return oauthHtmlResponse('<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connexion 221Cloud</title><body style="font:16px system-ui;max-width:440px;margin:10vh auto;padding:24px;color:#182230"><h1>Connexion à 221Cloud</h1><p>Connecte-toi pour autoriser l’accès à tes projets.</p><form id="login"><label>E-mail<br><input id="email" type="email" autocomplete="username" required style="box-sizing:border-box;width:100%;padding:12px;margin:8px 0 16px"></label><label>Mot de passe<br><input id="password" type="password" autocomplete="current-password" required style="box-sizing:border-box;width:100%;padding:12px;margin:8px 0 16px"></label><button style="padding:12px 18px">Se connecter</button></form><p id="error" role="alert"></p><script>document.getElementById("login").addEventListener("submit",async e=>{e.preventDefault();const error=document.getElementById("error");error.textContent="Connexion…";try{const r=await fetch("/api/login",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:document.getElementById("email").value,password:document.getElementById("password").value})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Connexion impossible");location.reload()}catch(x){error.textContent=x.message}})</script></body></html>');
+}
+
+async function oauthAuthorizePage(request, env) {
+  const url = new URL(request.url);
+  const params = request.method === "POST"
+    ? await readLimitedJsonBody(request).catch(() => ({}))
+    : Object.fromEntries(url.searchParams.entries());
+
+  const clientId = String(params.client_id || "");
+  const redirectUri = String(params.redirect_uri || "");
+  const state = String(params.state || "");
+  const challenge = String(params.code_challenge || "");
+  const challengeMethod = String(params.code_challenge_method || "");
+  const resource = String(params.resource || "");
+  const scope = String(params.scope || "projects:read applications:read files:read");
+  const scopes = [...new Set(scope.split(/\s+/).filter(Boolean))];
+  const invalid = message => json({ error: message }, 400, { "Cache-Control": "no-store" });
+
+  if (!clientId || !redirectUri || !state || state.length > 512 ||
+      !/^[A-Za-z0-9_-]{43,128}$/.test(challenge) || challengeMethod !== "S256") {
+    return invalid("Paramètres OAuth invalides.");
+  }
+  if (resource !== new URL("/mcp", url.origin).href) return invalid("Ressource OAuth invalide.");
+  if (!scopes.length || scopes.some(scopeName => !OAUTH_ALLOWED_SCOPES.includes(scopeName))) {
+    return invalid("Scopes OAuth non autorisés.");
+  }
+
+  await ensureOAuthSchema(env);
+  const client = await env.DB.prepare("SELECT client_id, client_name, redirect_uris FROM oauth_clients WHERE client_id = ? LIMIT 1").bind(clientId).first();
+  if (!client) return invalid("Client OAuth inconnu.");
+  let redirectUris = [];
+  try { redirectUris = JSON.parse(client.redirect_uris || "[]"); } catch {}
+  if (!redirectUris.includes(redirectUri)) return invalid("Adresse de retour non autorisée.");
+
+  const user = await currentUser(request, env);
+  if (!user) return oauthLoginPage();
+
+  if (request.method === "GET") {
+    const scopeLabels = {
+      "projects:read": "Consulter la liste et les détails de tes projets",
+      "applications:read": "Consulter les informations de tes applications",
+      "files:read": "Lire les fichiers autorisés de tes applications",
+      "offline_access": "Maintenir la connexion avec des jetons renouvelables"
+    };
+    const labels = scopes.map(s => "<li>" + oauthHtmlEscape(scopeLabels[s] || s) + "</li>").join("");
+    const payload = JSON.stringify({
+      client_id: clientId, redirect_uri: redirectUri, state,
+      code_challenge: challenge, code_challenge_method: "S256",
+      resource, scope: scopes.join(" ")
+    }).replace(/</g, "\\u003c");
+    const html = '<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Autoriser l’accès — 221Cloud</title><body style="font:16px system-ui;max-width:560px;margin:8vh auto;padding:24px;color:#182230"><h1>Autoriser une connexion</h1><p><strong>' + oauthHtmlEscape(client.client_name) + '</strong> demande à accéder à ton espace 221Cloud.</p><p>Compte connecté : ' + oauthHtmlEscape(user.email || user.full_name || "ton compte") + '</p><ul>' + labels + '</ul><p><strong>Lecture uniquement :</strong> aucune modification, suppression ou publication n’est autorisée.</p><button id="allow" style="padding:12px 18px">Autoriser</button> <button id="deny" style="padding:12px 18px">Refuser</button><p id="error" role="alert"></p><script>const payload=' + payload + ';async function decide(approved){const error=document.getElementById("error");error.textContent="Traitement…";try{const r=await fetch("/oauth/authorize",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({...payload,decision:approved?"approve":"deny"})});const d=await r.json();if(!r.ok)throw new Error(d.error||"Demande refusée");location.assign(d.redirect_uri)}catch(e){error.textContent=e.message}}document.getElementById("allow").onclick=()=>decide(true);document.getElementById("deny").onclick=()=>decide(false)</script></body></html>';
+    return oauthHtmlResponse(html);
+  }
+
+  const origin = request.headers.get("Origin");
+  if (!origin || origin !== url.origin) return json({ error: "Origine non autorisée." }, 403);
+  if (params.decision === "deny") {
+    const denied = new URL(redirectUri);
+    denied.searchParams.set("error", "access_denied");
+    denied.searchParams.set("state", state);
+    denied.searchParams.set("iss", url.origin);
+    return json({ redirect_uri: denied.href }, 200, { "Cache-Control": "no-store" });
+  }
+  if (params.decision !== "approve") return invalid("Décision OAuth invalide.");
+
+  const code = "221code_" + randomToken();
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+  await env.DB.prepare("INSERT INTO oauth_authorization_codes (code_hash, client_id, user_id, redirect_uri, code_challenge, scope, resource, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(await hashToken(code), clientId, user.id, redirectUri, challenge, scopes.join(" "), resource, expiresAt).run();
+  const callback = new URL(redirectUri);
+  callback.searchParams.set("code", code);
+  callback.searchParams.set("state", state);
+  callback.searchParams.set("iss", url.origin);
+  return json({ redirect_uri: callback.href }, 200, { "Cache-Control": "no-store" });
+}
+
+async function oauthRegisterClient(request, env) {
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  const limit = await incrementApiRateLimit(env, "oauth-register:" + await hashToken(ip), 20);
+  if (!limit.allowed) return json({ error: "registration_limit_exceeded" }, 429, { "Retry-After": String(limit.retryAfter) });
+  let body;
+  try { body = await readLimitedJsonBody(request); } catch {
+    return json({ error: "invalid_client_metadata" }, 400);
+  }
+  const redirectUris = body.redirect_uris;
+  if (!Array.isArray(redirectUris) || redirectUris.length < 1 || redirectUris.length > 10) {
+    return json({ error: "invalid_redirect_uri" }, 400);
+  }
+  const normalized = [];
+  for (const candidate of redirectUris) {
+    if (typeof candidate !== "string" || candidate.length > 2048) return json({ error: "invalid_redirect_uri" }, 400);
+    try {
+      const parsed = new URL(candidate);
+      const localHttp = parsed.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname);
+      if ((!localHttp && parsed.protocol !== "https:") || parsed.username || parsed.password || parsed.hash) {
+        return json({ error: "invalid_redirect_uri" }, 400);
+      }
+      if (!normalized.includes(candidate)) normalized.push(candidate);
+    } catch {
+      return json({ error: "invalid_redirect_uri" }, 400);
+    }
+  }
+  const grantTypes = Array.isArray(body.grant_types) ? body.grant_types : ["authorization_code", "refresh_token"];
+  const responseTypes = Array.isArray(body.response_types) ? body.response_types : ["code"];
+  if (!grantTypes.includes("authorization_code") || grantTypes.some(g => !["authorization_code", "refresh_token"].includes(g)) ||
+      !responseTypes.includes("code") || responseTypes.some(r => r !== "code") ||
+      (body.token_endpoint_auth_method && body.token_endpoint_auth_method !== "none")) {
+    return json({ error: "invalid_client_metadata" }, 400);
+  }
+  await ensureOAuthSchema(env);
+  const clientId = "221client_" + randomToken();
+  const clientName = String(body.client_name || "Client MCP").slice(0, 100);
+  await env.DB.prepare("INSERT INTO oauth_clients (client_id, client_name, redirect_uris, grant_types, response_types, token_endpoint_auth_method) VALUES (?, ?, ?, ?, ?, 'none')")
+    .bind(clientId, clientName, JSON.stringify(normalized), JSON.stringify(grantTypes), JSON.stringify(responseTypes)).run();
+  return json({
+    client_id: clientId,
+    client_id_issued_at: Math.floor(Date.now() / 1000),
+    client_name: clientName,
+    redirect_uris: normalized,
+    grant_types: grantTypes,
+    response_types: responseTypes,
+    token_endpoint_auth_method: "none"
+  }, 201, { "Cache-Control": "no-store" });
+}
+
+async function issueOAuthTokens(env, clientId, userId, scope, resource, familyId = crypto.randomUUID()) {
+  const accessToken = "221oauth_" + randomToken();
+  const refreshToken = "221refresh_" + randomToken();
+  const accessExpires = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const refreshExpires = new Date(Date.now() + 30 * 86400000).toISOString();
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO oauth_access_tokens (token_hash, family_id, client_id, user_id, scope, resource, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .bind(await hashToken(accessToken), familyId, clientId, userId, scope, resource, accessExpires),
+    env.DB.prepare("INSERT INTO oauth_refresh_tokens (token_hash, family_id, client_id, user_id, scope, resource, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .bind(await hashToken(refreshToken), familyId, clientId, userId, scope, resource, refreshExpires)
+  ]);
+  return { access_token: accessToken, token_type: "Bearer", expires_in: 3600, refresh_token: refreshToken, scope };
+}
+
+async function oauthTokenEndpoint(request, env) {
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  const limit = await incrementApiRateLimit(env, "oauth-token:" + await hashToken(ip), 60);
+  if (!limit.allowed) return json({ error: "slow_down" }, 429, { "Retry-After": String(limit.retryAfter) });
+  const contentType = request.headers.get("Content-Type") || "";
+  if (!contentType.toLowerCase().includes("application/x-www-form-urlencoded")) {
+    return json({ error: "invalid_request", error_description: "Form URL encoded body required." }, 400);
+  }
+  const raw = await request.text();
+  if (raw.length > 16384) return json({ error: "invalid_request" }, 413);
+  const form = new URLSearchParams(raw);
+  const clientId = form.get("client_id") || "";
+  const grantType = form.get("grant_type") || "";
+  const resource = form.get("resource") || "";
+  const expectedResource = new URL("/mcp", request.url).href;
+  if (!clientId || resource !== expectedResource) return json({ error: "invalid_request", error_description: "client_id and valid resource are required." }, 400);
+  await ensureOAuthSchema(env);
+  const client = await env.DB.prepare("SELECT client_id FROM oauth_clients WHERE client_id = ? LIMIT 1").bind(clientId).first();
+  if (!client) return json({ error: "invalid_client" }, 401);
+  if (form.get("client_secret") || form.get("client_assertion")) return json({ error: "invalid_client" }, 401);
+
+  if (grantType === "authorization_code") {
+    const code = form.get("code") || "";
+    const redirectUri = form.get("redirect_uri") || "";
+    const verifier = form.get("code_verifier") || "";
+    if (!/^221code_[a-f0-9]{64}$/i.test(code) || !/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) {
+      return json({ error: "invalid_grant" }, 400);
+    }
+    const codeHash = await hashToken(code);
+    const authorization = await env.DB.prepare("SELECT * FROM oauth_authorization_codes WHERE code_hash = ? AND client_id = ? AND redirect_uri = ? AND resource = ? AND used_at IS NULL AND datetime(expires_at) > CURRENT_TIMESTAMP LIMIT 1")
+      .bind(codeHash, clientId, redirectUri, resource).first();
+    if (!authorization) return json({ error: "invalid_grant" }, 400);
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+    const challenge = btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+    if (challenge !== authorization.code_challenge) return json({ error: "invalid_grant" }, 400);
+    const consumed = await env.DB.prepare("UPDATE oauth_authorization_codes SET used_at = CURRENT_TIMESTAMP WHERE code_hash = ? AND used_at IS NULL AND datetime(expires_at) > CURRENT_TIMESTAMP")
+      .bind(codeHash).run();
+    if (!consumed.meta?.changes) return json({ error: "invalid_grant" }, 400);
+    const tokens = await issueOAuthTokens(env, clientId, authorization.user_id, authorization.scope, resource);
+    return json(tokens, 200, { "Cache-Control": "no-store", Pragma: "no-cache" });
+  }
+
+  if (grantType === "refresh_token") {
+    const refreshToken = form.get("refresh_token") || "";
+    if (!/^221refresh_[a-f0-9]{64}$/i.test(refreshToken)) return json({ error: "invalid_grant" }, 400);
+    const tokenHash = await hashToken(refreshToken);
+    const existing = await env.DB.prepare("SELECT * FROM oauth_refresh_tokens WHERE token_hash = ? AND client_id = ? AND resource = ? LIMIT 1")
+      .bind(tokenHash, clientId, resource).first();
+    if (!existing) return json({ error: "invalid_grant" }, 400);
+    if (existing.revoked_at) {
+      await env.DB.batch([
+        env.DB.prepare("UPDATE oauth_refresh_tokens SET revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP) WHERE family_id = ?").bind(existing.family_id),
+        env.DB.prepare("UPDATE oauth_access_tokens SET revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP) WHERE family_id = ?").bind(existing.family_id)
+      ]);
+      return json({ error: "invalid_grant" }, 400);
+    }
+    if (new Date(existing.expires_at).getTime() <= Date.now()) return json({ error: "invalid_grant" }, 400);
+    const requestedScope = form.get("scope");
+    if (requestedScope) {
+      const requested = requestedScope.split(/\s+/).filter(Boolean);
+      const granted = String(existing.scope || "").split(/\s+/).filter(Boolean);
+      if (requested.some(s => !granted.includes(s))) return json({ error: "invalid_scope" }, 400);
+    }
+    const consumed = await env.DB.prepare("UPDATE oauth_refresh_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = ? AND revoked_at IS NULL AND datetime(expires_at) > CURRENT_TIMESTAMP")
+      .bind(tokenHash).run();
+    if (!consumed.meta?.changes) return json({ error: "invalid_grant" }, 400);
+    const tokens = await issueOAuthTokens(env, clientId, existing.user_id, existing.scope, resource, existing.family_id);
+    return json(tokens, 200, { "Cache-Control": "no-store", Pragma: "no-cache" });
+  }
+  return json({ error: "unsupported_grant_type" }, 400);
+}
+
+function oauthMetadata(request) {
+  const origin = new URL(request.url).origin;
+  const issuer = origin;
+  const resource = new URL("/mcp", origin).href;
+  const path = new URL(request.url).pathname;
+  if (path === "/.well-known/oauth-protected-resource") {
+    return json({
+      resource,
+      authorization_servers: [issuer],
+      scopes_supported: OAUTH_ALLOWED_SCOPES,
+      bearer_methods_supported: ["header"],
+      resource_name: "221Cloud"
+    }, 200, { "Cache-Control": "public, max-age=300" });
+  }
+  return json({
+    issuer,
+    authorization_endpoint: origin + "/oauth/authorize",
+    token_endpoint: origin + "/oauth/token",
+    registration_endpoint: origin + "/oauth/register",
+    response_types_supported: ["code"],
+    grant_types_supported: ["authorization_code", "refresh_token"],
+    token_endpoint_auth_methods_supported: ["none"],
+    code_challenge_methods_supported: ["S256"],
+    scopes_supported: OAUTH_ALLOWED_SCOPES,
+    authorization_response_iss_parameter_supported: true
+  }, 200, { "Cache-Control": "public, max-age=300" });
+}
+
+async function handleOAuthRequest(request, env, path) {
+  if (path === "/.well-known/oauth-protected-resource" || path === "/.well-known/oauth-authorization-server") {
+    if (request.method !== "GET") return json({ error: "Method not allowed." }, 405, { Allow: "GET" });
+    return oauthMetadata(request);
+  }
+  if (path === "/oauth/register") {
+    if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "POST" });
+    return oauthRegisterClient(request, env);
+  }
+  if (path === "/oauth/authorize") {
+    if (!["GET", "POST"].includes(request.method)) return json({ error: "Method not allowed." }, 405, { Allow: "GET, POST" });
+    return oauthAuthorizePage(request, env);
+  }
+  if (path === "/oauth/token") {
+    if (request.method !== "POST") return json({ error: "Method not allowed." }, 405, { Allow: "POST" });
+    return oauthTokenEndpoint(request, env);
+  }
+  return null;
+}
+
 async function handleAssistantMcpRequest(request, env) {
   if (request.method !== "POST") {
     return json({ error: "Le serveur MCP accepte les requêtes POST JSON." }, 405, {
@@ -1906,6 +2209,23 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
+
+    // Métadonnées et points de terminaison OAuth 2.1 pour le serveur MCP 221Cloud.
+    if (
+      path === "/.well-known/oauth-protected-resource" ||
+      path === "/.well-known/oauth-authorization-server" ||
+      path === "/oauth/register" ||
+      path === "/oauth/authorize" ||
+      path === "/oauth/token"
+    ) {
+      try {
+        const oauthResponse = await handleOAuthRequest(request, env, path);
+        if (oauthResponse) return oauthResponse;
+      } catch (error) {
+        console.error("ERREUR OAUTH 221CLOUD:", error);
+        return json({ error: "OAuth temporairement indisponible." }, 500, { "Cache-Control": "no-store" });
+      }
+    }
 
     // Serveur MCP distant : accès strictement en lecture via une clé personnelle.
     if (path === "/mcp") {
