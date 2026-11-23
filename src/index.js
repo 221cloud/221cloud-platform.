@@ -1038,10 +1038,19 @@ async function ensureApplicationTrashSchema(env) {
   `).run();
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_application_trash_project ON application_trash_items(project_id, deleted_at DESC)").run();
   for (const tableName of ["application_files", "application_file_versions", "application_directories"]) {
-    const columns = await env.DB.prepare("PRAGMA table_info(" + tableName + ")").all();
-    const known = new Set((columns.results || []).map(column => column.name));
-    if (!known.has("deleted_at")) await env.DB.prepare("ALTER TABLE " + tableName + " ADD COLUMN deleted_at TEXT").run();
-    if (!known.has("trash_id")) await env.DB.prepare("ALTER TABLE " + tableName + " ADD COLUMN trash_id TEXT").run();
+    for (const columnName of ["deleted_at", "trash_id"]) {
+      const columns = await env.DB.prepare("PRAGMA table_info(" + tableName + ")").all();
+      const known = new Set((columns.results || []).map(column => column.name));
+      if (known.has(columnName)) continue;
+      try {
+        await env.DB.prepare("ALTER TABLE " + tableName + " ADD COLUMN " + columnName + " TEXT").run();
+      } catch (error) {
+        // Une autre requête peut avoir ajouté la colonne entre PRAGMA et ALTER TABLE.
+        const refreshed = await env.DB.prepare("PRAGMA table_info(" + tableName + ")").all();
+        const alreadyAdded = (refreshed.results || []).some(column => column.name === columnName);
+        if (!alreadyAdded) throw error;
+      }
+    }
   }
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_application_files_trash ON application_files(project_id, trash_id)").run();
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_application_versions_trash ON application_file_versions(project_id, trash_id)").run();
@@ -1061,7 +1070,6 @@ async function ensureApplicationDirectoriesSchema(env) {
   await env.DB.prepare(
     "CREATE INDEX IF NOT EXISTS idx_application_directories_project ON application_directories(project_id, directory_path)"
   ).run();
-  await ensureApplicationTrashSchema(env);
 }
 
 async function applicationFilePathHasFileConflict(env, projectId, value, includeSelf = false) {
