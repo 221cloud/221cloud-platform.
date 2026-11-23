@@ -4231,28 +4231,71 @@ hosting
         await ensureApplicationDirectoriesSchema(env);
         const projectId = decodeURIComponent(applicationTrashRestoreMatch[1]);
         const trashId = decodeURIComponent(applicationTrashRestoreMatch[2]);
-        const project = await env.DB.prepare("SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1").bind(projectId, user.id).first();
+        const project = await env.DB.prepare(
+          "SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
+        ).bind(projectId, user.id).first();
         if (!project) return json({ error: "Application introuvable." }, 404);
-        const item = await env.DB.prepare("SELECT id, item_type, original_path FROM application_trash_items WHERE id = ? AND project_id = ? LIMIT 1").bind(trashId, projectId).first();
-        if (!item) return json({ error: "Élément introuvable dans la corbeille." }, 404);
-        const [restoredFilesResult, restoredDirectoriesResult, activeFilesResult, activeDirectoriesResult] = await Promise.all([
-          env.DB.prepare("SELECT file_name FROM application_files WHERE project_id = ? AND trash_id = ? AND deleted_at IS NOT NULL").bind(projectId, trashId).all(),
-          env.DB.prepare("SELECT directory_path FROM application_directories WHERE project_id = ? AND trash_id = ? AND deleted_at IS NOT NULL").bind(projectId, trashId).all(),
-          env.DB.prepare("SELECT file_name FROM application_files WHERE project_id = ? AND deleted_at IS NULL").bind(projectId).all(),
-          env.DB.prepare("SELECT directory_path FROM application_directories WHERE project_id = ? AND deleted_at IS NULL").bind(projectId).all()
+
+        const item = await env.DB.prepare(
+          "SELECT id, item_type, original_path FROM application_trash_items WHERE id = ? AND project_id = ? LIMIT 1"
+        ).bind(trashId, projectId).first();
+        if (!item) return json({ error: "Élément introuvable dans la corbeille ou déjà restauré." }, 404);
+        if (!["file", "folder"].includes(item.item_type) || !item.original_path) {
+          return json({ error: "Les informations de cet élément de corbeille sont invalides." }, 409);
+        }
+
+        const [filesResult, directoriesResult, versionsResult, activeFilesResult, activeDirectoriesResult] = await Promise.all([
+          env.DB.prepare(
+            "SELECT file_name FROM application_files WHERE project_id = ? AND trash_id = ? AND deleted_at IS NOT NULL"
+          ).bind(projectId, trashId).all(),
+          env.DB.prepare(
+            "SELECT directory_path FROM application_directories WHERE project_id = ? AND trash_id = ? AND deleted_at IS NOT NULL"
+          ).bind(projectId, trashId).all(),
+          env.DB.prepare(
+            "SELECT id, file_name FROM application_file_versions WHERE project_id = ? AND trash_id = ? AND deleted_at IS NOT NULL"
+          ).bind(projectId, trashId).all(),
+          env.DB.prepare(
+            "SELECT file_name FROM application_files WHERE project_id = ? AND deleted_at IS NULL"
+          ).bind(projectId).all(),
+          env.DB.prepare(
+            "SELECT directory_path FROM application_directories WHERE project_id = ? AND deleted_at IS NULL"
+          ).bind(projectId).all()
         ]);
-        const restoredFiles = (restoredFilesResult.results || []).map(row => row.file_name);
-        const restoredDirectories = (restoredDirectoriesResult.results || []).map(row => row.directory_path);
+
+        const restoredFiles = (filesResult.results || []).map(row => row.file_name);
+        const restoredDirectories = (directoriesResult.results || []).map(row => row.directory_path);
+        const restoredVersionIds = (versionsResult.results || []).map(row => row.id);
+        const restoredVersionPaths = (versionsResult.results || []).map(row => row.file_name);
         const activeFiles = (activeFilesResult.results || []).map(row => row.file_name);
         const activeDirectories = (activeDirectoriesResult.results || []).map(row => row.directory_path);
         const isSameOrBelow = (candidate, parent) => candidate === parent || candidate.startsWith(parent + "/");
-        let pathConflict = false;
 
-        // Un fichier ne peut pas occuper le chemin d'un autre fichier/dossier,
-        // ni servir de parent à un élément qui doit être restauré.
+        if (item.item_type === "file") {
+          if (restoredFiles.length !== 1 || restoredFiles[0] !== item.original_path || restoredDirectories.length) {
+            return json({ error: "Le contenu de cet élément de corbeille est incomplet ou incohérent." }, 409);
+          }
+          if (restoredVersionPaths.some(fileName => fileName !== item.original_path)) {
+            return json({ error: "L'historique de ce fichier contient un chemin incohérent." }, 409);
+          }
+        } else {
+          const validFolderFiles = restoredFiles.every(fileName => fileName.startsWith(item.original_path + "/"));
+          const validFolderDirectories = restoredDirectories.every(directoryPath => isSameOrBelow(directoryPath, item.original_path));
+          const validFolderVersions = restoredVersionPaths.every(fileName => fileName.startsWith(item.original_path + "/"));
+          if ((!restoredFiles.length && !restoredDirectories.length) || !validFolderFiles || !validFolderDirectories || !validFolderVersions) {
+            return json({ error: "Le contenu de ce dossier dans la corbeille est incomplet ou incohérent." }, 409);
+          }
+        }
+
+        if (restoredVersionIds.length && restoredVersionPaths.some(fileName => !restoredFiles.includes(fileName))) {
+          return json({ error: "L'historique contient une version sans fichier correspondant." }, 409);
+        }
+
+        // Première vérification lisible pour fournir un message précis avant écriture.
+        let pathConflict = false;
         for (const activePath of activeFiles) {
           if (restoredFiles.some(restoredPath =>
-            activePath === restoredPath || isSameOrBelow(restoredPath, activePath) ||
+            activePath === restoredPath ||
+            isSameOrBelow(restoredPath, activePath) ||
             isSameOrBelow(activePath, restoredPath)
           )) {
             pathConflict = true;
@@ -4265,36 +4308,122 @@ hosting
             break;
           }
         }
-
         if (!pathConflict) {
           for (const activePath of activeDirectories) {
             if (restoredFiles.some(restoredPath =>
               activePath === restoredPath || isSameOrBelow(activePath, restoredPath)
-            )) {
-              pathConflict = true;
-              break;
-            }
-            if (restoredDirectories.includes(activePath)) {
+            ) || restoredDirectories.includes(activePath)) {
               pathConflict = true;
               break;
             }
           }
         }
-
         if (pathConflict) {
           return json({
             error: "Un fichier ou dossier utilise déjà un chemin nécessaire à cette restauration. Renommez l’élément concerné avant de réessayer."
           }, 409);
         }
+
+        // Le même garde-fou SQL est réévalué dans le batch atomique.
+        // Les lignes du lot en cours sont exclues des conflits grâce à leur trash_id.
+        const restoreGuardSql = [
+          "EXISTS (SELECT 1 FROM application_trash_items ti WHERE ti.id = ? AND ti.project_id = ? AND ti.item_type = ? AND ti.original_path = ?)",
+          "AND (EXISTS (SELECT 1 FROM application_files rf0 WHERE rf0.project_id = ? AND rf0.trash_id = ? AND rf0.deleted_at IS NOT NULL)",
+          "OR EXISTS (SELECT 1 FROM application_directories rd0 WHERE rd0.project_id = ? AND rd0.trash_id = ? AND rd0.deleted_at IS NOT NULL))",
+          "AND NOT EXISTS (",
+          "SELECT 1 FROM application_files af",
+          "WHERE af.project_id = ? AND af.deleted_at IS NULL AND (af.trash_id IS NULL OR af.trash_id != ?)",
+          "AND (",
+          "EXISTS (SELECT 1 FROM application_files rf WHERE rf.project_id = ? AND rf.trash_id = ? AND rf.deleted_at IS NOT NULL AND (af.file_name = rf.file_name OR substr(rf.file_name, 1, length(af.file_name) + 1) = af.file_name || '/' OR substr(af.file_name, 1, length(rf.file_name) + 1) = rf.file_name || '/'))",
+          "OR EXISTS (SELECT 1 FROM application_directories rd WHERE rd.project_id = ? AND rd.trash_id = ? AND rd.deleted_at IS NOT NULL AND (af.file_name = rd.directory_path OR substr(rd.directory_path, 1, length(af.file_name) + 1) = af.file_name || '/'))",
+          "))",
+          "AND NOT EXISTS (",
+          "SELECT 1 FROM application_directories ad",
+          "WHERE ad.project_id = ? AND ad.deleted_at IS NULL AND (ad.trash_id IS NULL OR ad.trash_id != ?)",
+          "AND (",
+          "EXISTS (SELECT 1 FROM application_files rf WHERE rf.project_id = ? AND rf.trash_id = ? AND rf.deleted_at IS NOT NULL AND (ad.directory_path = rf.file_name OR substr(ad.directory_path, 1, length(rf.file_name) + 1) = rf.file_name || '/'))",
+          "OR EXISTS (SELECT 1 FROM application_directories rd WHERE rd.project_id = ? AND rd.trash_id = ? AND rd.deleted_at IS NOT NULL AND ad.directory_path = rd.directory_path)",
+          "))"
+        ].join(" ");
+        const restoreGuardBindings = () => [
+          trashId, projectId, item.item_type, item.original_path,
+          projectId, trashId, projectId, trashId,
+          projectId, trashId,
+          projectId, trashId, projectId, trashId,
+          projectId, trashId,
+          projectId, trashId, projectId, trashId
+        ];
+
+        const postRestoreGuardSql = [
+          "EXISTS (SELECT 1 FROM application_trash_items WHERE id = ? AND project_id = ?)",
+          "AND (EXISTS (SELECT 1 FROM application_files WHERE project_id = ? AND trash_id = ?)",
+          "OR EXISTS (SELECT 1 FROM application_directories WHERE project_id = ? AND trash_id = ?))",
+          "AND NOT EXISTS (SELECT 1 FROM application_files WHERE project_id = ? AND trash_id = ? AND deleted_at IS NOT NULL)",
+          "AND NOT EXISTS (SELECT 1 FROM application_file_versions WHERE project_id = ? AND trash_id = ? AND deleted_at IS NOT NULL)",
+          "AND NOT EXISTS (SELECT 1 FROM application_directories WHERE project_id = ? AND trash_id = ? AND deleted_at IS NOT NULL)"
+        ].join(" ");
+        const postRestoreGuardBindings = () => [
+          trashId, projectId,
+          projectId, trashId, projectId, trashId,
+          projectId, trashId, projectId, trashId, projectId, trashId
+        ];
+
         await env.DB.batch([
-          env.DB.prepare("UPDATE application_files SET deleted_at = NULL, trash_id = NULL WHERE project_id = ? AND trash_id = ?").bind(projectId, trashId),
-          env.DB.prepare("UPDATE application_file_versions SET deleted_at = NULL, trash_id = NULL WHERE project_id = ? AND trash_id = ?").bind(projectId, trashId),
-          env.DB.prepare("UPDATE application_directories SET deleted_at = NULL, trash_id = NULL WHERE project_id = ? AND trash_id = ?").bind(projectId, trashId),
-          env.DB.prepare("DELETE FROM application_trash_items WHERE id = ? AND project_id = ?").bind(trashId, projectId)
+          env.DB.prepare(
+            "UPDATE application_files SET deleted_at = NULL WHERE project_id = ? AND trash_id = ? AND deleted_at IS NOT NULL AND (" + restoreGuardSql + ")"
+          ).bind(projectId, trashId, ...restoreGuardBindings()),
+          env.DB.prepare(
+            "UPDATE application_file_versions SET deleted_at = NULL WHERE project_id = ? AND trash_id = ? AND deleted_at IS NOT NULL AND (" + restoreGuardSql + ")"
+          ).bind(projectId, trashId, ...restoreGuardBindings()),
+          env.DB.prepare(
+            "UPDATE application_directories SET deleted_at = NULL WHERE project_id = ? AND trash_id = ? AND deleted_at IS NOT NULL AND (" + restoreGuardSql + ")"
+          ).bind(projectId, trashId, ...restoreGuardBindings()),
+          env.DB.prepare(
+            "UPDATE application_files SET trash_id = NULL WHERE project_id = ? AND trash_id = ? AND deleted_at IS NULL AND (" + postRestoreGuardSql + ")"
+          ).bind(projectId, trashId, ...postRestoreGuardBindings()),
+          env.DB.prepare(
+            "UPDATE application_file_versions SET trash_id = NULL WHERE project_id = ? AND trash_id = ? AND deleted_at IS NULL AND (" + postRestoreGuardSql + ")"
+          ).bind(projectId, trashId, ...postRestoreGuardBindings()),
+          env.DB.prepare(
+            "UPDATE application_directories SET trash_id = NULL WHERE project_id = ? AND trash_id = ? AND deleted_at IS NULL AND (" + postRestoreGuardSql + ")"
+          ).bind(projectId, trashId, ...postRestoreGuardBindings()),
+          env.DB.prepare(
+            "DELETE FROM application_trash_items WHERE id = ? AND project_id = ? AND NOT EXISTS (SELECT 1 FROM application_files WHERE project_id = ? AND trash_id = ?) AND NOT EXISTS (SELECT 1 FROM application_file_versions WHERE project_id = ? AND trash_id = ?) AND NOT EXISTS (SELECT 1 FROM application_directories WHERE project_id = ? AND trash_id = ?)"
+          ).bind(trashId, projectId, projectId, trashId, projectId, trashId, projectId, trashId)
         ]);
+
+        // Relecture après transaction : aucune réussite n'est annoncée si un élément manque.
+        const [remainingTrashItem, activeFilesAfter, activeDirectoriesAfter, activeVersionsAfter] = await Promise.all([
+          env.DB.prepare(
+            "SELECT id FROM application_trash_items WHERE id = ? AND project_id = ? LIMIT 1"
+          ).bind(trashId, projectId).first(),
+          restoredFiles.length
+            ? env.DB.prepare("SELECT file_name FROM application_files WHERE project_id = ? AND deleted_at IS NULL AND file_name IN (" + restoredFiles.map(() => "?").join(",") + ")").bind(projectId, ...restoredFiles).all()
+            : Promise.resolve({ results: [] }),
+          restoredDirectories.length
+            ? env.DB.prepare("SELECT directory_path FROM application_directories WHERE project_id = ? AND deleted_at IS NULL AND directory_path IN (" + restoredDirectories.map(() => "?").join(",") + ")").bind(projectId, ...restoredDirectories).all()
+            : Promise.resolve({ results: [] }),
+          restoredVersionIds.length
+            ? env.DB.prepare("SELECT id FROM application_file_versions WHERE project_id = ? AND deleted_at IS NULL AND id IN (" + restoredVersionIds.map(() => "?").join(",") + ")").bind(projectId, ...restoredVersionIds).all()
+            : Promise.resolve({ results: [] })
+        ]);
+
+        const filesRestored = (activeFilesAfter.results || []).length === restoredFiles.length;
+        const directoriesRestored = (activeDirectoriesAfter.results || []).length === restoredDirectories.length;
+        const versionsRestored = (activeVersionsAfter.results || []).length === restoredVersionIds.length;
+        if (remainingTrashItem || !filesRestored || !directoriesRestored || !versionsRestored) {
+          return json({
+            error: "La restauration n'a pas été confirmée. L'élément est conservé dans la corbeille ; actualisez puis réessayez."
+          }, 409);
+        }
+
         return json({ message: "Élément restauré avec son contenu et son historique." });
       } catch (error) {
         if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
+        const errorMessage = String(error?.message || "");
+        if (errorMessage.includes("UNIQUE constraint failed")) {
+          return json({ error: "Un conflit de chemin empêche la restauration. Renommez l'élément concerné puis réessayez." }, 409);
+        }
         console.error("ERREUR RESTAURATION CORBEILLE APPLICATION:", error);
         return json({ error: "Impossible de restaurer cet élément." }, 500);
       }
