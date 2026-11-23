@@ -9038,6 +9038,14 @@ headers.set(
     }
 
 
+    // Accès autonome à 221Cloud Pro : même interface et même session 221Cloud.
+    if (path === "/pro" || path === "/pro/") {
+      const proUrl = new URL(request.url);
+      proUrl.pathname = "/";
+      proUrl.search = "";
+      return env.ASSETS.fetch(new Request(proUrl.toString(), request));
+    }
+
     return env.ASSETS.fetch(request);
   }
 };
