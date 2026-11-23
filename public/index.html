@@ -878,6 +878,7 @@ if (IS_PRO_MODE) {
 let currentUser = null;
 let proQuotesCache = [];
 let proEditingQuoteId = null;
+let proQuoteDraftState = null;
 let projectsCache = [];
 let databasesCache = [];
 let activeDatabaseStructure = null;
@@ -6403,7 +6404,7 @@ function renderProPage() {
 
     <div class="section-head pro-menu-heading"><h2>Que voulez-vous faire ?</h2></div>
     <div class="grid">
-      <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir le formulaire de devis" onclick="toggleProPanel('quote')" aria-expanded="false" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">📄</div><div><h3>Devis</h3><p>Prix d'un travail</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
+      <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir le formulaire de devis" onclick="renderProQuotePage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">📄</div><div><h3>Devis</h3><p>Prix d'un travail</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
       <div class="card pro-shortcut-card pro-shortcut-soon" aria-disabled="true"><div class="shortcut"><div class="shortcut-icon">🧾</div><div><h3>Facture</h3><p>Après le travail</p><span class="status">Bientôt</span></div></div></div>
       <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir la rubrique clients" onclick="toggleProPanel('clients')" aria-expanded="false" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">👥</div><div><h3>Clients</h3><p>Les personnes pour qui vous travaillez</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
       <div class="card pro-shortcut-card pro-shortcut-soon" aria-disabled="true"><div class="shortcut"><div class="shortcut-icon">💰</div><div><h3>Argent</h3><p>Argent reçu et à recevoir</p><span class="status">Bientôt</span></div></div></div>
@@ -6431,57 +6432,6 @@ function renderProPage() {
     </div>
     </div>
 
-    <div class="pro-panel hidden" id="proQuotePanel">
-    <div class="card" id="proQuoteSection">
-      <div class="section-head"><h2>📄 Faire un devis</h2><span class="status online">Disponible</span></div>
-      <p class="muted">Préparez le prix d'un travail. Le devis sera gardé en brouillon.</p>
-      <form id="proQuoteForm" class="form-card" onsubmit="saveProQuote(event)">
-        <label for="proQuoteClient">Choisir le client *</label>
-        <select id="proQuoteClient" required>
-          <option value="">Chargement des clients…</option>
-        </select>
-        <label for="proQuoteDescription">Quel travail faut-il faire ? *</label>
-        <textarea id="proQuoteDescription" rows="3" maxlength="2000" required placeholder="Exemple : Installer trois prises électriques dans le salon."></textarea>
-        <label for="proQuoteLabour">Prix de la main-d'œuvre (FCFA)</label>
-        <input id="proQuoteLabour" type="number" min="0" max="1000000000" step="1" value="0" inputmode="numeric" oninput="updateProQuoteTotal()">
-        <div style="margin-top:12px">
-          <h3>🔌 Matériaux et fournitures</h3>
-          <p class="muted">Ajoutez chaque matériel avec sa quantité et son prix.</p>
-          <div id="proQuoteItems">
-            <div class="pro-quote-material-row" data-pro-material-row style="border:1px solid var(--border);border-radius:12px;padding:12px;margin:10px 0">
-              <label>Nom du matériel</label>
-              <input class="pro-material-label" maxlength="160" placeholder="Exemple : Prise électrique" oninput="updateProQuoteTotal()">
-              <label>Quantité</label>
-              <input class="pro-material-quantity" type="number" min="0.01" max="1000000" step="0.01" value="1" inputmode="decimal" oninput="updateProQuoteTotal()">
-              <label>Unité</label>
-              <select class="pro-material-unit">
-                <option>Pièce</option><option>Mètre</option><option>Rouleau</option><option>Boîte</option><option>Paquet</option><option>Kg</option><option>Litre</option><option>Forfait</option><option>Autre</option>
-              </select>
-              <label>Prix unitaire (FCFA)</label>
-              <input class="pro-material-price" type="number" min="0" max="1000000000" step="1" value="0" inputmode="numeric" oninput="updateProQuoteTotal()">
-              <div class="muted" style="margin-top:8px">Total de cette ligne : <strong class="pro-material-line-total">0 FCFA</strong></div>
-              <button type="button" class="secondary" onclick="this.closest('[data-pro-material-row]').remove();updateProQuoteTotal()">Retirer ce matériel</button>
-            </div>
-          </div>
-          <button type="button" class="secondary" onclick="addProMaterialRow()">＋ Ajouter un autre matériel</button>
-        </div>
-        <div class="notice" style="margin-top:12px">
-          <div>Total des matériaux : <strong id="proQuoteMaterialsTotal">0 FCFA</strong></div>
-          <div>Main-d'œuvre : <strong id="proQuoteLabourSummary">0 FCFA</strong></div>
-          <div style="margin-top:8px"><strong>Total du devis : <span id="proQuoteTotal">0 FCFA</span></strong></div>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-          <button id="proQuoteSave" type="submit">＋ Enregistrer le devis en brouillon</button>
-          <button id="proQuoteCancelEdit" type="button" class="secondary hidden" onclick="cancelProQuoteEdit()">Annuler la modification</button>
-        </div>
-        <div id="proQuoteMessage" class="notice" role="status" aria-live="polite"></div>
-      </form>
-      <div class="section-head"><h3>Mes devis enregistrés</h3></div>
-      <div id="proQuotesList"><div class="empty">Chargement des devis…</div></div>
-    </div>
-
-    </div>
-
     <div class="notice">
       <strong>Conçu pour commencer avec les électriciens.</strong><br>
       Les prix seront toujours vérifiés par l'artisan. Aucun devis ni facture ne sera envoyé sans sa confirmation. Les fonctions seront activées progressivement.
@@ -6491,15 +6441,62 @@ function renderProPage() {
   loadProQuotes();
 }
 
+
+function saveProQuotePageDraft() {
+  const form = document.getElementById("proQuoteForm");
+  if (!form) return;
+  proQuoteDraftState = {
+    clientId: document.getElementById("proQuoteClient")?.value || "",
+    description: document.getElementById("proQuoteDescription")?.value || "",
+    labour: document.getElementById("proQuoteLabour")?.value || "0",
+    items: Array.from(document.querySelectorAll("#proQuoteItems [data-pro-material-row]")).map(row => ({
+      label: row.querySelector(".pro-material-label")?.value || "",
+      quantity: row.querySelector(".pro-material-quantity")?.value || "1",
+      unit: row.querySelector(".pro-material-unit")?.value || "Pièce",
+      price: row.querySelector(".pro-material-price")?.value || "0"
+    }))
+  };
+}
+
+function returnToProHome() {
+  saveProQuotePageDraft();
+  renderProPage();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function renderProQuotePage() {
+  const main = document.getElementById("mainContent");
+  main.innerHTML = "\n    <div style=\"display:flex;align-items:center;gap:12px;margin:0 0 18px\">\n      <button type=\"button\" class=\"secondary\" onclick=\"returnToProHome()\" style=\"min-width:104px\">← Retour</button>\n      <div><div class=\"dashboard-kicker\" style=\"color:#8de7c7\">221CLOUD PRO</div><strong style=\"font-size:18px\">Nouveau devis</strong></div>\n    </div>\n    <div class=\"card\" id=\"proQuoteSection\">\n      <div class=\"section-head\"><h2>📄 Faire un devis</h2><span class=\"status online\">Disponible</span></div>\n      <p class=\"muted\">Préparez le prix d'un travail. Le devis sera gardé en brouillon.</p>\n      <form id=\"proQuoteForm\" class=\"form-card\" onsubmit=\"saveProQuote(event)\">\n        <label for=\"proQuoteClient\">Choisir le client *</label>\n        <select id=\"proQuoteClient\" required><option value=\"\">Chargement des clients…</option></select>\n        <label for=\"proQuoteDescription\">Quel travail faut-il faire ? *</label>\n        <textarea id=\"proQuoteDescription\" rows=\"3\" maxlength=\"2000\" required placeholder=\"Exemple : Installer trois prises électriques dans le salon.\"></textarea>\n        <label for=\"proQuoteLabour\">Prix de la main-d'œuvre (FCFA)</label>\n        <input id=\"proQuoteLabour\" type=\"number\" min=\"0\" max=\"1000000000\" step=\"1\" value=\"0\" inputmode=\"numeric\" oninput=\"updateProQuoteTotal()\">\n        <div style=\"margin-top:12px\">\n          <h3>🔌 Matériaux et fournitures</h3><p class=\"muted\">Ajoutez chaque matériel avec sa quantité et son prix.</p>\n          <div id=\"proQuoteItems\">\n            <div class=\"pro-quote-material-row\" data-pro-material-row style=\"border:1px solid var(--border);border-radius:12px;padding:12px;margin:10px 0\">\n              <label>Nom du matériel</label><input class=\"pro-material-label\" maxlength=\"160\" placeholder=\"Exemple : Prise électrique\" oninput=\"updateProQuoteTotal()\">\n              <label>Quantité</label><input class=\"pro-material-quantity\" type=\"number\" min=\"0.01\" max=\"1000000\" step=\"0.01\" value=\"1\" inputmode=\"decimal\" oninput=\"updateProQuoteTotal()\">\n              <label>Unité</label><select class=\"pro-material-unit\"><option>Pièce</option><option>Mètre</option><option>Rouleau</option><option>Boîte</option><option>Paquet</option><option>Kg</option><option>Litre</option><option>Forfait</option><option>Autre</option></select>\n              <label>Prix unitaire (FCFA)</label><input class=\"pro-material-price\" type=\"number\" min=\"0\" max=\"1000000000\" step=\"1\" value=\"0\" inputmode=\"numeric\" oninput=\"updateProQuoteTotal()\">\n              <div class=\"muted\" style=\"margin-top:8px\">Total de cette ligne : <strong class=\"pro-material-line-total\">0 FCFA</strong></div>\n              <button type=\"button\" class=\"secondary\" onclick=\"this.closest('[data-pro-material-row]').remove();updateProQuoteTotal()\">Retirer ce matériel</button>\n            </div>\n          </div>\n          <button type=\"button\" class=\"secondary\" onclick=\"addProMaterialRow()\">＋ Ajouter un autre matériel</button>\n        </div>\n        <div class=\"notice\" style=\"margin-top:12px\">\n          <div>Total des matériaux : <strong id=\"proQuoteMaterialsTotal\">0 FCFA</strong></div>\n          <div>Main-d'œuvre : <strong id=\"proQuoteLabourSummary\">0 FCFA</strong></div>\n          <div style=\"margin-top:8px\"><strong>Total du devis : <span id=\"proQuoteTotal\">0 FCFA</span></strong></div>\n        </div>\n        <div style=\"display:flex;gap:8px;flex-wrap:wrap;margin-top:12px\">\n          <button id=\"proQuoteSave\" type=\"submit\">＋ Enregistrer le devis en brouillon</button>\n          <button id=\"proQuoteCancelEdit\" type=\"button\" class=\"secondary hidden\" onclick=\"cancelProQuoteEdit()\">Annuler la modification</button>\n        </div>\n        <div id=\"proQuoteMessage\" class=\"notice\" role=\"status\" aria-live=\"polite\"></div>\n      </form>\n      <div class=\"section-head\"><h3>Mes devis enregistrés</h3></div>\n      <div id=\"proQuotesList\"><div class=\"empty\">Chargement des devis…</div></div>\n    </div>\n";
+  await loadProClients();
+  await loadProQuotes();
+  if (proQuoteDraftState) {
+    const draft = proQuoteDraftState;
+    const client = document.getElementById("proQuoteClient");
+    const description = document.getElementById("proQuoteDescription");
+    const labour = document.getElementById("proQuoteLabour");
+    if (client) client.value = draft.clientId || "";
+    if (description) description.value = draft.description || "";
+    if (labour) labour.value = draft.labour || "0";
+    const rows = document.getElementById("proQuoteItems");
+    if (rows) {
+      rows.innerHTML = "";
+      (draft.items && draft.items.length ? draft.items : [{}]).forEach(item => {
+        addProMaterialRow();
+        const row = rows.lastElementChild;
+        row.querySelector(".pro-material-label").value = item.label || "";
+        row.querySelector(".pro-material-quantity").value = item.quantity || "1";
+        row.querySelector(".pro-material-unit").value = item.unit || "Pièce";
+        row.querySelector(".pro-material-price").value = item.price || "0";
+      });
+    }
+    updateProQuoteTotal();
+  }
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
 function toggleProPanel(type) {
-  const panels = {
-    clients: document.getElementById("proClientsPanel"),
-    quote: document.getElementById("proQuotePanel")
-  };
-  const cards = {
-    clients: document.querySelector('[aria-label="Ouvrir la rubrique clients"]'),
-    quote: document.querySelector('[aria-label="Ouvrir le formulaire de devis"]')
-  };
+  const panels = { clients: document.getElementById("proClientsPanel") };
+  const cards = { clients: document.querySelector('[aria-label="Ouvrir la rubrique clients"]') };
   const selected = panels[type];
   if (!selected) return;
 
@@ -6844,6 +6841,7 @@ async function saveProQuote(event) {
       method: editingId ? "PATCH" : "POST", body: JSON.stringify(body)
     });
     proEditingQuoteId = null;
+    proQuoteDraftState = null;
     form.reset();
     const materialRows = document.getElementById("proQuoteItems");
     if (materialRows) {
