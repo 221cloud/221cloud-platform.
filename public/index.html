@@ -666,6 +666,7 @@ footer {
       <button class="nav-btn" data-page="applications" onclick="showPage('applications')">▦ Applications</button>
       <button class="nav-btn admin-nav hidden" data-page="admin" onclick="showPage('admin')">🛡 Administration</button>
       <button class="nav-btn" data-page="account" onclick="showPage('account')">⚙ Mon compte</button>
+      <button class="nav-btn" data-page="assistant-access" onclick="showPage('assistant-access')">🔑 Accès assistant</button>
     </aside>
     <main id="mainContent"></main>
   </div>
@@ -1105,6 +1106,7 @@ function showPage(page) {
   else if (page === "applications") renderApplicationsPage();
   else if (page === "admin") renderAdmin();
   else if (page === "account") renderAccount();
+  else if (page === "assistant-access") renderAssistantAccessPage();
 }
 
 /* TABLEAU DE BORD */
@@ -7219,6 +7221,174 @@ function renderPlaceholder(title, description) {
       <span class="status">Bientôt disponible</span>
     </div>
   `;
+}
+
+async function renderAssistantAccessPage() {
+  document.getElementById("mainContent").innerHTML = `
+    <h1 class="page-title">Accès assistant</h1>
+    <p class="page-subtitle">Autorise un assistant à consulter uniquement tes propres projets et fichiers d’application sur 221Cloud.</p>
+
+    <div class="card form-card">
+      <h3>Créer une clé d’accès</h3>
+      <p class="muted">Cette clé autorise uniquement la lecture. Elle ne permet pas de modifier, supprimer ou publier tes projets.</p>
+      <form onsubmit="createAssistantAccess(event)">
+        <label for="assistantAccessLabel">Nom de cette clé</label>
+        <input id="assistantAccessLabel" type="text" maxlength="60" value="ChatGPT - accès personnel" required>
+        <label for="assistantAccessExpiry">Durée de validité</label>
+        <select id="assistantAccessExpiry">
+          <option value="30">30 jours</option>
+          <option value="90" selected>90 jours</option>
+          <option value="180">180 jours</option>
+          <option value="365">365 jours</option>
+        </select>
+        <button type="submit" id="assistantAccessCreateButton">Créer une clé de lecture</button>
+      </form>
+      <div id="assistantAccessCreateMessage" aria-live="polite"></div>
+      <div id="assistantAccessSecret" class="hidden" style="margin-top:16px">
+        <div class="notice success-text">
+          <strong>Clé créée.</strong> Copie-la maintenant : elle ne sera plus affichée après avoir quitté cette page.
+        </div>
+        <label for="assistantAccessTokenValue">Clé privée</label>
+        <input id="assistantAccessTokenValue" type="password" readonly autocomplete="off">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+          <button type="button" class="secondary" onclick="toggleAssistantAccessSecret()">Afficher / masquer</button>
+          <button type="button" onclick="copyAssistantAccessSecret()">Copier la clé</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card form-card">
+      <div class="section-head" style="margin-top:0">
+        <h3>Mes clés d’accès</h3>
+        <button type="button" class="secondary" onclick="loadAssistantAccessTokens()">Actualiser</button>
+      </div>
+      <p class="muted">Tu peux révoquer une clé à tout moment. Une clé révoquée ne peut plus être utilisée.</p>
+      <div id="assistantAccessTokensList" class="muted">Chargement des clés...</div>
+    </div>
+
+    <div class="card">
+      <h3>Autorisations accordées</h3>
+      <ul>
+        <li>Consulter la liste de tes projets.</li>
+        <li>Consulter les informations de tes projets.</li>
+        <li>Lire les fichiers autorisés de tes applications.</li>
+      </ul>
+      <p class="muted">Les projets des autres utilisateurs restent inaccessibles. Les fichiers sensibles comme les secrets d’environnement sont exclus.</p>
+    </div>
+  `;
+  await loadAssistantAccessTokens();
+}
+
+async function loadAssistantAccessTokens() {
+  const container = document.getElementById("assistantAccessTokensList");
+  if (!container) return;
+  container.textContent = "Chargement des clés...";
+  try {
+    const result = await api("/assistant-access/tokens");
+    const tokens = Array.isArray(result.tokens) ? result.tokens : [];
+    if (!tokens.length) {
+      container.innerHTML = "<p>Aucune clé d’accès créée.</p>";
+      return;
+    }
+    container.innerHTML = tokens.map(token => {
+      const revoked = Boolean(token.revoked_at);
+      const expired = Boolean(token.expires_at && new Date(token.expires_at).getTime() <= Date.now());
+      const status = revoked ? "Révoquée" : (expired ? "Expirée" : "Active");
+      const statusClass = revoked || expired ? "error-text" : "success-text";
+      const expiry = token.expires_at
+        ? new Date(token.expires_at).toLocaleString("fr-FR", { dateStyle: "medium" })
+        : "Sans expiration";
+      const created = token.created_at
+        ? new Date(token.created_at).toLocaleString("fr-FR", { dateStyle: "medium" })
+        : "Date inconnue";
+      return `
+        <div class="item-card" style="margin-top:12px">
+          <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
+            <strong>${escapeHTML(token.label || "Accès assistant")}</strong>
+            <strong class="${statusClass}">${status}</strong>
+          </div>
+          <p class="muted">Créée le ${escapeHTML(created)} · Expire le ${escapeHTML(expiry)}</p>
+          <p class="muted">Autorisations : lecture des projets et fichiers d’application</p>
+          ${!revoked && !expired ? `<button type="button" class="danger" onclick="revokeAssistantAccess(${escapeJSAttribute(token.id)}, ${escapeJSAttribute(token.label || "cette clé")})">Révoquer cette clé</button>` : ""}
+        </div>
+      `;
+    }).join("");
+  } catch (error) {
+    container.innerHTML = '<p class="error-text">' + escapeHTML(error.message || "Impossible de charger les clés.") + '</p>';
+  }
+}
+
+async function createAssistantAccess(event) {
+  event.preventDefault();
+  const labelInput = document.getElementById("assistantAccessLabel");
+  const expiryInput = document.getElementById("assistantAccessExpiry");
+  const button = document.getElementById("assistantAccessCreateButton");
+  const message = document.getElementById("assistantAccessCreateMessage");
+  const secretPanel = document.getElementById("assistantAccessSecret");
+  const secretInput = document.getElementById("assistantAccessTokenValue");
+  if (!labelInput || !expiryInput || !button || !message || !secretPanel || !secretInput) return;
+
+  if (!confirm("Créer une clé qui donnera un accès en lecture à tes propres projets et fichiers d’application ?")) return;
+  button.disabled = true;
+  button.textContent = "Création...";
+  message.textContent = "";
+  secretPanel.classList.add("hidden");
+  secretInput.value = "";
+  try {
+    const result = await api("/assistant-access/tokens", {
+      method: "POST",
+      body: JSON.stringify({
+        label: labelInput.value.trim(),
+        expires_in_days: Number(expiryInput.value)
+      })
+    });
+    if (!result.token) throw new Error("La clé n’a pas été retournée. Vérifie la liste des accès.");
+    secretInput.value = result.token;
+    secretPanel.classList.remove("hidden");
+    message.innerHTML = '<p class="success-text">' + escapeHTML(result.message || "Clé créée.") + '</p>';
+    await loadAssistantAccessTokens();
+  } catch (error) {
+    message.innerHTML = '<p class="error-text">' + escapeHTML(error.message || "Impossible de créer la clé.") + '</p>';
+  } finally {
+    button.disabled = false;
+    button.textContent = "Créer une clé de lecture";
+  }
+}
+
+function toggleAssistantAccessSecret() {
+  const input = document.getElementById("assistantAccessTokenValue");
+  if (input) input.type = input.type === "password" ? "text" : "password";
+}
+
+async function copyAssistantAccessSecret() {
+  const input = document.getElementById("assistantAccessTokenValue");
+  if (!input || !input.value) return;
+  try {
+    await navigator.clipboard.writeText(input.value);
+    alert("Clé copiée. Garde-la secrète et ne la partage pas dans une conversation.");
+  } catch (error) {
+    input.type = "text";
+    input.select();
+    alert("Sélectionne la clé puis utilise Copier. Ne la partage pas dans une conversation.");
+  }
+}
+
+async function revokeAssistantAccess(id, label) {
+  if (!confirm("Révoquer « " + label + " » ? Cette clé cessera immédiatement de fonctionner.")) return;
+  try {
+    const result = await api("/assistant-access/tokens/" + encodeURIComponent(id) + "/revoke", {
+      method: "POST",
+      body: "{}"
+    });
+    alert(result.message || "Clé révoquée.");
+    const secretPanel = document.getElementById("assistantAccessSecret");
+    const secretInput = document.getElementById("assistantAccessTokenValue");
+    if (secretPanel) secretPanel.classList.add("hidden");
+    if (secretInput) secretInput.value = "";
+    await loadAssistantAccessTokens();
+  } catch (error) {
+    alert(error.message || "Impossible de révoquer cette clé.");
+  }
 }
 
 function renderAccount() {
