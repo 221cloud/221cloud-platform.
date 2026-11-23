@@ -1167,19 +1167,22 @@ async function ensureAutomationTasksSchema(env) {
       await env.DB.prepare(
         "CREATE INDEX IF NOT EXISTS idx_automation_tasks_project_owner ON automation_tasks(user_id, project_id, created_at DESC)"
       ).run();
-      const automationColumns = await env.DB.prepare("PRAGMA table_info(automation_tasks)").all();
-      if (!(automationColumns.results || []).some(column => column.name === "result_json")) {
-        await env.DB.prepare("ALTER TABLE automation_tasks ADD COLUMN result_json TEXT").run();
-      }
-      if (!(automationColumns.results || []).some(column => column.name === "started_at")) {
-        await env.DB.prepare("ALTER TABLE automation_tasks ADD COLUMN started_at TEXT").run();
-      }
-      if (!(automationColumns.results || []).some(column => column.name === "duration_ms")) {
-        await env.DB.prepare("ALTER TABLE automation_tasks ADD COLUMN duration_ms INTEGER").run();
-      }
-      if (!(automationColumns.results || []).some(column => column.name === "recovery_count")) {
-        await env.DB.prepare("ALTER TABLE automation_tasks ADD COLUMN recovery_count INTEGER NOT NULL DEFAULT 0").run();
-      }
+      const ensureAutomationColumn = async (columnName, definition) => {
+        const columns = await env.DB.prepare("PRAGMA table_info(automation_tasks)").all();
+        if ((columns.results || []).some(column => column.name === columnName)) return;
+        try {
+          await env.DB.prepare("ALTER TABLE automation_tasks ADD COLUMN " + columnName + " " + definition).run();
+        } catch (error) {
+          // Une autre instance du Worker peut avoir ajouté la colonne entre-temps.
+          const refreshed = await env.DB.prepare("PRAGMA table_info(automation_tasks)").all();
+          const alreadyAdded = (refreshed.results || []).some(column => column.name === columnName);
+          if (!alreadyAdded) throw error;
+        }
+      };
+      await ensureAutomationColumn("result_json", "TEXT");
+      await ensureAutomationColumn("started_at", "TEXT");
+      await ensureAutomationColumn("duration_ms", "INTEGER");
+      await ensureAutomationColumn("recovery_count", "INTEGER NOT NULL DEFAULT 0");
     })().catch(error => {
       automationTasksSchemaPromise = null;
       throw error;
