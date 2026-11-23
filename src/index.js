@@ -1177,6 +1177,9 @@ async function ensureAutomationTasksSchema(env) {
       if (!(automationColumns.results || []).some(column => column.name === "duration_ms")) {
         await env.DB.prepare("ALTER TABLE automation_tasks ADD COLUMN duration_ms INTEGER").run();
       }
+      if (!(automationColumns.results || []).some(column => column.name === "recovery_count")) {
+        await env.DB.prepare("ALTER TABLE automation_tasks ADD COLUMN recovery_count INTEGER NOT NULL DEFAULT 0").run();
+      }
     })().catch(error => {
       automationTasksSchemaPromise = null;
       throw error;
@@ -1425,6 +1428,7 @@ async function runAutomationScheduler(env, scheduledTime) {
   await env.DB.prepare(`
     UPDATE automation_tasks
     SET status = 'failed',
+        recovery_count = recovery_count + 1,
         lock_token = NULL,
         locked_until = NULL,
         last_error = 'Verrou expiré après la dernière tentative.',
@@ -1443,7 +1447,9 @@ async function runAutomationScheduler(env, scheduledTime) {
 
     const claimed = await env.DB.prepare(`
       UPDATE automation_tasks
-      SET status = 'running',
+      SET recovery_count = recovery_count + CASE
+            WHEN status = 'running' AND locked_until <= ? THEN 1 ELSE 0 END,
+          status = 'running',
           lock_token = ?,
           locked_until = ?,
           attempts = attempts + 1,
@@ -1468,6 +1474,7 @@ async function runAutomationScheduler(env, scheduledTime) {
           OR (status = 'running' AND locked_until <= ?)
         )
     `).bind(
+      now,
       lockToken,
       lockUntil,
       new Date(attemptStartedAt).toISOString(),
@@ -2311,7 +2318,7 @@ if (path === "/api/subscription" && request.method === "GET") {
             SELECT id, project_id, task_type, payload_json, result_json, status,
                    scheduled_at, attempts, max_attempts, last_error,
                    created_at, updated_at, completed_at, cancelled_at,
-                   started_at, duration_ms
+                   started_at, duration_ms, recovery_count
             FROM automation_tasks
             WHERE project_id = ? AND user_id = ?
             ORDER BY created_at DESC, scheduled_at DESC
