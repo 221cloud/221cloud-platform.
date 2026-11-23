@@ -6424,6 +6424,31 @@ function updateProQuoteTotal() {
   if (total) total.textContent = formatProMoney(safeLabour + materials);
 }
 
+async function deleteProQuote(quoteId) {
+  const quote = proQuotesCache.find(item => item.id === quoteId);
+  if (!quote || quote.status !== "draft") {
+    alert("Seuls les devis en brouillon peuvent être supprimés.");
+    return;
+  }
+
+  const clientName = quote.client_name || "ce client";
+  const confirmed = confirm(
+    "Voulez-vous vraiment supprimer le brouillon de " + clientName +
+    " ?\n\nCette action supprimera aussi le détail des matériaux. Elle est définitive."
+  );
+  if (!confirmed) return;
+
+  try {
+    await api("/pro/quotes/" + encodeURIComponent(quoteId), { method: "DELETE" });
+    if (proEditingQuoteId === quoteId) cancelProQuoteEdit();
+    await loadProQuotes();
+    const message = document.getElementById("proQuoteMessage");
+    if (message) message.textContent = "Le brouillon a été supprimé.";
+  } catch (error) {
+    alert(error.message || "Impossible de supprimer ce devis.");
+  }
+}
+
 async function loadProQuotes() {
   const list = document.getElementById("proQuotesList");
   if (!list) return;
@@ -6460,7 +6485,10 @@ async function loadProQuotes() {
             </div>
             <span class="status">Brouillon</span>
           </div>
-          <div class="item-actions"><button type="button" class="secondary" onclick="editProQuote('${escapeHTML(quote.id)}')">✏️ Modifier ce devis</button></div>
+          ${quote.status === "draft" ? `<div class="item-actions">
+            <button type="button" class="secondary" onclick="editProQuote('${escapeHTML(quote.id)}')">✏️ Modifier ce devis</button>
+            <button type="button" class="danger" onclick="deleteProQuote('${escapeHTML(quote.id)}')">🗑️ Supprimer ce devis</button>
+          </div>` : ""}
           <p style="font-size:19px;margin:14px 0 8px"><strong>${escapeHTML(formatProMoney(quote.total_amount))}</strong></p>
           <details style="margin-top:12px">
             <summary style="cursor:pointer;color:#8eb6ff;font-weight:700;padding:8px 0">📄 Consulter le devis complet</summary>
