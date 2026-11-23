@@ -660,6 +660,13 @@ body.pro-mode #mainContent .pro-voice-copy span {
   color: #a9b8cb;
   font-size: 12px;
 }
+body.pro-mode #mainContent .pro-panel:not(.hidden) {
+  animation: proPanelOpen .22s ease-out;
+}
+@keyframes proPanelOpen {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 body.pro-mode #mainContent .pro-shortcut-card {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -6396,13 +6403,14 @@ function renderProPage() {
 
     <div class="section-head pro-menu-heading"><h2>Que voulez-vous faire ?</h2></div>
     <div class="grid">
-      <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir le formulaire de devis" onclick="document.getElementById('proQuoteSection').scrollIntoView({behavior:'smooth',block:'start'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">📄</div><div><h3>Devis</h3><p>Prix d'un travail</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
+      <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir le formulaire de devis" onclick="toggleProPanel('quote')" aria-expanded="false" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">📄</div><div><h3>Devis</h3><p>Prix d'un travail</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
       <div class="card pro-shortcut-card pro-shortcut-soon" aria-disabled="true"><div class="shortcut"><div class="shortcut-icon">🧾</div><div><h3>Facture</h3><p>Après le travail</p><span class="status">Bientôt</span></div></div></div>
-      <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir la rubrique clients" onclick="document.getElementById('proClientsSection').scrollIntoView({behavior:'smooth',block:'start'})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">👥</div><div><h3>Clients</h3><p>Les personnes pour qui vous travaillez</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
+      <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir la rubrique clients" onclick="toggleProPanel('clients')" aria-expanded="false" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">👥</div><div><h3>Clients</h3><p>Les personnes pour qui vous travaillez</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
       <div class="card pro-shortcut-card pro-shortcut-soon" aria-disabled="true"><div class="shortcut"><div class="shortcut-icon">💰</div><div><h3>Argent</h3><p>Argent reçu et à recevoir</p><span class="status">Bientôt</span></div></div></div>
       <div class="card pro-shortcut-card pro-shortcut-soon" aria-disabled="true"><div class="shortcut"><div class="shortcut-icon">🔌</div><div><h3>Matériel</h3><p>Vos outils et fournitures</p><span class="status">Bientôt</span></div></div></div>
     </div>
 
+    <div class="pro-panel hidden" id="proClientsPanel">
     <div class="card" id="proClientsSection">
       <div class="section-head"><h2>👥 Mes clients</h2><span class="muted" id="proClientCount">Chargement…</span></div>
       <p class="muted">Enregistrez les personnes pour qui vous faites des travaux.</p>
@@ -6422,6 +6430,7 @@ function renderProPage() {
       <div id="proClientsList"><div class="empty">Chargement des clients…</div></div>
     </div>
 
+    <div class="pro-panel hidden" id="proQuotePanel">
     <div class="card" id="proQuoteSection">
       <div class="section-head"><h2>📄 Faire un devis</h2><span class="status online">Disponible</span></div>
       <p class="muted">Préparez le prix d'un travail. Le devis sera gardé en brouillon.</p>
@@ -6470,6 +6479,9 @@ function renderProPage() {
       <div id="proQuotesList"><div class="empty">Chargement des devis…</div></div>
     </div>
 
+    </div>
+    </div>
+
     <div class="notice">
       <strong>Conçu pour commencer avec les électriciens.</strong><br>
       Les prix seront toujours vérifiés par l'artisan. Aucun devis ni facture ne sera envoyé sans sa confirmation. Les fonctions seront activées progressivement.
@@ -6477,6 +6489,29 @@ function renderProPage() {
   `;
   loadProClients();
   loadProQuotes();
+}
+
+function toggleProPanel(type) {
+  const panels = {
+    clients: document.getElementById("proClientsPanel"),
+    quote: document.getElementById("proQuotePanel")
+  };
+  const cards = {
+    clients: document.querySelector('[aria-label="Ouvrir la rubrique clients"]'),
+    quote: document.querySelector('[aria-label="Ouvrir le formulaire de devis"]')
+  };
+  const selected = panels[type];
+  if (!selected) return;
+
+  const shouldOpen = selected.classList.contains("hidden");
+  Object.entries(panels).forEach(([key, panel]) => {
+    if (panel) panel.classList.toggle("hidden", !(key === type && shouldOpen));
+    if (cards[key]) cards[key].setAttribute("aria-expanded", String(key === type && shouldOpen));
+  });
+
+  if (shouldOpen) {
+    requestAnimationFrame(() => selected.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
 }
 
 async function loadProClients() {
