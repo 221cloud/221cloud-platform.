@@ -4328,8 +4328,6 @@ hosting
         // Les lignes du lot en cours sont exclues des conflits grâce à leur trash_id.
         const restoreGuardSql = [
           "EXISTS (SELECT 1 FROM application_trash_items ti WHERE ti.id = ? AND ti.project_id = ? AND ti.item_type = ? AND ti.original_path = ?)",
-          "AND (EXISTS (SELECT 1 FROM application_files rf0 WHERE rf0.project_id = ? AND rf0.trash_id = ? AND rf0.deleted_at IS NOT NULL)",
-          "OR EXISTS (SELECT 1 FROM application_directories rd0 WHERE rd0.project_id = ? AND rd0.trash_id = ? AND rd0.deleted_at IS NOT NULL))",
           "AND NOT EXISTS (",
           "SELECT 1 FROM application_files af",
           "WHERE af.project_id = ? AND af.deleted_at IS NULL AND (af.trash_id IS NULL OR af.trash_id != ?)",
@@ -4347,7 +4345,6 @@ hosting
         ].join(" ");
         const restoreGuardBindings = () => [
           trashId, projectId, item.item_type, item.original_path,
-          projectId, trashId, projectId, trashId,
           projectId, trashId,
           projectId, trashId, projectId, trashId,
           projectId, trashId,
@@ -4355,17 +4352,10 @@ hosting
         ];
 
         const postRestoreGuardSql = [
-          "EXISTS (SELECT 1 FROM application_trash_items WHERE id = ? AND project_id = ?)",
-          "AND (EXISTS (SELECT 1 FROM application_files WHERE project_id = ? AND trash_id = ?)",
-          "OR EXISTS (SELECT 1 FROM application_directories WHERE project_id = ? AND trash_id = ?))",
-          "AND NOT EXISTS (SELECT 1 FROM application_files WHERE project_id = ? AND trash_id = ? AND deleted_at IS NOT NULL)",
-          "AND NOT EXISTS (SELECT 1 FROM application_file_versions WHERE project_id = ? AND trash_id = ? AND deleted_at IS NOT NULL)",
-          "AND NOT EXISTS (SELECT 1 FROM application_directories WHERE project_id = ? AND trash_id = ? AND deleted_at IS NOT NULL)"
+          "EXISTS (SELECT 1 FROM application_trash_items WHERE id = ? AND project_id = ?)"
         ].join(" ");
         const postRestoreGuardBindings = () => [
-          trashId, projectId,
-          projectId, trashId, projectId, trashId,
-          projectId, trashId, projectId, trashId, projectId, trashId
+          trashId, projectId
         ];
 
         await env.DB.batch([
