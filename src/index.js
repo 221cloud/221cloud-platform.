@@ -2554,6 +2554,63 @@ export default {
     }
 
 
+    // ÉQUIPE FUTPULSE : CONSULTATION DES MEMBRES ET INVITATIONS PAR LE PROPRIÉTAIRE
+    const futPulseTeamMatch = path.match(/^\/api\/private\/applications\/([a-z0-9-]+)\/team$/);
+    if (futPulseTeamMatch) {
+      if (request.method !== "GET") return json({ error: "Méthode non autorisée." }, 405);
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Connecte-toi à 221Cloud pour gérer FutPulse." }, 401);
+        await ensureApplicationPublicationSchema(env);
+        await ensureApplicationTeamSchema(env);
+        const slug = futPulseTeamMatch[1];
+        const publication = await env.DB.prepare(`
+          SELECT publications.project_id
+          FROM application_publications AS publications
+          JOIN projects
+            ON projects.id = publications.project_id
+           AND projects.user_id = publications.user_id
+           AND projects.type = 'application'
+           AND projects.deleted_at IS NULL
+          WHERE publications.slug = ? AND publications.user_id = ?
+          LIMIT 1
+        `).bind(slug, user.id).first();
+        if (!publication) return json({ error: "Application introuvable ou accès interdit." }, 404);
+        await ensureApplicationOwnerMembership(env, publication.project_id, user.id);
+        const owner = await env.DB.prepare(`
+          SELECT id FROM application_memberships
+          WHERE project_id = ? AND user_id = ? AND role = 'owner' AND status = 'active'
+          LIMIT 1
+        `).bind(publication.project_id, user.id).first();
+        if (!owner) return json({ error: "Seul le propriétaire peut consulter cette équipe pour le moment." }, 403);
+        const [members, invitations] = await Promise.all([
+          env.DB.prepare(`
+            SELECT memberships.id, memberships.user_id, users.full_name, users.email,
+                   memberships.role, memberships.status, memberships.created_at
+            FROM application_memberships AS memberships
+            JOIN users ON users.id = memberships.user_id
+            WHERE memberships.project_id = ?
+            ORDER BY CASE memberships.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'editor' THEN 2 ELSE 3 END,
+                     memberships.created_at ASC
+          `).bind(publication.project_id).all(),
+          env.DB.prepare(`
+            SELECT id, email, role, status, expires_at, created_at
+            FROM application_invitations
+            WHERE project_id = ?
+            ORDER BY created_at DESC
+            LIMIT 50
+          `).bind(publication.project_id).all()
+        ]);
+        return json({
+          members: members.results || [],
+          invitations: invitations.results || []
+        }, 200, { "Cache-Control": "no-store" });
+      } catch (error) {
+        console.error("ERREUR ÉQUIPE FUTPULSE:", error);
+        return json({ error: "Impossible de charger l’équipe FutPulse." }, 500);
+      }
+    }
+
     // ADMINISTRATION PRIVÉE DES DONNÉES FUTPULSE
     const futPulseAdminApiMatch = path.match(/^\/api\/private\/applications\/([a-z0-9-]+)\/rows(?:\/([^/]+))?$/);
     if (futPulseAdminApiMatch) {
@@ -2864,6 +2921,7 @@ input,textarea,select{width:100%;border:1px solid #344b68;border-radius:9px;back
 @media(max-width:600px){main{margin-top:18px}.panel{padding:15px}.grid{grid-template-columns:1fr}}
 </style></head><body><main>
 <header class="top"><div><div class="muted">221Cloud · Espace privé</div><h1>FutPulse</h1><div class="muted">Gestion des actualités</div></div><a class="button secondary" href="/">Retour à 221Cloud</a></header>
+<section class="panel"><h2>Équipe FutPulse</h2><p class="muted">Membres enregistrés et invitations. La gestion des invitations sera activée dans une prochaine étape.</p><div id="teamList" class="muted">Chargement de l’équipe…</div></section>
 <section class="panel"><h2 id="formTitle">Nouvelle actualité</h2><form id="newsForm"><div id="fields" class="grid"></div><div class="actions"><button id="saveButton" type="submit">Enregistrer l’actualité</button><button id="cancelButton" class="secondary" type="button">Effacer le formulaire</button></div></form><div id="message" class="notice" role="status"></div></section>
 <section class="panel"><h2>Actualités enregistrées</h2><p class="muted">Les brouillons restent invisibles sur le site public. Passe le statut à « publié » pour les afficher.</p><div id="newsList" class="muted">Chargement…</div></section>
 </main>
@@ -2871,7 +2929,7 @@ input,textarea,select{width:100%;border:1px solid #344b68;border-radius:9px;back
 const slug=${JSON.stringify(slug)};
 const apiUrl="/api/private/applications/"+encodeURIComponent(slug)+"/rows";
 let columns=[],rows=[],editingId=null;
-const fields=document.getElementById("fields"),list=document.getElementById("newsList"),message=document.getElementById("message");
+const fields=document.getElementById("fields"),list=document.getElementById("newsList"),message=document.getElementById("message"),teamList=document.getElementById("teamList");
 const labels={titre:"Titre",contenu:"Contenu",categorie:"Catégorie",image_url:"URL de l’image",source:"Source",date_publication:"Date de publication",statut:"Statut"};
 function el(tag,cls,text){const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node}
 async function request(url,options={}){const response=await fetch(url,{credentials:"same-origin",...options,headers:{"Content-Type":"application/json",...(options.headers||{})}});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||"Une erreur est survenue.");return data}
@@ -2880,10 +2938,12 @@ if(column.name==="contenu"){input=el("textarea")}else if(column.name==="statut")
 input.id="field_"+column.name;input.name=column.name;wrap.append(input);fields.append(wrap)}}
 function resetForm(){editingId=null;document.getElementById("newsForm").reset();document.getElementById("formTitle").textContent="Nouvelle actualité";document.getElementById("saveButton").textContent="Enregistrer l’actualité"}
 function renderList(){list.replaceChildren();if(!rows.length){list.textContent="Aucune actualité enregistrée.";return}for(const row of rows){const item=el("div","item");const title=el("strong","",row.titre||"Sans titre");const status=el("span","status",row.statut||"sans statut");title.append(status);item.append(title);item.append(el("div","muted",(row.categorie||"Sans catégorie")+" · "+(row.date_publication||"Date non précisée")));const excerpt=String(row.contenu||"");item.append(el("p","muted",excerpt.length>180?excerpt.slice(0,180)+"…":excerpt));const edit=el("button","secondary","Modifier");edit.type="button";edit.addEventListener("click",()=>{editingId=row.row_id;document.getElementById("formTitle").textContent="Modifier l’actualité";document.getElementById("saveButton").textContent="Enregistrer les modifications";for(const column of columns){const input=document.getElementById("field_"+column.name);if(input)input.value=row[column.name]??""}window.scrollTo({top:0,behavior:"smooth"})});item.append(edit);list.append(item)}}
+async function loadTeam(){try{const data=await request("/api/private/applications/"+encodeURIComponent(slug)+"/team");teamList.replaceChildren();const members=data.members||[],invitations=data.invitations||[];if(!members.length&&!invitations.length){teamList.textContent="Aucun membre enregistré.";return}for(const member of members){const item=el("div","item");item.append(el("strong","",member.full_name||member.email||"Compte 221Cloud"));item.append(el("div","muted",(member.email||"")+" · "+member.role+" · "+member.status));teamList.append(item)}for(const invitation of invitations){const item=el("div","item");item.append(el("strong","","Invitation : "+invitation.email));item.append(el("div","muted",invitation.role+" · "+invitation.status+" · expiration : "+invitation.expires_at));teamList.append(item)}}catch(error){teamList.textContent=error.message}}
 async function load(){try{const data=await request(apiUrl);columns=data.columns||[];rows=data.rows||[];buildForm();renderList()}catch(error){list.textContent=error.message}}
 document.getElementById("newsForm").addEventListener("submit",async event=>{event.preventDefault();const button=document.getElementById("saveButton");button.disabled=true;message.textContent="Enregistrement…";const values={};for(const column of columns){const input=document.getElementById("field_"+column.name);if(input)values[column.name]=input.value.trim()}try{const url=editingId?apiUrl+"/"+encodeURIComponent(editingId):apiUrl;const result=await request(url,{method:editingId?"PATCH":"POST",body:JSON.stringify({values})});message.textContent=result.message||"Enregistré.";resetForm();await load()}catch(error){message.textContent=error.message}finally{button.disabled=false}});
 document.getElementById("cancelButton").addEventListener("click",()=>{resetForm();message.textContent=""});
 load();
+loadTeam();
 </script></body></html>`;
       return new Response(html, {
         headers: {
