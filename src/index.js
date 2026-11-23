@@ -3582,7 +3582,7 @@ hosting
     }
 
     // APPLICATIONS : CRÉER UN DOSSIER
-    const applicationFoldersMatch = path.match(/^\\/api\\/projects\\/([^/]+)\\/application-folders$/);
+    const applicationFoldersMatch = path.match(/^\/api\/projects\/([^/]+)\/application-folders$/);
     if (applicationFoldersMatch && request.method === "POST") {
       try {
         const user = await currentUser(request, env);
@@ -3624,13 +3624,13 @@ hosting
     }
 
     // APPLICATIONS : CRÉER UN FICHIER
-    if (path.match(/^\\/api\\/projects\\/([^/]+)\\/application-files$/) && request.method === "POST") {
+    if (path.match(/^\/api\/projects\/([^/]+)\/application-files$/) && request.method === "POST") {
       try {
         const user = await currentUser(request, env);
         if (!user) return json({ error: "Vous devez être connecté." }, 401);
         await ensureApplicationFilesSchema(env);
         await ensureApplicationDirectoriesSchema(env);
-        const projectId = decodeURIComponent(path.match(/^\\/api\\/projects\\/([^/]+)\\/application-files$/)[1]);
+        const projectId = decodeURIComponent(path.match(/^\/api\/projects\/([^/]+)\/application-files$/)[1]);
         const project = await env.DB.prepare(
           "SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
         ).bind(projectId, user.id).first();
