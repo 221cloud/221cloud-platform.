@@ -3637,7 +3637,7 @@ hosting
     }
 
     // APPLICATIONS : CRÉER UN DOSSIER
-    const applicationFoldersMatch = path.match(/^\\/api\\/projects\\/([^/]+)\\/application-folders$/);
+    const applicationFoldersMatch = path.match(/^\/api\/projects\/([^/]+)\/application-folders$/);
     if (applicationFoldersMatch && request.method === "POST") {
       try {
         const user = await currentUser(request, env);
