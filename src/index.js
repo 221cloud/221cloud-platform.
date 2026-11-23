@@ -987,11 +987,12 @@ function validApplicationFilePath(value) {
   if (typeof value !== "string" || value.length < 1 || value.length > 240) return false;
   if (value.startsWith("/") || value.endsWith("/") || value.includes("\\") || /[%?#]/.test(value)) return false;
   const parts = value.split("/");
-  if (parts.length > 8 || parts.some(part =>
-    !part || part === "." || part === ".." || part.length > 64 ||
-    !/^[A-Za-z0-9][A-Za-z0-9 ._-]*$/.test(part) ||
-    part.endsWith(".") || part.endsWith(" ")
-  )) return false;
+  if (parts.length > 8 || parts.some((part, index) => {
+    const isGitIgnoreFile = index === parts.length - 1 && part === ".gitignore";
+    return !part || part === "." || part === ".." || part.length > 64 ||
+      (!isGitIgnoreFile && !/^[A-Za-z0-9][A-Za-z0-9 ._-]*$/.test(part)) ||
+      part.endsWith(".") || part.endsWith(" ");
+  })) return false;
   const name = parts[parts.length - 1];
   if (/^\.env($|\.)/i.test(name) || /^\.dev\.vars$/i.test(name)) return false;
   return /^(\.gitignore|[^.].*\.(html?|css|m?js|json|svg|txt|md|xml|webmanifest))$/i.test(name);
@@ -1028,6 +1029,19 @@ async function ensureApplicationDirectoriesSchema(env) {
   await env.DB.prepare(
     "CREATE INDEX IF NOT EXISTS idx_application_directories_project ON application_directories(project_id, directory_path)"
   ).run();
+}
+
+async function applicationFilePathHasFileConflict(env, projectId, value, includeSelf = false) {
+  const segments = String(value).split("/");
+  const limit = includeSelf ? segments.length : segments.length - 1;
+  for (let index = 1; index <= limit; index++) {
+    const candidate = segments.slice(0, index).join("/");
+    const file = await env.DB.prepare(
+      "SELECT file_name FROM application_files WHERE project_id = ? AND file_name = ? LIMIT 1"
+    ).bind(projectId, candidate).first();
+    if (file) return candidate;
+  }
+  return "";
 }
 
 async function ensureApplicationPublicationSchema(env) {
@@ -3599,10 +3613,10 @@ hosting
         if (!validApplicationFilePath(directoryPath + "/placeholder.txt")) {
           return json({ error: "Nom ou chemin de dossier invalide." }, 400);
         }
-        const existingFile = await env.DB.prepare(
-          "SELECT file_name FROM application_files WHERE project_id = ? AND file_name = ? LIMIT 1"
-        ).bind(projectId, directoryPath).first();
-        if (existingFile) return json({ error: "Un fichier porte déjà ce nom." }, 409);
+        const conflictingFilePath = await applicationFilePathHasFileConflict(env, projectId, directoryPath, true);
+        if (conflictingFilePath) {
+          return json({ error: "Un fichier existe déjà sur ce chemin ou sur l'un de ses niveaux parents : " + conflictingFilePath }, 409);
+        }
         const segments = directoryPath.split("/");
         const paths = segments.map((_, index) => segments.slice(0, index + 1).join("/"));
         const existing = await env.DB.prepare(
@@ -3642,6 +3656,14 @@ hosting
           "SELECT file_name FROM application_files WHERE project_id = ? AND file_name = ? LIMIT 1"
         ).bind(projectId, fileName).first();
         if (existing) return json({ error: "Ce fichier existe déjà." }, 409);
+        const existingDirectory = await env.DB.prepare(
+          "SELECT directory_path FROM application_directories WHERE project_id = ? AND directory_path = ? LIMIT 1"
+        ).bind(projectId, fileName).first();
+        if (existingDirectory) return json({ error: "Un dossier porte déjà ce nom." }, 409);
+        const conflictingParentFile = await applicationFilePathHasFileConflict(env, projectId, fileName, false);
+        if (conflictingParentFile) {
+          return json({ error: "Un fichier empêche la création de ce chemin : " + conflictingParentFile }, 409);
+        }
         const count = await env.DB.prepare(
           "SELECT COUNT(*) AS total FROM application_files WHERE project_id = ?"
         ).bind(projectId).first();
@@ -3789,6 +3811,7 @@ hosting
         const user = await currentUser(request, env);
         if (!user) return json({ error: "Vous devez être connecté." }, 401);
         await ensureApplicationFilesSchema(env);
+        await ensureApplicationDirectoriesSchema(env);
         const projectId = decodeURIComponent(applicationFileMatch[1]);
         const fileName = decodeURIComponent(applicationFileMatch[2]);
         if (!validApplicationFilePath(fileName)) {
@@ -3798,6 +3821,12 @@ hosting
           "SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
         ).bind(projectId, user.id).first();
         if (!project) return json({ error: "Application introuvable." }, 404);
+        const directoryConflict = await env.DB.prepare(
+          "SELECT directory_path FROM application_directories WHERE project_id = ? AND directory_path = ? LIMIT 1"
+        ).bind(projectId, fileName).first();
+        if (directoryConflict) return json({ error: "Un dossier porte déjà ce nom." }, 409);
+        const parentFileConflict = await applicationFilePathHasFileConflict(env, projectId, fileName, false);
+        if (parentFileConflict) return json({ error: "Un fichier empêche l'enregistrement de ce chemin : " + parentFileConflict }, 409);
         const body = await readLimitedJsonBody(request);
         const content = typeof body.content === "string" ? body.content : null;
         if (content === null) return json({ error: "Contenu de fichier invalide." }, 400);
