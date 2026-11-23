@@ -1702,6 +1702,110 @@ export default {
       }
     }
 
+    // API PUBLIQUE DES APPLICATIONS : LECTURE DES TABLES EXPLICITEMENT AUTORISÉES
+    const publicApplicationDataMatch = path.match(/^\\/api\\/public\\/applications\\/([a-z0-9-]+)\\/tables\\/([^/]+)\\/rows$/);
+    if (publicApplicationDataMatch) {
+      if (request.method !== "GET") {
+        return json({ error: "Méthode non autorisée." }, 405);
+      }
+      try {
+        await ensureApplicationPublicationSchema(env);
+        await ensureApplicationDatabaseConnectionSchema(env);
+        await ensureApplicationDatabasePermissionsSchema(env);
+        await ensureCustomerDatabaseStructureSchema(env);
+
+        const slug = publicApplicationDataMatch[1];
+        const tableId = decodeURIComponent(publicApplicationDataMatch[2]);
+        const publication = await env.DB.prepare(`
+          SELECT publications.id, publications.project_id, publications.user_id,
+                 connections.database_id
+          FROM application_publications AS publications
+          JOIN application_publication_versions AS versions
+            ON versions.id = publications.active_version_id
+           AND versions.publication_id = publications.id
+          JOIN projects
+            ON projects.id = publications.project_id
+           AND projects.user_id = publications.user_id
+           AND projects.type = 'application'
+           AND projects.deleted_at IS NULL
+          JOIN application_database_connections AS connections
+            ON connections.project_id = publications.project_id
+           AND connections.user_id = publications.user_id
+          WHERE publications.slug = ?
+          LIMIT 1
+        `).bind(slug).first();
+
+        if (!publication) {
+          return json({ error: "Application publiée introuvable." }, 404);
+        }
+
+        const table = await env.DB.prepare(`
+          SELECT tables.id, tables.name, tables.physical_name
+          FROM customer_database_tables AS tables
+          JOIN application_database_table_permissions AS permissions
+            ON permissions.table_id = tables.id
+           AND permissions.project_id = ?
+           AND permissions.user_id = ?
+           AND permissions.database_id = ?
+           AND permissions.can_read = 1
+          WHERE tables.id = ?
+            AND tables.database_id = ?
+            AND tables.user_id = ?
+          LIMIT 1
+        `).bind(
+          publication.project_id, publication.user_id, publication.database_id,
+          tableId, publication.database_id, publication.user_id
+        ).first();
+
+        if (!table || !safeInternalSqlIdentifier(table.physical_name)) {
+          return json({ error: "Lecture publique non autorisée pour cette table." }, 403);
+        }
+
+        const columnResult = await env.DB.prepare(`
+          SELECT name, data_type, physical_name, position
+          FROM customer_database_columns
+          WHERE table_id = ? AND database_id = ? AND user_id = ?
+          ORDER BY position ASC
+        `).bind(tableId, publication.database_id, publication.user_id).all();
+        const columns = columnResult.results || [];
+        if (columns.some(column => !safeInternalSqlIdentifier(column.physical_name))) {
+          return json({ error: "Structure de colonne invalide." }, 500);
+        }
+
+        const quoteIdentifier = value => '"' + String(value).replace(/"/g, '""') + '"';
+        const url = new URL(request.url);
+        const limit = Math.min(50, Math.max(1, Number.parseInt(url.searchParams.get("limit") || "20", 10) || 20));
+        const offset = Math.min(1000000, Math.max(0, Number.parseInt(url.searchParams.get("offset") || "0", 10) || 0));
+        const selectColumns = columns.map(column =>
+          quoteIdentifier(column.physical_name) + " AS " + quoteIdentifier(column.name)
+        );
+        const selectSql = ["row_id", "created_at", ...selectColumns].map(quoteIdentifier).join(", ");
+        const physicalTable = quoteIdentifier(table.physical_name);
+        const count = await env.DB.prepare(
+          "SELECT COUNT(*) AS total FROM " + physicalTable
+        ).first();
+        const result = await env.DB.prepare(
+          "SELECT " + selectSql + " FROM " + physicalTable +
+          " ORDER BY created_at DESC, row_id DESC LIMIT ? OFFSET ?"
+        ).bind(limit, offset).all();
+
+        return json({
+          table: { id: table.id, name: table.name },
+          rows: result.results || [],
+          total: Number(count?.total || 0),
+          limit,
+          offset,
+          columns: columns.map(column => ({
+            name: column.name,
+            data_type: column.data_type
+          }))
+        }, 200, { "Cache-Control": "no-store" });
+      } catch (error) {
+        console.error("ERREUR LECTURE PUBLIQUE BASE APPLICATION:", error);
+        return json({ error: "Impossible de charger les données publiques de cette application." }, 500);
+      }
+    }
+
     // PUBLICATION D'APPLICATION : SERVIR UNIQUEMENT LA VERSION ACTIVE
     const publicApplicationMatch = path.match(/^\/app\/([a-z0-9-]+)(?:\/(.*))?$/);
     if (publicApplicationMatch && request.method === "GET") {
