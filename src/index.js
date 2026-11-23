@@ -4589,7 +4589,7 @@ hosting
     }
 
     // APPLICATIONS : DÉPLACER UN FICHIER OU DOSSIER DANS LA CORBEILLE
-    const applicationTrashMoveMatch = path.match(/^\\/api\\/projects\\/([^/]+)\\/application-items\\/trash$/);
+    const applicationTrashMoveMatch = path.match(/^\/api\/projects\/([^/]+)\/application-items\/trash$/);
     if (applicationTrashMoveMatch && request.method === "POST") {
       try {
         const user = await currentUser(request, env);
