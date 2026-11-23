@@ -1703,7 +1703,7 @@ export default {
     }
 
     // API PUBLIQUE DES APPLICATIONS : LECTURE DES TABLES EXPLICITEMENT AUTORISÉES
-    const publicApplicationDataMatch = path.match(/^\\/api\\/public\\/applications\\/([a-z0-9-]+)\\/tables\\/([^/]+)\\/rows$/);
+    const publicApplicationDataMatch = path.match(/^\/api\/public\/applications\/([a-z0-9-]+)\/tables\/([^/]+)\/rows$/);
     if (publicApplicationDataMatch) {
       if (request.method !== "GET") {
         return json({ error: "Méthode non autorisée." }, 405);
