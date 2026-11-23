@@ -2776,6 +2776,19 @@ export default {
       const user = await currentUser(request, env);
       if (!user) return Response.redirect(new URL("/", url), 302);
       const slug = futPulseAdminPageMatch[1];
+      // Vérifie aussi la propriété de l'application avant de servir l'interface privée.
+      const ownedPublication = await env.DB.prepare(`
+        SELECT publications.id
+        FROM application_publications AS publications
+        JOIN projects
+          ON projects.id = publications.project_id
+         AND projects.user_id = publications.user_id
+         AND projects.type = 'application'
+         AND projects.deleted_at IS NULL
+        WHERE publications.slug = ? AND publications.user_id = ?
+        LIMIT 1
+      `).bind(slug, user.id).first();
+      if (!ownedPublication) return new Response("Application introuvable ou accès interdit.", { status: 404 });
       const html = `<!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Administration FutPulse · 221Cloud</title>
