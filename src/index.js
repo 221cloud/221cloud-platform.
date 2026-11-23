@@ -715,6 +715,71 @@ function safeFileName(value) {
     .slice(0, 255);
 }
 
+async function ensureStorageQuotaReservationsSchema(env) {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS storage_quota_reservations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      reserved_bytes INTEGER NOT NULL CHECK (reserved_bytes > 0),
+      expires_at INTEGER NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_storage_quota_reservations_owner_expiry ON storage_quota_reservations(user_id, expires_at)"
+  ).run();
+}
+
+async function reserveStorageQuota(env, userId, bytes, maxStorage) {
+  const amount = Number(bytes);
+  const limit = Number(maxStorage);
+  if (!Number.isSafeInteger(amount) || amount <= 0 || !Number.isSafeInteger(limit) || limit <= 0) {
+    return null;
+  }
+
+  await ensureStorageQuotaReservationsSchema(env);
+  await env.DB.prepare(
+    "DELETE FROM storage_quota_reservations WHERE expires_at <= unixepoch()"
+  ).run();
+
+  const reservationId = crypto.randomUUID();
+  const result = await env.DB.prepare(`
+    INSERT INTO storage_quota_reservations (id, user_id, reserved_bytes, expires_at)
+    SELECT ?, ?, ?, unixepoch() + 1800
+    WHERE
+      COALESCE((SELECT SUM(file_size) FROM cloud_files WHERE user_id = ?), 0) +
+      COALESCE((
+        SELECT SUM(wf.file_size)
+        FROM website_files wf
+        JOIN website_hostings wh ON wh.id = wf.hosting_id
+        WHERE wh.user_id = ?
+      ), 0) +
+      COALESCE((
+        SELECT SUM(reserved_bytes)
+        FROM storage_quota_reservations
+        WHERE user_id = ? AND expires_at > unixepoch()
+      ), 0) + ? <= ?
+  `).bind(
+    reservationId,
+    userId,
+    amount,
+    userId,
+    userId,
+    userId,
+    amount,
+    limit
+  ).run();
+
+  return result?.meta?.changes ? reservationId : null;
+}
+
+async function releaseStorageQuotaReservation(env, reservationId) {
+  if (!reservationId) return;
+  await env.DB.prepare(
+    "DELETE FROM storage_quota_reservations WHERE id = ?"
+  ).bind(reservationId).run();
+}
+
 async function ensureStorageFoldersSchema(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS storage_folders (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, parent_id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)").run();
   const columns = await env.DB.prepare("PRAGMA table_info(cloud_files)").all();
@@ -1974,6 +2039,7 @@ if (path === "/api/subscription" && request.method === "GET") {
     );
 
     if (deploymentFileMatch && request.method === "POST") {
+      let storageReservationId = null;
       try {
         const user = await currentUser(request, env);
 
@@ -2132,26 +2198,9 @@ if (path === "/api/subscription" && request.method === "GET") {
 
 
 
-        // Calcul du stockage privé et des sites web
-        const usage = await env.DB.prepare(`
-          SELECT
-            COALESCE((
-              SELECT SUM(file_size)
-              FROM cloud_files
-              WHERE user_id = ?
-            ), 0) +
-            COALESCE((
-              SELECT SUM(website_files.file_size)
-              FROM website_files
-              JOIN website_hostings
-                ON website_hostings.id = website_files.hosting_id
-              WHERE website_hostings.user_id = ?
-            ), 0) AS used
-        `).bind(user.id, user.id).first();
-
-        const used = Number(usage?.used || 0);
-
-        if (used + file.size > maxStorage) {
+        // Réservation atomique du quota avant le transfert vers B2.
+        storageReservationId = await reserveStorageQuota(env, user.id, file.size, maxStorage);
+        if (!storageReservationId) {
           return json({
             error: `Votre forfait ${plan} ne dispose pas d'assez d'espace de stockage.`
           }, 413);
@@ -2283,6 +2332,14 @@ if (path === "/api/subscription" && request.method === "GET") {
         return json({
           error: "Impossible d'envoyer le fichier du site."
         }, 500);
+      } finally {
+        if (storageReservationId) {
+          try {
+            await releaseStorageQuotaReservation(env, storageReservationId);
+          } catch (releaseError) {
+            console.error("ERREUR LIBÉRATION RÉSERVATION STOCKAGE:", releaseError);
+          }
+        }
       }
     }
 
@@ -2332,6 +2389,7 @@ if (path === "/api/subscription" && request.method === "GET") {
     if (cloneActiveDeploymentMatch && request.method === "POST") {
       const uploadedCopies = [];
       const insertedIds = [];
+      let storageReservationId = null;
       try {
         const user = await currentUser(request, env);
         if (!user) return json({ error: "Vous devez être connecté." }, 401);
@@ -2398,17 +2456,14 @@ if (path === "/api/subscription" && request.method === "GET") {
         const plan = String(subscription?.effective_plan || "free").toLowerCase();
         const maxStorage = getPlanLimits(plan).storage_bytes;
 
-        const usage = await env.DB.prepare(`
-          SELECT
-            COALESCE((SELECT SUM(file_size) FROM cloud_files WHERE user_id = ?), 0) +
-            COALESCE((SELECT SUM(wf.file_size) FROM website_files wf
-              JOIN website_hostings wh ON wh.id = wf.hosting_id
-              WHERE wh.user_id = ?), 0) AS used
-        `).bind(user.id, user.id).first();
-        const used = Number(usage?.used || 0);
-        if (used + cloneBytes + additionalBytes > maxStorage) {
-          return json({ error: "Espace insuffisant pour préparer la nouvelle version du site. Il faut " +
-            (cloneBytes + additionalBytes) + " octet(s) supplémentaires." }, 413);
+        // Réserver atomiquement les octets copiés et l'espace prévu pour les nouveaux fichiers.
+        const bytesToReserve = cloneBytes + additionalBytes;
+        if (bytesToReserve > 0) {
+          storageReservationId = await reserveStorageQuota(env, user.id, bytesToReserve, maxStorage);
+          if (!storageReservationId) {
+            return json({ error: "Espace insuffisant pour préparer la nouvelle version du site. Il faut " +
+              bytesToReserve + " octet(s) supplémentaires." }, 413);
+          }
         }
 
         for (const file of files) {
@@ -2466,6 +2521,14 @@ if (path === "/api/subscription" && request.method === "GET") {
           try { await b2NativeDelete(env, copy.fileId, copy.fileName); } catch (cleanupError) {}
         }
         return json({ error: error.message || "Impossible de copier les fichiers du site actuel." }, 500);
+      } finally {
+        if (storageReservationId) {
+          try {
+            await releaseStorageQuotaReservation(env, storageReservationId);
+          } catch (releaseError) {
+            console.error("ERREUR LIBÉRATION RÉSERVATION STOCKAGE:", releaseError);
+          }
+        }
       }
     }
 
@@ -5659,6 +5722,7 @@ const used = Number(usage?.used || 0);
     
     // STOCKAGE : ENVOI D'UN FICHIER
     if (path === "/api/storage/upload" && request.method === "POST") {
+      let storageReservationId = null;
       try {
         const user = await currentUser(request, env);
 
@@ -5737,29 +5801,10 @@ const used = Number(usage?.used || 0);
 
 
 
-        // Calcul de l'espace utilisé : cloud privé + hébergement web
-const usage = await env.DB.prepare(`
-  SELECT
-    COALESCE((
-      SELECT SUM(file_size)
-      FROM cloud_files
-      WHERE user_id = ?
-    ), 0) +
-    COALESCE((
-      SELECT SUM(website_files.file_size)
-      FROM website_files
-      JOIN website_hostings
-        ON website_hostings.id = website_files.hosting_id
-      WHERE website_hostings.user_id = ?
-    ), 0) AS used
-`).bind(user.id, user.id).first();
-
-const used = Number(usage?.used || 0);
-
-        // Vérification du quota
-        if (used + file.size > maxStorage) {
+        // Réservation atomique du quota avant le transfert vers B2.
+        storageReservationId = await reserveStorageQuota(env, user.id, file.size, maxStorage);
+        if (!storageReservationId) {
           const quotaGo = maxStorage / (1024 * 1024 * 1024);
-
           return json({
             error: `Votre forfait ${plan} autorise ${quotaGo} Go de stockage. Votre espace disponible est insuffisant.`
           }, 413);
@@ -5877,6 +5922,14 @@ const used = Number(usage?.used || 0);
         return json({
           error: "Impossible d'envoyer le fichier."
         }, 500);
+      } finally {
+        if (storageReservationId) {
+          try {
+            await releaseStorageQuotaReservation(env, storageReservationId);
+          } catch (releaseError) {
+            console.error("ERREUR LIBÉRATION RÉSERVATION STOCKAGE:", releaseError);
+          }
+        }
       }
     }
 
