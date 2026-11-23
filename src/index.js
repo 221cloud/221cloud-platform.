@@ -2629,7 +2629,8 @@ export default {
     }
 
     // 221CLOUD PRO : GESTION PRIVÉE DES CLIENTS
-    if (path === "/api/pro/clients") {
+    const proClientRouteMatch = path.match(/^\/api\/pro\/clients(?:\/([^/]+))?$/);
+    if (proClientRouteMatch) {
       try {
         const user = await currentUser(request, env);
         if (!user) return json({ error: "Vous devez être connecté." }, 401);
@@ -2666,6 +2667,31 @@ export default {
             "SELECT id, name, phone, address, notes, created_at, updated_at FROM pro_clients WHERE id = ? AND user_id = ? LIMIT 1"
           ).bind(id, user.id).first();
           return json({ message: "Client enregistré.", client }, 201);
+        }
+
+        if (request.method === "PUT" && proClientRouteMatch[1]) {
+          const clientId = decodeURIComponent(proClientRouteMatch[1]);
+          const body = await readLimitedJsonBody(request);
+          const rawName = String(body.name || "").trim();
+          const rawPhone = String(body.phone || "").trim();
+          const rawAddress = String(body.address || "").trim();
+          const rawNotes = String(body.notes || "").trim();
+
+          if (!rawName) return json({ error: "Écris le nom du client." }, 400);
+          if (rawName.length > 120) return json({ error: "Le nom du client est trop long." }, 400);
+          if (rawPhone.length > 40) return json({ error: "Le numéro de téléphone est trop long." }, 400);
+          if (rawAddress.length > 240) return json({ error: "L'adresse est trop longue." }, 400);
+          if (rawNotes.length > 1000) return json({ error: "La note est trop longue." }, 400);
+
+          const result = await env.DB.prepare(
+            "UPDATE pro_clients SET name = ?, phone = ?, address = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?"
+          ).bind(rawName, rawPhone || null, rawAddress || null, rawNotes || null, clientId, user.id).run();
+          if (!result.meta?.changes) return json({ error: "Client introuvable." }, 404);
+
+          const client = await env.DB.prepare(
+            "SELECT id, name, phone, address, notes, created_at, updated_at FROM pro_clients WHERE id = ? AND user_id = ? LIMIT 1"
+          ).bind(clientId, user.id).first();
+          return json({ message: "Client modifié avec succès.", client });
         }
 
         return json({ error: "Méthode non autorisée." }, 405);
