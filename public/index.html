@@ -6201,11 +6201,30 @@ function renderProPage() {
 
     <div class="section-head"><h2>Que souhaitez-vous faire ?</h2></div>
     <div class="grid">
-      <div class="card"><div class="shortcut"><div class="shortcut-icon">📄</div><div><h3>Faire un devis</h3><p>Préparer le prix d'un travail pour un client.</p><span class="status">En préparation</span></div></div></div>
+      <div class="card"><div class="shortcut"><div class="shortcut-icon">📄</div><div><h3>Faire un devis</h3><p>Préparer le prix d'un travail pour un client.</p><span class="status">Bientôt disponible</span></div></div></div>
       <div class="card"><div class="shortcut"><div class="shortcut-icon">🧾</div><div><h3>Faire une facture</h3><p>Créer un document après un travail.</p><span class="status">En préparation</span></div></div></div>
-      <div class="card"><div class="shortcut"><div class="shortcut-icon">👥</div><div><h3>Mes clients</h3><p>Retrouver les noms et coordonnées de vos clients.</p><span class="status">En préparation</span></div></div></div>
+      <div class="card"><div class="shortcut"><div class="shortcut-icon">👥</div><div><h3>Mes clients</h3><p>Enregistrer et retrouver vos clients.</p><span class="status online">Disponible</span></div></div></div>
       <div class="card"><div class="shortcut"><div class="shortcut-icon">💰</div><div><h3>Mon argent</h3><p>Suivre les paiements, les avances et les sommes restantes.</p><span class="status">En préparation</span></div></div></div>
       <div class="card"><div class="shortcut"><div class="shortcut-icon">🔌</div><div><h3>Mon matériel</h3><p>Retrouver vos prises, câbles, disjoncteurs et fournitures.</p><span class="status">En préparation</span></div></div></div>
+    </div>
+
+    <div class="card">
+      <div class="section-head"><h2>👥 Mes clients</h2><span class="muted" id="proClientCount">Chargement…</span></div>
+      <p class="muted">Enregistrez les personnes pour qui vous faites des travaux.</p>
+      <form id="proClientForm" class="form-card" onsubmit="saveProClient(event)">
+        <label for="proClientName">Nom du client *</label>
+        <input id="proClientName" maxlength="120" required placeholder="Exemple : Mamadou Ndiaye">
+        <label for="proClientPhone">Téléphone</label>
+        <input id="proClientPhone" maxlength="40" type="tel" placeholder="Exemple : 77 000 00 00">
+        <label for="proClientAddress">Adresse ou quartier</label>
+        <input id="proClientAddress" maxlength="240" placeholder="Exemple : Mbour, Grand Mbour">
+        <label for="proClientNotes">Petite note (facultatif)</label>
+        <textarea id="proClientNotes" rows="2" maxlength="1000" placeholder="Une information utile sur ce client"></textarea>
+        <button id="proClientSave" type="submit">＋ Enregistrer le client</button>
+        <div id="proClientMessage" class="notice" role="status" aria-live="polite"></div>
+      </form>
+      <div class="section-head"><h3>Clients enregistrés</h3></div>
+      <div id="proClientsList"><div class="empty">Chargement des clients…</div></div>
     </div>
 
     <div class="notice">
@@ -6213,6 +6232,60 @@ function renderProPage() {
       Les prix seront toujours vérifiés par l'artisan. Aucun devis ni facture ne sera envoyé sans sa confirmation. Les fonctions seront activées progressivement.
     </div>
   `;
+  loadProClients();
+}
+
+async function loadProClients() {
+  const list = document.getElementById("proClientsList");
+  const count = document.getElementById("proClientCount");
+  if (!list) return;
+  list.innerHTML = '<div class="empty">Chargement des clients…</div>';
+  try {
+    const data = await api("/pro/clients");
+    const clients = Array.isArray(data.clients) ? data.clients : [];
+    if (count) count.textContent = clients.length + (clients.length > 1 ? " clients" : " client");
+    if (!clients.length) {
+      list.innerHTML = '<div class="empty">Aucun client enregistré. Ajoutez votre premier client ci-dessus.</div>';
+      return;
+    }
+    list.innerHTML = clients.map(client => `
+      <div class="item">
+        <strong>${escapeHTML(client.name)}</strong>
+        ${client.phone ? '<div class="muted">☎ ' + escapeHTML(client.phone) + '</div>' : ''}
+        ${client.address ? '<div class="muted">📍 ' + escapeHTML(client.address) + '</div>' : ''}
+        ${client.notes ? '<p class="muted">' + escapeHTML(client.notes) + '</p>' : ''}
+      </div>
+    `).join("");
+  } catch (error) {
+    list.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message) + '</div>';
+    if (count) count.textContent = "Indisponible";
+  }
+}
+
+async function saveProClient(event) {
+  event.preventDefault();
+  const form = document.getElementById("proClientForm");
+  const button = document.getElementById("proClientSave");
+  const message = document.getElementById("proClientMessage");
+  if (!form || !button || !message) return;
+  const body = {
+    name: document.getElementById("proClientName").value,
+    phone: document.getElementById("proClientPhone").value,
+    address: document.getElementById("proClientAddress").value,
+    notes: document.getElementById("proClientNotes").value
+  };
+  button.disabled = true;
+  message.textContent = "Enregistrement…";
+  try {
+    await api("/pro/clients", { method: "POST", body: JSON.stringify(body) });
+    form.reset();
+    message.textContent = "Client enregistré avec succès.";
+    await loadProClients();
+  } catch (error) {
+    message.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
 }
 
 /* AUTRES PAGES */
