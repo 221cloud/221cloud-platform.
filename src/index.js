@@ -3333,22 +3333,15 @@ if (downloadRequested) {
 
 
 
-        const projectCount = await env.DB.prepare(`
-          SELECT COUNT(*) AS total
-          FROM projects
-          WHERE user_id = ? AND deleted_at IS NULL
-        `).bind(user.id).first();
-
-        if (Number(projectCount?.total || 0) >= maxProjects) {
-          return json({
-            error: `Votre forfait ${plan} autorise au maximum ${maxProjects} projet(s). Passez à une offre supérieure pour en créer davantage.`
-          }, 403);
-        }
         const id = crypto.randomUUID();
 const projectInsert = env.DB.prepare(
   `INSERT INTO projects (id, user_id, name, type, status)
-   VALUES (?, ?, ?, ?, 'pending')`
-).bind(id, user.id, name, type);
+   SELECT ?, ?, ?, ?, 'pending'
+   WHERE (
+     SELECT COUNT(*) FROM projects
+     WHERE user_id = ? AND deleted_at IS NULL
+   ) < ?`
+).bind(id, user.id, name, type, user.id, maxProjects);
 
 let hosting = null;
 
@@ -3359,10 +3352,15 @@ if (type === "website") {
     INSERT INTO website_hostings (
       id, user_id, project_id, slug, status
     )
-    VALUES (?, ?, ?, ?, 'draft')
-  `).bind(hostingId, user.id, id, slug);
+    SELECT ?, ?, ?, ?, 'draft'
+    WHERE EXISTS (
+      SELECT 1 FROM projects
+      WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+    )
+  `).bind(hostingId, user.id, id, slug, id, user.id);
 
-  // Les deux insertions sont atomiques : aucun projet orphelin.
+  // Les deux insertions sont atomiques ; l'hébergement n'est créé
+  // que si l'insertion du projet a effectivement respecté le quota.
   await env.DB.batch([projectInsert, hostingInsert]);
 
   hosting = {
@@ -3379,6 +3377,12 @@ const project = await env.DB.prepare(
   `SELECT id, name, type, status, created_at
    FROM projects WHERE id = ? AND user_id = ?`
 ).bind(id, user.id).first();
+
+if (!project) {
+  return json({
+    error: `Votre forfait ${plan} autorise au maximum ${maxProjects} projet(s). Passez à une offre supérieure pour en créer davantage.`
+  }, 403);
+}
 
         return json({
           message: "Projet créé avec succès.",
