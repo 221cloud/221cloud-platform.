@@ -354,6 +354,24 @@ function validDatabaseName(value) {
     value.trim().length <= DATABASE_NAME_MAX;
 }
 
+async function ensureProSchema(env) {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS pro_clients (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      phone TEXT,
+      address TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_pro_clients_owner_created ON pro_clients(user_id, created_at DESC)"
+  ).run();
+}
+
 async function ensureCustomerDatabaseStructureSchema(env) {
   await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS customer_database_tables (
@@ -2360,6 +2378,54 @@ export default {
       }
     }
 
+
+    // 221CLOUD PRO : GESTION PRIVÉE DES CLIENTS
+    if (path === "/api/pro/clients") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureProSchema(env);
+
+        if (request.method === "GET") {
+          const result = await env.DB.prepare(
+            "SELECT id, name, phone, address, notes, created_at, updated_at FROM pro_clients WHERE user_id = ? ORDER BY created_at DESC LIMIT 200"
+          ).bind(user.id).all();
+          return json({ clients: result.results || [] }, 200, { "Cache-Control": "no-store" });
+        }
+
+        if (request.method === "POST") {
+          const body = await readLimitedJsonBody(request);
+          const name = String(body.name || "").trim().slice(0, 120);
+          const phone = String(body.phone || "").trim().slice(0, 40);
+          const address = String(body.address || "").trim().slice(0, 240);
+          const notes = String(body.notes || "").trim().slice(0, 1000);
+
+          if (!name) return json({ error: "Écris le nom du client." }, 400);
+          if (String(body.name || "").trim().length > 120) {
+            return json({ error: "Le nom du client est trop long." }, 400);
+          }
+          if (String(body.phone || "").trim().length > 40) {
+            return json({ error: "Le numéro de téléphone est trop long." }, 400);
+          }
+
+          const id = crypto.randomUUID();
+          await env.DB.prepare(
+            "INSERT INTO pro_clients (id, user_id, name, phone, address, notes) VALUES (?, ?, ?, ?, ?, ?)"
+          ).bind(id, user.id, name, phone || null, address || null, notes || null).run();
+
+          const client = await env.DB.prepare(
+            "SELECT id, name, phone, address, notes, created_at, updated_at FROM pro_clients WHERE id = ? AND user_id = ? LIMIT 1"
+          ).bind(id, user.id).first();
+          return json({ message: "Client enregistré.", client }, 201);
+        }
+
+        return json({ error: "Méthode non autorisée." }, 405);
+      } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête est trop volumineuse." }, 413);
+        console.error("ERREUR 221CLOUD PRO CLIENTS:", error);
+        return json({ error: "Impossible de traiter les clients pour le moment." }, 500);
+      }
+    }
 
     // GESTION DES APPLICATIONS MCP AUTORISÉES PAR L’UTILISATEUR
     if (path === "/api/assistant-access/oauth-connections" && request.method === "GET") {
