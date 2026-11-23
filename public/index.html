@@ -6406,38 +6406,18 @@ function renderProPage() {
     <div class="grid">
       <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir le formulaire de devis" onclick="renderProQuotePage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">📄</div><div><h3>Devis</h3><p>Prix d'un travail</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
       <div class="card pro-shortcut-card pro-shortcut-soon" aria-disabled="true"><div class="shortcut"><div class="shortcut-icon">🧾</div><div><h3>Facture</h3><p>Après le travail</p><span class="status">Bientôt</span></div></div></div>
-      <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir la rubrique clients" onclick="toggleProPanel('clients')" aria-expanded="false" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">👥</div><div><h3>Clients</h3><p>Les personnes pour qui vous travaillez</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
+      <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir la rubrique clients" onclick="renderProClientsPage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">👥</div><div><h3>Clients</h3><p>Les personnes pour qui vous travaillez</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
       <div class="card pro-shortcut-card pro-shortcut-soon" aria-disabled="true"><div class="shortcut"><div class="shortcut-icon">💰</div><div><h3>Argent</h3><p>Argent reçu et à recevoir</p><span class="status">Bientôt</span></div></div></div>
       <div class="card pro-shortcut-card pro-shortcut-soon" aria-disabled="true"><div class="shortcut"><div class="shortcut-icon">🔌</div><div><h3>Matériel</h3><p>Vos outils et fournitures</p><span class="status">Bientôt</span></div></div></div>
     </div>
 
-    <div class="pro-panel hidden" id="proClientsPanel">
-    <div class="card" id="proClientsSection">
-      <div class="section-head"><h2>👥 Mes clients</h2><span class="muted" id="proClientCount">Chargement…</span></div>
-      <p class="muted">Enregistrez les personnes pour qui vous faites des travaux.</p>
-      <form id="proClientForm" class="form-card" onsubmit="saveProClient(event)">
-        <label for="proClientName">Nom du client *</label>
-        <input id="proClientName" maxlength="120" required placeholder="Exemple : Mamadou Ndiaye">
-        <label for="proClientPhone">Téléphone</label>
-        <input id="proClientPhone" maxlength="40" type="tel" placeholder="Exemple : 77 000 00 00">
-        <label for="proClientAddress">Adresse ou quartier</label>
-        <input id="proClientAddress" maxlength="240" placeholder="Exemple : Mbour, Grand Mbour">
-        <label for="proClientNotes">Petite note (facultatif)</label>
-        <textarea id="proClientNotes" rows="2" maxlength="1000" placeholder="Une information utile sur ce client"></textarea>
-        <button id="proClientSave" type="submit">＋ Enregistrer le client</button>
-        <div id="proClientMessage" class="notice" role="status" aria-live="polite"></div>
-      </form>
-      <div class="section-head"><h3>Clients enregistrés</h3></div>
-      <div id="proClientsList"><div class="empty">Chargement des clients…</div></div>
-    </div>
-    </div>
+
 
     <div class="notice">
       <strong>Conçu pour commencer avec les électriciens.</strong><br>
       Les prix seront toujours vérifiés par l'artisan. Aucun devis ni facture ne sera envoyé sans sa confirmation. Les fonctions seront activées progressivement.
     </div>
   `;
-  loadProClients();
   loadProQuotes();
 }
 
@@ -6458,9 +6438,58 @@ function saveProQuotePageDraft() {
   };
 }
 
+function saveProClientPageDraft() {
+  const form = document.getElementById("proClientForm");
+  if (!form) return;
+  window.proClientDraftState = {
+    name: document.getElementById("proClientName")?.value || "",
+    phone: document.getElementById("proClientPhone")?.value || "",
+    address: document.getElementById("proClientAddress")?.value || "",
+    notes: document.getElementById("proClientNotes")?.value || ""
+  };
+}
+
 function returnToProHome() {
   saveProQuotePageDraft();
+  saveProClientPageDraft();
   renderProPage();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function renderProClientsPage() {
+  const main = document.getElementById("mainContent");
+  main.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin:0 0 18px">
+      <button type="button" class="secondary" onclick="returnToProHome()" style="min-width:104px">← Retour</button>
+      <div><div class="dashboard-kicker" style="color:#8de7c7">221CLOUD PRO</div><strong style="font-size:18px">Mes clients</strong></div>
+    </div>
+    <div class="card" id="proClientsSection">
+      <div class="section-head"><h2>👥 Mes clients</h2><span class="muted" id="proClientCount">Chargement…</span></div>
+      <p class="muted">Enregistrez les personnes pour qui vous faites des travaux.</p>
+      <form id="proClientForm" class="form-card" onsubmit="saveProClient(event)">
+        <label for="proClientName">Nom du client *</label>
+        <input id="proClientName" maxlength="120" required placeholder="Exemple : Mamadou Ndiaye">
+        <label for="proClientPhone">Téléphone</label>
+        <input id="proClientPhone" maxlength="40" type="tel" placeholder="Exemple : 77 000 00 00">
+        <label for="proClientAddress">Adresse ou quartier</label>
+        <input id="proClientAddress" maxlength="240" placeholder="Exemple : Mbour, Grand Mbour">
+        <label for="proClientNotes">Petite note (facultatif)</label>
+        <textarea id="proClientNotes" rows="2" maxlength="1000" placeholder="Une information utile sur ce client"></textarea>
+        <button id="proClientSave" type="submit">＋ Enregistrer le client</button>
+        <div id="proClientMessage" class="notice" role="status" aria-live="polite"></div>
+      </form>
+      <div class="section-head"><h3>Clients enregistrés</h3></div>
+      <div id="proClientsList"><div class="empty">Chargement des clients…</div></div>
+    </div>
+  `;
+  const draft = window.proClientDraftState;
+  if (draft) {
+    document.getElementById("proClientName").value = draft.name || "";
+    document.getElementById("proClientPhone").value = draft.phone || "";
+    document.getElementById("proClientAddress").value = draft.address || "";
+    document.getElementById("proClientNotes").value = draft.notes || "";
+  }
+  await loadProClients();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -6565,6 +6594,7 @@ async function saveProClient(event) {
   try {
     await api("/pro/clients", { method: "POST", body: JSON.stringify(body) });
     form.reset();
+    window.proClientDraftState = null;
     message.textContent = "Client enregistré avec succès.";
     await loadProClients();
   } catch (error) {
