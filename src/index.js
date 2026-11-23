@@ -1152,6 +1152,8 @@ async function ensureAutomationTasksSchema(env) {
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           completed_at TEXT,
           cancelled_at TEXT,
+          started_at TEXT,
+          duration_ms INTEGER CHECK (duration_ms IS NULL OR duration_ms >= 0),
           CHECK (
             (status = 'running' AND lock_token IS NOT NULL AND locked_until IS NOT NULL)
             OR
@@ -1168,6 +1170,12 @@ async function ensureAutomationTasksSchema(env) {
       const automationColumns = await env.DB.prepare("PRAGMA table_info(automation_tasks)").all();
       if (!(automationColumns.results || []).some(column => column.name === "result_json")) {
         await env.DB.prepare("ALTER TABLE automation_tasks ADD COLUMN result_json TEXT").run();
+      }
+      if (!(automationColumns.results || []).some(column => column.name === "started_at")) {
+        await env.DB.prepare("ALTER TABLE automation_tasks ADD COLUMN started_at TEXT").run();
+      }
+      if (!(automationColumns.results || []).some(column => column.name === "duration_ms")) {
+        await env.DB.prepare("ALTER TABLE automation_tasks ADD COLUMN duration_ms INTEGER").run();
       }
     })().catch(error => {
       automationTasksSchemaPromise = null;
@@ -1410,7 +1418,8 @@ async function executeProjectHealthCheck(env, task) {
 
 async function runAutomationScheduler(env, scheduledTime) {
   await ensureAutomationTasksSchema(env);
-  const now = Math.floor(Date.now() / 1000);
+  const attemptStartedAt = Date.now();
+  const now = Math.floor(attemptStartedAt / 1000);
 
   await env.DB.prepare(`
     UPDATE automation_tasks
@@ -1432,6 +1441,8 @@ async function runAutomationScheduler(env, scheduledTime) {
         lock_token = ?,
         locked_until = ?,
         attempts = attempts + 1,
+        started_at = ?,
+        duration_ms = NULL,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = (
       SELECT id
@@ -1450,7 +1461,7 @@ async function runAutomationScheduler(env, scheduledTime) {
         status = 'pending'
         OR (status = 'running' AND locked_until <= ?)
       )
-  `).bind(lockToken, lockUntil, now, now, now).run();
+  `).bind(lockToken, lockUntil, new Date(attemptStartedAt).toISOString(), now, now, now).run();
 
   if (!claimed.meta || Number(claimed.meta.changes || 0) !== 1) return;
 
@@ -1470,13 +1481,14 @@ async function runAutomationScheduler(env, scheduledTime) {
       UPDATE automation_tasks
       SET status = 'completed',
           result_json = ?,
+          duration_ms = ?,
           last_error = NULL,
           lock_token = NULL,
           locked_until = NULL,
           completed_at = CURRENT_TIMESTAMP,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND status = 'running' AND lock_token = ?
-    `).bind(JSON.stringify(result), task.id, lockToken).run();
+    `).bind(JSON.stringify(result), Math.max(0, Date.now() - attemptStartedAt), task.id, lockToken).run();
   } catch (error) {
     const message = String(error?.message || "Erreur d'exécution").slice(0, 1000);
     const canRetry = Number(task.attempts) < Number(task.max_attempts);
@@ -1485,6 +1497,7 @@ async function runAutomationScheduler(env, scheduledTime) {
       SET status = ?,
           scheduled_at = CASE WHEN ? = 1 THEN ? ELSE scheduled_at END,
           last_error = ?,
+          duration_ms = ?,
           lock_token = NULL,
           locked_until = NULL,
           updated_at = CURRENT_TIMESTAMP
@@ -1494,6 +1507,7 @@ async function runAutomationScheduler(env, scheduledTime) {
       canRetry ? 1 : 0,
       now + 60,
       message,
+      Math.max(0, Date.now() - attemptStartedAt),
       task.id,
       lockToken
     ).run();
@@ -2275,7 +2289,8 @@ if (path === "/api/subscription" && request.method === "GET") {
           const result = await env.DB.prepare(`
             SELECT id, project_id, task_type, payload_json, result_json, status,
                    scheduled_at, attempts, max_attempts, last_error,
-                   created_at, updated_at, completed_at, cancelled_at
+                   created_at, updated_at, completed_at, cancelled_at,
+                   started_at, duration_ms
             FROM automation_tasks
             WHERE project_id = ? AND user_id = ?
             ORDER BY scheduled_at ASC, created_at DESC
