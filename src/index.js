@@ -2019,9 +2019,10 @@ async function handleOAuthRequest(request, env, path) {
 
 async function handleAssistantMcpRequest(request, env) {
   if (request.method !== "POST") {
+    const metadataUrl = new URL("/.well-known/oauth-protected-resource", request.url).href;
     return json({ error: "Le serveur MCP accepte les requêtes POST JSON." }, 405, {
       "Allow": "POST",
-      "WWW-Authenticate": "Bearer"
+      "WWW-Authenticate": 'Bearer resource_metadata="' + metadataUrl + '"'
     });
   }
 
