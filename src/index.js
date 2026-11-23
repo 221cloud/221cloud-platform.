@@ -1427,6 +1427,7 @@ async function runAutomationScheduler(env, scheduledTime) {
         lock_token = NULL,
         locked_until = NULL,
         last_error = 'Verrou expiré après la dernière tentative.',
+        completed_at = CURRENT_TIMESTAMP,
         updated_at = CURRENT_TIMESTAMP
     WHERE status = 'running'
       AND locked_until <= ?
@@ -1498,6 +1499,7 @@ async function runAutomationScheduler(env, scheduledTime) {
           scheduled_at = CASE WHEN ? = 1 THEN ? ELSE scheduled_at END,
           last_error = ?,
           duration_ms = ?,
+          completed_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END,
           lock_token = NULL,
           locked_until = NULL,
           updated_at = CURRENT_TIMESTAMP
@@ -1508,6 +1510,7 @@ async function runAutomationScheduler(env, scheduledTime) {
       now + 60,
       message,
       Math.max(0, Date.now() - attemptStartedAt),
+      canRetry ? 0 : 1,
       task.id,
       lockToken
     ).run();
@@ -2293,7 +2296,7 @@ if (path === "/api/subscription" && request.method === "GET") {
                    started_at, duration_ms
             FROM automation_tasks
             WHERE project_id = ? AND user_id = ?
-            ORDER BY scheduled_at ASC, created_at DESC
+            ORDER BY created_at DESC, scheduled_at DESC
             LIMIT 100
           `).bind(projectId, user.id).all();
 
