@@ -6479,7 +6479,9 @@ async function renderProClientsPage() {
         <div id="proClientMessage" class="notice" role="status" aria-live="polite"></div>
       </form>
       <div class="section-head"><h3>Clients enregistrés</h3></div>
+      <input id="proClientSearch" type="search" placeholder="🔎 Rechercher par nom ou téléphone…" oninput="filterProClients(this.value)" aria-label="Rechercher un client">
       <div id="proClientsList"><div class="empty">Chargement des clients…</div></div>
+      <div id="proClientNoResults" class="empty" style="display:none">Aucun client ne correspond à cette recherche.</div>
     </div>
   `;
   const draft = window.proClientDraftState;
@@ -6661,6 +6663,22 @@ async function openProClientDetail(clientId) {
     main.innerHTML = `<div style="margin-bottom:18px"><button type="button" class="secondary" onclick="renderProClientsPage()">← Clients</button></div><div class="card"><div class="notice error-text">${escapeHTML(error.message || "Impossible de charger cette fiche.")}</div></div>`;
   }
 }
+function filterProClients(value) {
+  const list = document.getElementById("proClientsList");
+  const noResults = document.getElementById("proClientNoResults");
+  if (!list) return;
+  const query = String(value || "").trim().toLocaleLowerCase("fr").normalize("NFD").replace(/[\\u0300-\\u036f]/g, "");
+  const cards = Array.from(list.querySelectorAll("[data-pro-client-search]"));
+  let visible = 0;
+  cards.forEach(card => {
+    const searchable = String(card.getAttribute("data-pro-client-search") || "").toLocaleLowerCase("fr").normalize("NFD").replace(/[\\u0300-\\u036f]/g, "");
+    const matches = !query || searchable.includes(query);
+    card.style.display = matches ? "" : "none";
+    if (matches) visible++;
+  });
+  if (noResults) noResults.style.display = cards.length && visible === 0 ? "" : "none";
+}
+
 async function loadProClients() {
   const list = document.getElementById("proClientsList");
   const count = document.getElementById("proClientCount");
@@ -6684,7 +6702,7 @@ async function loadProClients() {
       return;
     }
     list.innerHTML = clients.map(client => `
-      <div class="item-card" role="button" tabindex="0" style="cursor:pointer" aria-label="Voir la fiche de ${escapeHTML(client.name)}" onclick="openProClientDetail('${escapeHTML(client.id)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
+      <div class="item-card" data-pro-client-search="${escapeHTML([client.name, client.phone, client.address].filter(Boolean).join(" "))}" role="button" tabindex="0" style="cursor:pointer" aria-label="Voir la fiche de ${escapeHTML(client.name)}" onclick="openProClientDetail('${escapeHTML(client.id)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
           <strong>${escapeHTML(client.name)}</strong><span class="muted">Voir la fiche →</span>
         </div>
