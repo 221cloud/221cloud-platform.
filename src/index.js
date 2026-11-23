@@ -2669,6 +2669,28 @@ export default {
           return json({ message: "Client enregistré.", client }, 201);
         }
 
+        if (request.method === "DELETE" && proClientRouteMatch[1]) {
+          const clientId = decodeURIComponent(proClientRouteMatch[1]);
+          const client = await env.DB.prepare(
+            "SELECT id FROM pro_clients WHERE id = ? AND user_id = ? LIMIT 1"
+          ).bind(clientId, user.id).first();
+          if (!client) return json({ error: "Client introuvable." }, 404);
+
+          const quoteCount = await env.DB.prepare(
+            "SELECT COUNT(*) AS total FROM pro_quotes WHERE client_id = ? AND user_id = ?"
+          ).bind(clientId, user.id).first();
+          if (Number(quoteCount?.total || 0) > 0) {
+            return json({
+              error: "Ce client possède déjà un ou plusieurs devis. Pour protéger votre historique, vous ne pouvez pas le supprimer."
+            }, 409);
+          }
+
+          await env.DB.prepare(
+            "DELETE FROM pro_clients WHERE id = ? AND user_id = ?"
+          ).bind(clientId, user.id).run();
+          return json({ message: "Client supprimé." });
+        }
+
         if (request.method === "PUT" && proClientRouteMatch[1]) {
           const clientId = decodeURIComponent(proClientRouteMatch[1]);
           const body = await readLimitedJsonBody(request);
