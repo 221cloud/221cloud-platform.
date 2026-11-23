@@ -2512,6 +2512,9 @@ function renderProjectAutomationTasks() {
       '<div class="muted">Durée : ' + escapeHTML(durationLabel) + '</div>' +
       '<p><span class="status">' + escapeHTML(statusLabels[task.status] || task.status || "Inconnue") + '</span></p>' +
       '<div class="muted">Tentatives : ' + Number(task.attempts || 0) + ' / ' + Number(task.max_attempts || 0) + '</div>' +
+      (Number(task.recovery_count || 0) > 0
+        ? '<div class="muted">Reprises après expiration du verrou : ' + Number(task.recovery_count || 0) + '</div>'
+        : '') +
       (task.last_error ? '<p class="error-text">' + escapeHTML(task.last_error) + '</p>' : '') +
       (result ? '<div class="notice" style="margin-top:10px;"><strong>Résultat de la vérification</strong>' +
         (resultSummary ? '<p>' + escapeHTML(resultSummary) + '</p>' : '') +
