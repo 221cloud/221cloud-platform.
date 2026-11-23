@@ -395,6 +395,19 @@ async function ensureCustomerDatabaseStructureSchema(env) {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_database_columns_unique_name
     ON customer_database_columns(table_id, user_id, name COLLATE NOCASE)
   `).run();
+  // La limite est imposée dans SQLite pour résister aux ajouts simultanés.
+  await env.DB.prepare(`
+    CREATE TRIGGER IF NOT EXISTS trg_customer_database_columns_limit
+    BEFORE INSERT ON customer_database_columns
+    WHEN (
+      SELECT COUNT(*)
+      FROM customer_database_columns
+      WHERE table_id = NEW.table_id AND user_id = NEW.user_id
+    ) >= 50
+    BEGIN
+      SELECT RAISE(ABORT, 'CUSTOMER_DATABASE_COLUMN_LIMIT');
+    END
+  `).run();
 }
 
 function customerColumnSqlType(type) {
@@ -5910,6 +5923,9 @@ hosting
         }, 201);
       } catch (error) {
         if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
+        if (String(error?.message || "").includes("CUSTOMER_DATABASE_COLUMN_LIMIT")) {
+          return json({ error: "Une table peut contenir au maximum 50 colonnes personnalisées." }, 400);
+        }
         if (String(error?.message || "").includes("UNIQUE constraint failed")) {
           return json({ error: "Un élément portant déjà ce nom existe dans cette base ou cette table." }, 409);
         }
