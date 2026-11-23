@@ -2482,6 +2482,19 @@ function renderProjectAutomationTasks() {
     const dateLabel = Number.isFinite(date)
       ? new Date(date * 1000).toLocaleString()
       : "Date inconnue";
+    const formatTaskDate = value => {
+      if (!value) return "—";
+      const parsed = new Date(value);
+      return Number.isFinite(parsed.getTime()) ? parsed.toLocaleString() : "—";
+    };
+    const durationMs = Number(task.duration_ms);
+    const durationLabel = Number.isFinite(durationMs) && task.duration_ms !== null
+      ? (durationMs < 1000
+          ? durationMs + " ms"
+          : (durationMs < 60000
+              ? (durationMs / 1000).toFixed(2) + " s"
+              : Math.floor(durationMs / 60000) + " min " + Math.round((durationMs % 60000) / 1000) + " s"))
+      : "Non disponible";
     const payload = task.payload && typeof task.payload === "object"
       ? JSON.stringify(task.payload, null, 2)
       : "{}";
@@ -2494,6 +2507,9 @@ function renderProjectAutomationTasks() {
     return '<div class="item-card">' +
       '<h4>' + escapeHTML(task.task_type || "Tâche") + '</h4>' +
       '<div class="muted">Prévue le : ' + escapeHTML(dateLabel) + '</div>' +
+      '<div class="muted">Démarrée le : ' + escapeHTML(formatTaskDate(task.started_at)) + '</div>' +
+      '<div class="muted">Terminée le : ' + escapeHTML(formatTaskDate(task.completed_at)) + '</div>' +
+      '<div class="muted">Durée : ' + escapeHTML(durationLabel) + '</div>' +
       '<p><span class="status">' + escapeHTML(statusLabels[task.status] || task.status || "Inconnue") + '</span></p>' +
       '<div class="muted">Tentatives : ' + Number(task.attempts || 0) + ' / ' + Number(task.max_attempts || 0) + '</div>' +
       (task.last_error ? '<p class="error-text">' + escapeHTML(task.last_error) + '</p>' : '') +
