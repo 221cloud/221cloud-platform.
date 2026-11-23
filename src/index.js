@@ -2130,7 +2130,7 @@ if (path === "/api/subscription" && request.method === "GET") {
 
         const maxStorage = getPlanLimits(plan).storage_bytes;
 
-        const maxStorage = storageLimits[plan] ?? storageLimits.free;
+
 
         // Calcul du stockage privé et des sites web
         const usage = await env.DB.prepare(`
@@ -2397,7 +2397,7 @@ if (path === "/api/subscription" && request.method === "GET") {
         `).bind(user.id).first();
         const plan = String(subscription?.effective_plan || "free").toLowerCase();
         const maxStorage = getPlanLimits(plan).storage_bytes;
-        const maxStorage = storageLimits[plan] ?? storageLimits.free;
+
         const usage = await env.DB.prepare(`
           SELECT
             COALESCE((SELECT SUM(file_size) FROM cloud_files WHERE user_id = ?), 0) +
@@ -3331,7 +3331,7 @@ if (downloadRequested) {
 
         const maxProjects = getPlanLimits(plan).projects;
 
-        const maxProjects = projectLimits[plan] ?? 1;
+
 
         const projectCount = await env.DB.prepare(`
           SELECT COUNT(*) AS total
@@ -3443,7 +3443,7 @@ hosting
         `).bind(user.id).first();
         const plan = String(subscription?.effective_plan || "free").toLowerCase();
         const maxProjects = getPlanLimits(plan).projects;
-        const maxProjects = projectLimits[plan] ?? 1;
+
         const activeCount = await env.DB.prepare(`
           SELECT COUNT(*) AS total
           FROM projects
@@ -5623,7 +5623,7 @@ const used = Number(usage?.used || 0);
         // Limites selon le forfait
         const maxStorage = getPlanLimits(plan).storage_bytes;
 
-        const limit = storageLimits[plan] ?? storageLimits.free;
+        const limit = getPlanLimits(plan).storage_bytes;
 
         const available = Math.max(0, limit - used);
 
@@ -5731,7 +5731,7 @@ const used = Number(usage?.used || 0);
         // Quotas de stockage en octets
         const maxStorage = getPlanLimits(plan).storage_bytes;
 
-        const maxStorage = storageLimits[plan] ?? storageLimits.free;
+
 
         // Calcul de l'espace utilisé : cloud privé + hébergement web
 const usage = await env.DB.prepare(`
