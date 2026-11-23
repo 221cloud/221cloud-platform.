@@ -7266,6 +7266,15 @@ async function renderAssistantAccessPage() {
       <div id="assistantAccessTokensList" class="muted">Chargement des clés...</div>
     </div>
 
+    <div class="card form-card">
+      <div class="section-head" style="margin-top:0">
+        <h3>Applications connectées</h3>
+        <button type="button" class="secondary" onclick="loadAssistantOAuthConnections()">Actualiser</button>
+      </div>
+      <p class="muted">Tu peux retirer à tout moment l’autorisation OAuth d’une application. Ses jetons d’accès et de renouvellement seront révoqués.</p>
+      <div id="assistantOAuthConnectionsList" class="muted">Chargement des applications...</div>
+    </div>
+
     <div class="card">
       <h3>Autorisations accordées</h3>
       <ul>
@@ -7277,6 +7286,7 @@ async function renderAssistantAccessPage() {
     </div>
   `;
   await loadAssistantAccessTokens();
+  await loadAssistantOAuthConnections();
 }
 
 async function loadAssistantAccessTokens() {
@@ -7315,6 +7325,52 @@ async function loadAssistantAccessTokens() {
     }).join("");
   } catch (error) {
     container.innerHTML = '<p class="error-text">' + escapeHTML(error.message || "Impossible de charger les clés.") + '</p>';
+  }
+}
+
+
+async function loadAssistantOAuthConnections() {
+  const container = document.getElementById("assistantOAuthConnectionsList");
+  if (!container) return;
+  container.textContent = "Chargement des applications...";
+  try {
+    const result = await api("/assistant-access/oauth-connections");
+    const connections = Array.isArray(result.connections) ? result.connections : [];
+    if (!connections.length) {
+      container.innerHTML = "<p>Aucune application connectée pour le moment.</p>";
+      return;
+    }
+    container.innerHTML = connections.map(connection => {
+      const date = connection.last_authorized_at
+        ? new Date(connection.last_authorized_at).toLocaleString("fr-FR", { dateStyle: "medium" })
+        : "Date inconnue";
+      return `
+        <div class="item-card" style="margin-top:12px">
+          <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
+            <strong>${escapeHTML(connection.client_name || "Application MCP")}</strong>
+            <strong class="success-text">Autorisée</strong>
+          </div>
+          <p class="muted">Dernière autorisation : ${escapeHTML(date)}</p>
+          <button type="button" class="danger" onclick="revokeAssistantOAuthConnection(${escapeJSAttribute(connection.client_id)}, ${escapeJSAttribute(connection.client_name || "cette application")})">Révoquer l’application</button>
+        </div>
+      `;
+    }).join("");
+  } catch (error) {
+    container.innerHTML = '<p class="error-text">' + escapeHTML(error.message || "Impossible de charger les applications connectées.") + '</p>';
+  }
+}
+
+async function revokeAssistantOAuthConnection(clientId, clientName) {
+  if (!confirm("Révoquer l’accès de « " + clientName + " » ? Ses jetons ne fonctionneront plus.")) return;
+  try {
+    const result = await api("/assistant-access/oauth-connections/" + encodeURIComponent(clientId) + "/revoke", {
+      method: "POST",
+      body: "{}"
+    });
+    alert(result.message || "Accès révoqué.");
+    await loadAssistantOAuthConnections();
+  } catch (error) {
+    alert(error.message || "Impossible de révoquer cette application.");
   }
 }
 
