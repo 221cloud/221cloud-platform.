@@ -6540,6 +6540,62 @@ function toggleProPanel(type) {
   }
 }
 
+async function openProClientDetail(clientId) {
+  const main = document.getElementById("mainContent");
+  if (!main) return;
+  main.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin:0 0 18px">
+      <button type="button" class="secondary" onclick="renderProClientsPage()" style="min-width:104px">← Clients</button>
+      <div><div class="dashboard-kicker" style="color:#8de7c7">221CLOUD PRO</div><strong style="font-size:18px">Fiche du client</strong></div>
+    </div>
+    <div class="card"><div class="empty">Chargement de la fiche et des devis…</div></div>
+  `;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  try {
+    const [clientData, quoteData] = await Promise.all([api("/pro/clients"), api("/pro/quotes")]);
+    const clients = Array.isArray(clientData.clients) ? clientData.clients : [];
+    const client = clients.find(item => item.id === clientId);
+    if (!client) {
+      main.innerHTML = `<div style="margin-bottom:18px"><button type="button" class="secondary" onclick="renderProClientsPage()">← Clients</button></div><div class="card"><div class="notice error-text">Client introuvable. Actualisez la liste puis réessayez.</div></div>`;
+      return;
+    }
+    const quotes = Array.isArray(quoteData.quotes) ? quoteData.quotes : [];
+    proQuotesCache = quotes;
+    const clientQuotes = quotes.filter(quote => quote.client_id === clientId);
+    const quoteCards = clientQuotes.length ? clientQuotes.map(quote => {
+      const items = Array.isArray(quote.items) ? quote.items : [];
+      const materials = items.length ? `<div style="margin-top:10px"><strong>Matériaux</strong>${items.map(item => `<div class="muted" style="margin-top:5px">• ${escapeHTML(item.label)} — ${escapeHTML(String(item.quantity))} ${escapeHTML(item.unit)} × ${escapeHTML(formatProMoney(item.unit_price))}</div>`).join("")}</div>` : "";
+      return `<div class="item-card">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap"><strong>${escapeHTML(quote.description || "Devis")}</strong><span class="status">Brouillon</span></div>
+        <div class="muted" style="margin-top:6px">Créé le ${escapeHTML(formatDate(quote.created_at))}</div>
+        ${materials}
+        <div style="display:flex;justify-content:space-between;gap:10px;margin-top:14px;padding-top:10px;border-top:1px solid var(--border)"><span class="muted">Matériaux</span><strong>${escapeHTML(formatProMoney(quote.material_amount))}</strong></div>
+        <div style="display:flex;justify-content:space-between;gap:10px;margin-top:6px"><span class="muted">Main-d’œuvre</span><strong>${escapeHTML(formatProMoney(quote.labour_amount))}</strong></div>
+        <div style="display:flex;justify-content:space-between;gap:10px;margin-top:10px;font-size:18px"><strong>Total</strong><strong>${escapeHTML(formatProMoney(quote.total_amount))}</strong></div>
+        <div class="item-actions"><button type="button" class="secondary" onclick="printProQuote('${escapeHTML(quote.id)}')">📄 Exporter le devis en PDF</button></div>
+      </div>`;
+    }).join("") : '<div class="empty">Aucun devis enregistré pour ce client.</div>';
+    main.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;margin:0 0 18px">
+        <button type="button" class="secondary" onclick="renderProClientsPage()" style="min-width:104px">← Clients</button>
+        <div><div class="dashboard-kicker" style="color:#8de7c7">221CLOUD PRO</div><strong style="font-size:18px">Fiche du client</strong></div>
+      </div>
+      <div class="card">
+        <div class="section-head"><h2>👤 ${escapeHTML(client.name)}</h2></div>
+        <div style="line-height:1.9">
+          <div>☎ ${client.phone ? escapeHTML(client.phone) : '<span class="muted">Téléphone non renseigné</span>'}</div>
+          <div>📍 ${client.address ? escapeHTML(client.address) : '<span class="muted">Adresse non renseignée</span>'}</div>
+          <div style="margin-top:8px"><strong>Note :</strong> ${client.notes ? escapeHTML(client.notes) : '<span class="muted">Aucune note</span>'}</div>
+          <div class="muted" style="margin-top:8px;font-size:12px">Client ajouté le : ${escapeHTML(formatDate(client.created_at))}</div>
+        </div>
+      </div>
+      <div class="section-head"><h2>📄 Ses devis (${clientQuotes.length})</h2></div>
+      ${quoteCards}
+    `;
+  } catch (error) {
+    main.innerHTML = `<div style="margin-bottom:18px"><button type="button" class="secondary" onclick="renderProClientsPage()">← Clients</button></div><div class="card"><div class="notice error-text">${escapeHTML(error.message || "Impossible de charger cette fiche.")}</div></div>`;
+  }
+}
 async function loadProClients() {
   const list = document.getElementById("proClientsList");
   const count = document.getElementById("proClientCount");
@@ -6563,11 +6619,12 @@ async function loadProClients() {
       return;
     }
     list.innerHTML = clients.map(client => `
-      <div class="item">
-        <strong>${escapeHTML(client.name)}</strong>
+      <div class="item-card" role="button" tabindex="0" style="cursor:pointer" aria-label="Voir la fiche de ${escapeHTML(client.name)}" onclick="openProClientDetail('${escapeHTML(client.id)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+          <strong>${escapeHTML(client.name)}</strong><span class="muted">Voir la fiche →</span>
+        </div>
         ${client.phone ? '<div class="muted">☎ ' + escapeHTML(client.phone) + '</div>' : ''}
         ${client.address ? '<div class="muted">📍 ' + escapeHTML(client.address) + '</div>' : ''}
-        ${client.notes ? '<p class="muted">' + escapeHTML(client.notes) + '</p>' : ''}
       </div>
     `).join("");
   } catch (error) {
