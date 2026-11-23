@@ -4301,6 +4301,17 @@ hosting
         const activeFiles = (activeFilesResult.results || []).map(row => row.file_name);
         const activeDirectories = (activeDirectoriesResult.results || []).map(row => row.directory_path);
         const isSameOrBelow = (candidate, parent) => candidate === parent || candidate.startsWith(parent + "/");
+        const requiredParentPaths = new Set();
+        const addParentPaths = filePath => {
+          const segments = String(filePath || "").split("/").filter(Boolean);
+          for (let index = 1; index < segments.length; index++) {
+            requiredParentPaths.add(segments.slice(0, index).join("/"));
+          }
+        };
+        for (const filePath of restoredFiles) addParentPaths(filePath);
+        for (const directoryPath of restoredDirectories) addParentPaths(directoryPath);
+        addParentPaths(item.original_path);
+        const requiredParentPathList = [...requiredParentPaths];
 
         if (item.item_type === "file") {
           if (restoredFiles.length !== 1 || restoredFiles[0] !== item.original_path || restoredDirectories.length) {
@@ -4320,6 +4331,17 @@ hosting
 
         if (restoredVersionIds.length && restoredVersionPaths.some(fileName => !restoredFiles.includes(fileName))) {
           return json({ error: "L'historique contient une version sans fichier correspondant." }, 409);
+        }
+
+        if (requiredParentPathList.length) {
+          const deletedParent = await env.DB.prepare(
+            "SELECT directory_path FROM application_directories WHERE project_id = ? AND directory_path IN (SELECT value FROM json_each(?)) AND deleted_at IS NOT NULL AND (trash_id IS NULL OR trash_id != ?) LIMIT 1"
+          ).bind(projectId, JSON.stringify(requiredParentPathList), trashId).first();
+          if (deletedParent) {
+            return json({
+              error: "Un dossier parent nécessaire est encore dans la corbeille. Restaurez d'abord ce dossier parent, puis réessayez."
+            }, 409);
+          }
         }
 
         // Première vérification lisible pour fournir un message précis avant écriture.
@@ -4373,14 +4395,20 @@ hosting
           "AND (",
           "EXISTS (SELECT 1 FROM application_files rf WHERE rf.project_id = ? AND rf.trash_id = ? AND rf.deleted_at IS NOT NULL AND (ad.directory_path = rf.file_name OR substr(ad.directory_path, 1, length(rf.file_name) + 1) = rf.file_name || '/'))",
           "OR EXISTS (SELECT 1 FROM application_directories rd WHERE rd.project_id = ? AND rd.trash_id = ? AND rd.deleted_at IS NOT NULL AND ad.directory_path = rd.directory_path)",
-          "))"
+          "))",
+          "AND NOT EXISTS (",
+          "SELECT 1 FROM application_directories pd",
+          "WHERE pd.project_id = ? AND pd.directory_path IN (SELECT value FROM json_each(?))",
+          "AND pd.deleted_at IS NOT NULL AND (pd.trash_id IS NULL OR pd.trash_id != ?)",
+          ")"
         ].join(" ");
         const restoreGuardBindings = () => [
           trashId, projectId, item.item_type, item.original_path,
           projectId, trashId,
           projectId, trashId, projectId, trashId,
           projectId, trashId,
-          projectId, trashId, projectId, trashId
+          projectId, trashId, projectId, trashId,
+          projectId, JSON.stringify(requiredParentPathList), trashId
         ];
 
         const postRestoreGuardSql = [
