@@ -1510,6 +1510,63 @@ async function ensureApplicationDatabasePermissionsSchema(env) {
 }
 
 
+async function ensureApplicationTeamSchema(env) {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS application_memberships (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('admin', 'editor', 'writer')),
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
+      invited_by TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(project_id, user_id)
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE INDEX IF NOT EXISTS idx_application_memberships_project
+    ON application_memberships(project_id, status, role)
+  `).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS application_invitations (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      email TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('admin', 'editor', 'writer')),
+      token_hash TEXT NOT NULL UNIQUE,
+      invited_by TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'accepted', 'revoked', 'expired')),
+      expires_at TEXT NOT NULL,
+      accepted_by TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      accepted_at TEXT
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE INDEX IF NOT EXISTS idx_application_invitations_project
+    ON application_invitations(project_id, status, created_at DESC)
+  `).run();
+  await env.DB.prepare(`
+    CREATE INDEX IF NOT EXISTS idx_application_invitations_email
+    ON application_invitations(email, status, expires_at)
+  `).run();
+}
+
+async function ensureApplicationOwnerMembership(env, projectId, ownerId) {
+  await ensureApplicationTeamSchema(env);
+  await env.DB.prepare(`
+    INSERT OR IGNORE INTO application_memberships
+      (id, project_id, user_id, role, status, invited_by)
+    SELECT ?, ?, ?, 'admin', 'active', ?
+    WHERE EXISTS (
+      SELECT 1 FROM projects
+      WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL
+    )
+  `).bind(crypto.randomUUID(), projectId, ownerId, ownerId, projectId, ownerId).run();
+}
+
 async function ensureProjectTrashSchema(env) {
   const columns = await env.DB.prepare("PRAGMA table_info(projects)").all();
   const hasDeletedAt = (columns.results || []).some(column => column.name === "deleted_at");
@@ -2506,6 +2563,7 @@ export default {
         await ensureApplicationPublicationSchema(env);
         await ensureApplicationDatabaseConnectionSchema(env);
         await ensureApplicationDatabasePermissionsSchema(env);
+        await ensureApplicationTeamSchema(env);
         await ensureCustomerDatabaseStructureSchema(env);
 
         const slug = futPulseAdminApiMatch[1];
@@ -2778,7 +2836,7 @@ export default {
       const slug = futPulseAdminPageMatch[1];
       // Vérifie aussi la propriété de l'application avant de servir l'interface privée.
       const ownedPublication = await env.DB.prepare(`
-        SELECT publications.id
+        SELECT publications.id, publications.project_id
         FROM application_publications AS publications
         JOIN projects
           ON projects.id = publications.project_id
@@ -2789,6 +2847,7 @@ export default {
         LIMIT 1
       `).bind(slug, user.id).first();
       if (!ownedPublication) return new Response("Application introuvable ou accès interdit.", { status: 404 });
+      await ensureApplicationOwnerMembership(env, ownedPublication.project_id, user.id);
       const html = `<!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Administration FutPulse · 221Cloud</title>
