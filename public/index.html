@@ -6227,12 +6227,37 @@ function renderProPage() {
       <div id="proClientsList"><div class="empty">Chargement des clients…</div></div>
     </div>
 
+    <div class="card">
+      <div class="section-head"><h2>📄 Faire un devis</h2><span class="status online">Disponible</span></div>
+      <p class="muted">Préparez le prix d'un travail. Le devis sera gardé en brouillon.</p>
+      <form id="proQuoteForm" class="form-card" onsubmit="saveProQuote(event)">
+        <label for="proQuoteClient">Choisir le client *</label>
+        <select id="proQuoteClient" required>
+          <option value="">Chargement des clients…</option>
+        </select>
+        <label for="proQuoteDescription">Quel travail faut-il faire ? *</label>
+        <textarea id="proQuoteDescription" rows="3" maxlength="2000" required placeholder="Exemple : Installer trois prises électriques dans le salon."></textarea>
+        <label for="proQuoteLabour">Prix de la main-d'œuvre (FCFA)</label>
+        <input id="proQuoteLabour" type="number" min="0" max="1000000000" step="1" value="0" inputmode="numeric" oninput="updateProQuoteTotal()">
+        <label for="proQuoteMaterials">Prix du matériel (FCFA)</label>
+        <input id="proQuoteMaterials" type="number" min="0" max="1000000000" step="1" value="0" inputmode="numeric" oninput="updateProQuoteTotal()">
+        <div class="notice" style="margin-top:12px">
+          <strong>Total du devis : <span id="proQuoteTotal">0 FCFA</span></strong>
+        </div>
+        <button id="proQuoteSave" type="submit">＋ Enregistrer le devis en brouillon</button>
+        <div id="proQuoteMessage" class="notice" role="status" aria-live="polite"></div>
+      </form>
+      <div class="section-head"><h3>Mes devis enregistrés</h3></div>
+      <div id="proQuotesList"><div class="empty">Chargement des devis…</div></div>
+    </div>
+
     <div class="notice">
       <strong>Conçu pour commencer avec les électriciens.</strong><br>
       Les prix seront toujours vérifiés par l'artisan. Aucun devis ni facture ne sera envoyé sans sa confirmation. Les fonctions seront activées progressivement.
     </div>
   `;
   loadProClients();
+  loadProQuotes();
 }
 
 async function loadProClients() {
@@ -6243,6 +6268,15 @@ async function loadProClients() {
   try {
     const data = await api("/pro/clients");
     const clients = Array.isArray(data.clients) ? data.clients : [];
+    const quoteClient = document.getElementById("proQuoteClient");
+    if (quoteClient) {
+      const previousValue = quoteClient.value;
+      quoteClient.innerHTML = '<option value="">Choisir un client…</option>' + clients.map(client =>
+        '<option value="' + escapeHTML(client.id) + '">' + escapeHTML(client.name) + '</option>'
+      ).join("");
+      if (clients.some(client => client.id === previousValue)) quoteClient.value = previousValue;
+      if (!clients.length) quoteClient.innerHTML = '<option value="">Ajoutez d’abord un client</option>';
+    }
     if (count) count.textContent = clients.length + (clients.length > 1 ? " clients" : " client");
     if (!clients.length) {
       list.innerHTML = '<div class="empty">Aucun client enregistré. Ajoutez votre premier client ci-dessus.</div>';
@@ -6283,6 +6317,80 @@ async function saveProClient(event) {
     await loadProClients();
   } catch (error) {
     message.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function formatProMoney(value) {
+  return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(Number(value) || 0) + " FCFA";
+}
+
+function updateProQuoteTotal() {
+  const labour = Number(document.getElementById("proQuoteLabour")?.value || 0);
+  const materials = Number(document.getElementById("proQuoteMaterials")?.value || 0);
+  const total = document.getElementById("proQuoteTotal");
+  if (total) total.textContent = formatProMoney(
+    (Number.isFinite(labour) && labour >= 0 ? labour : 0) +
+    (Number.isFinite(materials) && materials >= 0 ? materials : 0)
+  );
+}
+
+async function loadProQuotes() {
+  const list = document.getElementById("proQuotesList");
+  if (!list) return;
+  list.innerHTML = '<div class="empty">Chargement des devis…</div>';
+  try {
+    const data = await api("/pro/quotes");
+    const quotes = Array.isArray(data.quotes) ? data.quotes : [];
+    if (!quotes.length) {
+      list.innerHTML = '<div class="empty">Aucun devis pour le moment.</div>';
+      return;
+    }
+    list.innerHTML = quotes.map(quote => `
+      <div class="item">
+        <strong>${escapeHTML(quote.client_name || "Client")}</strong>
+        <div>${escapeHTML(quote.description)}</div>
+        <div class="muted">Main-d'œuvre : ${escapeHTML(formatProMoney(quote.labour_amount))}</div>
+        <div class="muted">Matériel : ${escapeHTML(formatProMoney(quote.material_amount))}</div>
+        <p><strong>Total : ${escapeHTML(formatProMoney(quote.total_amount))}</strong></p>
+        <span class="status">Brouillon</span>
+      </div>
+    `).join("");
+  } catch (error) {
+    list.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message || "Impossible de charger les devis.") + '</div>';
+  }
+}
+
+async function saveProQuote(event) {
+  event.preventDefault();
+  const form = document.getElementById("proQuoteForm");
+  const button = document.getElementById("proQuoteSave");
+  const message = document.getElementById("proQuoteMessage");
+  if (!form || !button || !message) return;
+
+  const body = {
+    client_id: document.getElementById("proQuoteClient").value,
+    description: document.getElementById("proQuoteDescription").value.trim(),
+    labour_amount: Number(document.getElementById("proQuoteLabour").value || 0),
+    material_amount: Number(document.getElementById("proQuoteMaterials").value || 0)
+  };
+  if (!Number.isSafeInteger(body.labour_amount) || body.labour_amount < 0 ||
+      !Number.isSafeInteger(body.material_amount) || body.material_amount < 0) {
+    message.textContent = "Vérifiez les montants : utilisez des nombres entiers en FCFA.";
+    return;
+  }
+
+  button.disabled = true;
+  message.textContent = "Enregistrement du brouillon…";
+  try {
+    await api("/pro/quotes", { method: "POST", body: JSON.stringify(body) });
+    form.reset();
+    updateProQuoteTotal();
+    message.textContent = "Devis enregistré en brouillon.";
+    await loadProQuotes();
+  } catch (error) {
+    message.textContent = error.message || "Impossible d'enregistrer le devis.";
   } finally {
     button.disabled = false;
   }
