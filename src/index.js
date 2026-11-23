@@ -1431,6 +1431,30 @@ async function ensureApplicationDatabaseConnectionSchema(env) {
 }
 
 
+async function ensureApplicationDatabasePermissionsSchema(env) {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS application_database_table_permissions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      database_id TEXT NOT NULL,
+      table_id TEXT NOT NULL,
+      can_read INTEGER NOT NULL DEFAULT 0 CHECK (can_read IN (0, 1)),
+      can_create INTEGER NOT NULL DEFAULT 0 CHECK (can_create IN (0, 1)),
+      can_update INTEGER NOT NULL DEFAULT 0 CHECK (can_update IN (0, 1)),
+      can_delete INTEGER NOT NULL DEFAULT 0 CHECK (can_delete IN (0, 1)),
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(project_id, table_id)
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE INDEX IF NOT EXISTS idx_application_db_permissions_owner
+    ON application_database_table_permissions(user_id, project_id, database_id)
+  `).run();
+}
+
+
 async function ensureProjectTrashSchema(env) {
   const columns = await env.DB.prepare("PRAGMA table_info(projects)").all();
   const hasDeletedAt = (columns.results || []).some(column => column.name === "deleted_at");
@@ -4434,6 +4458,139 @@ hosting
         }
         console.error("ERREUR LIAISON BASE APPLICATION:", error);
         return json({ error: "Impossible de gérer la liaison avec cette base de données." }, 500);
+      }
+    }
+
+    // APPLICATIONS : AUTORISATIONS PAR TABLE DE LA BASE RELIÉE
+    const applicationDatabasePermissionsMatch = path.match(/^\/api\/projects\/([^/]+)\/application-database-permissions$/);
+    if (applicationDatabasePermissionsMatch && ["GET", "PUT"].includes(request.method)) {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureApplicationDatabaseConnectionSchema(env);
+        await ensureApplicationDatabasePermissionsSchema(env);
+        await ensureCustomerDatabaseStructureSchema(env);
+        const projectId = decodeURIComponent(applicationDatabasePermissionsMatch[1]);
+        const project = await env.DB.prepare(
+          "SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
+        ).bind(projectId, user.id).first();
+        if (!project) return json({ error: "Application introuvable." }, 404);
+
+        const connection = await env.DB.prepare(`
+          SELECT database_id
+          FROM application_database_connections
+          WHERE project_id = ? AND user_id = ?
+          LIMIT 1
+        `).bind(projectId, user.id).first();
+        if (!connection) {
+          return json({ error: "Reliez d'abord une base de données à cette application." }, 409);
+        }
+
+        if (request.method === "GET") {
+          const tableResult = await env.DB.prepare(`
+            SELECT tables.id, tables.name,
+                   COALESCE(permissions.can_read, 0) AS can_read,
+                   COALESCE(permissions.can_create, 0) AS can_create,
+                   COALESCE(permissions.can_update, 0) AS can_update,
+                   COALESCE(permissions.can_delete, 0) AS can_delete
+            FROM customer_database_tables AS tables
+            LEFT JOIN application_database_table_permissions AS permissions
+              ON permissions.table_id = tables.id
+             AND permissions.project_id = ?
+             AND permissions.user_id = ?
+             AND permissions.database_id = ?
+            WHERE tables.database_id = ? AND tables.user_id = ?
+            ORDER BY tables.created_at ASC, tables.name COLLATE NOCASE ASC
+          `).bind(
+            projectId, user.id, connection.database_id,
+            connection.database_id, user.id
+          ).all();
+          return json({
+            database_id: connection.database_id,
+            tables: (tableResult.results || []).map(table => ({
+              id: table.id,
+              name: table.name,
+              permissions: {
+                read: Number(table.can_read) === 1,
+                create: Number(table.can_create) === 1,
+                update: Number(table.can_update) === 1,
+                delete: Number(table.can_delete) === 1
+              }
+            }))
+          });
+        }
+
+        const body = await readLimitedJsonBody(request);
+        if (!Array.isArray(body.permissions) || body.permissions.length > 200) {
+          return json({ error: "La liste des autorisations est invalide (200 tables maximum)." }, 400);
+        }
+        const seenTableIds = new Set();
+        const normalized = [];
+        for (const item of body.permissions) {
+          if (!item || typeof item !== "object" || Array.isArray(item)) {
+            return json({ error: "Une autorisation de table est invalide." }, 400);
+          }
+          const tableId = String(item.table_id || "").trim();
+          if (!tableId || seenTableIds.has(tableId)) {
+            return json({ error: "Identifiant de table manquant ou répété." }, 400);
+          }
+          seenTableIds.add(tableId);
+          for (const key of ["read", "create", "update", "delete"]) {
+            if (typeof item[key] !== "boolean") {
+              return json({ error: "Chaque autorisation doit être un booléen explicite." }, 400);
+            }
+          }
+          normalized.push({
+            table_id: tableId,
+            read: item.read,
+            create: item.create,
+            update: item.update,
+            delete: item.delete
+          });
+        }
+
+        if (normalized.length) {
+          const placeholders = normalized.map(() => "?").join(",");
+          const ownedTables = await env.DB.prepare(
+            "SELECT id FROM customer_database_tables WHERE database_id = ? AND user_id = ? AND id IN (" + placeholders + ")"
+          ).bind(connection.database_id, user.id, ...normalized.map(item => item.table_id)).all();
+          if ((ownedTables.results || []).length !== normalized.length) {
+            return json({ error: "Une ou plusieurs tables ne font pas partie de la base reliée." }, 400);
+          }
+        }
+
+        const statements = [
+          env.DB.prepare(
+            "DELETE FROM application_database_table_permissions WHERE project_id = ? AND user_id = ?"
+          ).bind(projectId, user.id)
+        ];
+        for (const item of normalized) {
+          if (!item.read && !item.create && !item.update && !item.delete) continue;
+          statements.push(env.DB.prepare(`
+            INSERT INTO application_database_table_permissions
+              (id, user_id, project_id, database_id, table_id, can_read, can_create, can_update, can_delete)
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+            WHERE EXISTS (
+              SELECT 1 FROM application_database_connections
+              WHERE project_id = ? AND user_id = ? AND database_id = ?
+            )
+            AND EXISTS (
+              SELECT 1 FROM customer_database_tables
+              WHERE id = ? AND database_id = ? AND user_id = ?
+            )
+          `).bind(
+            crypto.randomUUID(), user.id, projectId, connection.database_id, item.table_id,
+            item.read ? 1 : 0, item.create ? 1 : 0, item.update ? 1 : 0, item.delete ? 1 : 0,
+            projectId, user.id, connection.database_id,
+            item.table_id, connection.database_id, user.id
+          ));
+        }
+        await env.DB.batch(statements);
+        return json({ message: "Autorisations enregistrées. Elles restent inactives tant que l'accès runtime sécurisé n'est pas activé." });
+      } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
+        console.error("ERREUR AUTORISATIONS BASE APPLICATION:", error);
+        return json({ error: "Impossible d'enregistrer les autorisations de la base." }, 500);
       }
     }
 
