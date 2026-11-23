@@ -4430,9 +4430,9 @@ hosting
             : Promise.resolve({ total: 0 })
         ]);
 
-        const filesRestored = (activeFilesAfter.results || []).length === restoredFiles.length;
-        const directoriesRestored = (activeDirectoriesAfter.results || []).length === restoredDirectories.length;
-        const versionsRestored = (activeVersionsAfter.results || []).length === restoredVersionIds.length;
+        const filesRestored = Number(activeFilesAfter?.total || 0) === restoredFiles.length;
+        const directoriesRestored = Number(activeDirectoriesAfter?.total || 0) === restoredDirectories.length;
+        const versionsRestored = Number(activeVersionsAfter?.total || 0) === restoredVersionIds.length;
         if (remainingTrashItem || !filesRestored || !directoriesRestored || !versionsRestored) {
           return json({
             error: "La restauration n'a pas été confirmée. L'élément est conservé dans la corbeille ; actualisez puis réessayez."
