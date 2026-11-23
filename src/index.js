@@ -2496,6 +2496,151 @@ export default {
       }
     }
 
+
+    // ADMINISTRATION PRIVÉE DES DONNÉES FUTPULSE
+    const futPulseAdminApiMatch = path.match(/^\\/api\\/private\\/applications\\/([a-z0-9-]+)\\/rows(?:\\/([^/]+))?$/);
+    if (futPulseAdminApiMatch) {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Connecte-toi à 221Cloud pour gérer FutPulse." }, 401);
+        await ensureApplicationPublicationSchema(env);
+        await ensureApplicationDatabaseConnectionSchema(env);
+        await ensureApplicationDatabasePermissionsSchema(env);
+        await ensureCustomerDatabaseStructureSchema(env);
+
+        const slug = futPulseAdminApiMatch[1];
+        const rowId = futPulseAdminApiMatch[2] ? decodeURIComponent(futPulseAdminApiMatch[2]) : null;
+        const tableId = "ddf4f9ce-ffc1-4361-be6b-00b7a129aeb8";
+        const access = await env.DB.prepare(`
+          SELECT publications.project_id, publications.user_id, connections.database_id,
+                 tables.id AS table_id, tables.physical_name,
+                 permissions.can_read, permissions.can_create,
+                 permissions.can_update, permissions.can_delete
+          FROM application_publications AS publications
+          JOIN application_publication_versions AS versions
+            ON versions.id = publications.active_version_id
+           AND versions.publication_id = publications.id
+          JOIN projects
+            ON projects.id = publications.project_id
+           AND projects.user_id = publications.user_id
+           AND projects.type = 'application'
+           AND projects.deleted_at IS NULL
+          JOIN application_database_connections AS connections
+            ON connections.project_id = publications.project_id
+           AND connections.user_id = publications.user_id
+          JOIN customer_database_tables AS tables
+            ON tables.id = ? AND tables.database_id = connections.database_id
+           AND tables.user_id = publications.user_id
+          JOIN application_database_table_permissions AS permissions
+            ON permissions.table_id = tables.id
+           AND permissions.project_id = publications.project_id
+           AND permissions.database_id = connections.database_id
+           AND permissions.user_id = publications.user_id
+          WHERE publications.slug = ? AND publications.user_id = ?
+          LIMIT 1
+        `).bind(tableId, slug, user.id).first();
+
+        if (!access || !safeInternalSqlIdentifier(access.physical_name)) {
+          return json({ error: "FutPulse est introuvable ou n’est pas relié à ton compte." }, 404);
+        }
+
+        const permissionKey = request.method === "GET" ? "can_read"
+          : request.method === "POST" ? "can_create"
+          : request.method === "PATCH" ? "can_update" : null;
+        if (!permissionKey || Number(access[permissionKey]) !== 1) {
+          return json({ error: "Cette opération n’est pas autorisée pour cette table." }, 403);
+        }
+
+        const columnResult = await env.DB.prepare(`
+          SELECT name, data_type, physical_name, position
+          FROM customer_database_columns
+          WHERE table_id = ? AND database_id = ? AND user_id = ?
+          ORDER BY position ASC
+        `).bind(tableId, access.database_id, user.id).all();
+        const columns = columnResult.results || [];
+        if (!columns.length || columns.some(column => !safeInternalSqlIdentifier(column.physical_name))) {
+          return json({ error: "La structure de la table FutPulse est invalide." }, 500);
+        }
+        const quoteIdentifier = value => '"' + String(value).replace(/"/g, '""') + '"';
+        const physicalTable = quoteIdentifier(access.physical_name);
+        const validateValues = values => {
+          if (!values || typeof values !== "object" || Array.isArray(values)) return { error: "Les données de l’actualité sont invalides." };
+          const allowed = new Map(columns.map(column => [column.name, column]));
+          const entries = Object.entries(values);
+          if (!entries.length || entries.length > columns.length || entries.some(([name]) => !allowed.has(name))) {
+            return { error: "Une ou plusieurs colonnes sont inconnues." };
+          }
+          const normalized = [];
+          for (const [name, raw] of entries) {
+            const column = allowed.get(name);
+            if (raw === null || raw === "") { normalized.push([column, null]); continue; }
+            if (column.data_type === "text") {
+              if (typeof raw !== "string" || raw.length > 5000) return { error: "Le champ « " + name + " » doit contenir au maximum 5 000 caractères." };
+              normalized.push([column, raw]);
+            } else if (column.data_type === "number") {
+              const number = typeof raw === "number" ? raw : Number(String(raw).trim());
+              if (!Number.isFinite(number)) return { error: "Le champ « " + name + " » doit être un nombre valide." };
+              normalized.push([column, number]);
+            } else if (column.data_type === "boolean") {
+              if (![true, false, 1, 0, "1", "0"].includes(raw)) return { error: "Le champ « " + name + " » doit être oui ou non." };
+              normalized.push([column, raw === true || raw === 1 || raw === "1" ? 1 : 0]);
+            } else if (column.data_type === "date") {
+              const date = String(raw);
+              if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || Number.isNaN(Date.parse(date + "T00:00:00Z"))) return { error: "Le champ « " + name + " » doit être une date au format AAAA-MM-JJ." };
+              normalized.push([column, date]);
+            } else return { error: "Type de colonne non pris en charge." };
+          }
+          return { entries: normalized };
+        };
+
+        if (request.method === "GET" && !rowId) {
+          const result = await env.DB.prepare(
+            "SELECT " + [quoteIdentifier("row_id"), quoteIdentifier("created_at"), ...columns.map(column => quoteIdentifier(column.physical_name) + " AS " + quoteIdentifier(column.name))].join(", ") +
+            " FROM " + physicalTable + " ORDER BY created_at DESC, row_id DESC LIMIT 100"
+          ).all();
+          return json({ rows: result.results || [], columns: columns.map(column => ({ name: column.name, data_type: column.data_type })) }, 200, { "Cache-Control": "no-store" });
+        }
+
+        if (request.method === "POST" && !rowId) {
+          const body = await readLimitedJsonBody(request);
+          const checked = validateValues(body.values);
+          if (checked.error) return json({ error: checked.error }, 400);
+          const values = Object.fromEntries(checked.entries.map(([column, value]) => [column.name, value]));
+          if (!String(values.titre || "").trim() || !String(values.contenu || "").trim()) {
+            return json({ error: "Le titre et le contenu sont obligatoires." }, 400);
+          }
+          const newRowId = crypto.randomUUID();
+          const names = checked.entries.map(([column]) => quoteIdentifier(column.physical_name));
+          const placeholders = checked.entries.map(() => "?");
+          await env.DB.prepare(
+            "INSERT INTO " + physicalTable + " (row_id, " + names.join(", ") + ") VALUES (?, " + placeholders.join(", ") + ")"
+          ).bind(newRowId, ...checked.entries.map(([, value]) => value)).run();
+          return json({ message: "Actualité enregistrée.", row_id: newRowId }, 201);
+        }
+
+        if (request.method === "PATCH" && rowId) {
+          const body = await readLimitedJsonBody(request);
+          const checked = validateValues(body.values);
+          if (checked.error) return json({ error: checked.error }, 400);
+          const values = Object.fromEntries(checked.entries.map(([column, value]) => [column.name, value]));
+          if (Object.prototype.hasOwnProperty.call(values, "titre") && !String(values.titre || "").trim()) return json({ error: "Le titre ne peut pas être vide." }, 400);
+          if (Object.prototype.hasOwnProperty.call(values, "contenu") && !String(values.contenu || "").trim()) return json({ error: "Le contenu ne peut pas être vide." }, 400);
+          const assignments = checked.entries.map(([column]) => quoteIdentifier(column.physical_name) + " = ?");
+          const result = await env.DB.prepare(
+            "UPDATE " + physicalTable + " SET " + assignments.join(", ") + " WHERE row_id = ?"
+          ).bind(...checked.entries.map(([, value]) => value), rowId).run();
+          if (!Number(result.meta?.changes || 0)) return json({ error: "Actualité introuvable." }, 404);
+          return json({ message: "Actualité modifiée." });
+        }
+
+        return json({ error: "Méthode non autorisée." }, 405);
+      } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
+        console.error("ERREUR ADMIN FUTPULSE:", error);
+        return json({ error: "Impossible de traiter cette opération FutPulse." }, 500);
+      }
+    }
+
     // API PUBLIQUE DES APPLICATIONS : LECTURE DES TABLES EXPLICITEMENT AUTORISÉES
     const publicApplicationDataMatch = path.match(/^\/api\/public\/applications\/([a-z0-9-]+)\/tables\/([^/]+)\/rows$/);
     if (publicApplicationDataMatch) {
@@ -2622,6 +2767,61 @@ export default {
         console.error("ERREUR LECTURE PUBLIQUE BASE APPLICATION:", error);
         return publicApiJson({ error: "Impossible de charger les données publiques de cette application." }, 500);
       }
+    }
+
+
+    // PAGE D'ADMINISTRATION FUTPULSE : SERVIE SUR L'ORIGINE 221CLOUD, HORS IFRAME SANDBOX
+    const futPulseAdminPageMatch = path.match(/^\\/manage\\/([a-z0-9-]+)\\/?$/);
+    if (futPulseAdminPageMatch && request.method === "GET") {
+      const user = await currentUser(request, env);
+      if (!user) return Response.redirect(new URL("/", url), 302);
+      const slug = futPulseAdminPageMatch[1];
+      const html = `<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Administration FutPulse · 221Cloud</title>
+<style>
+:root{color-scheme:dark;--bg:#07111f;--panel:#101d30;--line:#263750;--gold:#d7b56d;--muted:#9aabc0;--text:#f4f6fa}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top right,#172c48 0,transparent 38%),var(--bg);color:var(--text);font:15px system-ui,-apple-system,sans-serif}
+main{width:min(100% - 28px,1000px);margin:28px auto 60px}.top{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:22px}
+h1{font-size:clamp(25px,5vw,38px);margin:0;color:var(--gold)}h2{font-size:20px;margin:0 0 16px}.muted{color:var(--muted)}.panel{background:rgba(16,29,48,.94);border:1px solid var(--line);border-radius:16px;padding:20px;margin:16px 0}
+button,a.button{border:0;border-radius:10px;padding:11px 15px;background:var(--gold);color:#101827;font-weight:700;text-decoration:none;cursor:pointer}
+button.secondary,a.secondary{background:#20334d;color:var(--text);border:1px solid #38506e}button:disabled{opacity:.5;cursor:wait}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.field{display:flex;flex-direction:column;gap:6px}.field.full{grid-column:1/-1}label{color:#c7d2e0;font-size:13px}
+input,textarea,select{width:100%;border:1px solid #344b68;border-radius:9px;background:#081525;color:var(--text);padding:12px;font:inherit}textarea{min-height:130px;resize:vertical}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.item{padding:14px 0;border-bottom:1px solid var(--line)}.item:last-child{border:0}.item strong{display:block;margin-bottom:5px}.status{font-size:12px;color:var(--gold);margin-left:8px}.notice{margin:12px 0;color:var(--gold);min-height:20px}
+@media(max-width:600px){main{margin-top:18px}.panel{padding:15px}.grid{grid-template-columns:1fr}}
+</style></head><body><main>
+<header class="top"><div><div class="muted">221Cloud · Espace privé</div><h1>FutPulse</h1><div class="muted">Gestion des actualités</div></div><a class="button secondary" href="/">Retour à 221Cloud</a></header>
+<section class="panel"><h2 id="formTitle">Nouvelle actualité</h2><form id="newsForm"><div id="fields" class="grid"></div><div class="actions"><button id="saveButton" type="submit">Enregistrer l’actualité</button><button id="cancelButton" class="secondary" type="button">Effacer le formulaire</button></div></form><div id="message" class="notice" role="status"></div></section>
+<section class="panel"><h2>Actualités enregistrées</h2><p class="muted">Les brouillons restent invisibles sur le site public. Passe le statut à « publié » pour les afficher.</p><div id="newsList" class="muted">Chargement…</div></section>
+</main>
+<script>
+const slug=${JSON.stringify(slug)};
+const apiUrl="/api/private/applications/"+encodeURIComponent(slug)+"/rows";
+let columns=[],rows=[],editingId=null;
+const fields=document.getElementById("fields"),list=document.getElementById("newsList"),message=document.getElementById("message");
+const labels={titre:"Titre",contenu:"Contenu",categorie:"Catégorie",image_url:"URL de l’image",source:"Source",date_publication:"Date de publication",statut:"Statut"};
+function el(tag,cls,text){const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node}
+async function request(url,options={}){const response=await fetch(url,{credentials:"same-origin",...options,headers:{"Content-Type":"application/json",...(options.headers||{})}});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||"Une erreur est survenue.");return data}
+function buildForm(){fields.replaceChildren();for(const column of columns){const wrap=el("div","field"+(column.name==="contenu"?" full":""));const label=el("label","",labels[column.name]||column.name);label.htmlFor="field_"+column.name;wrap.append(label);let input;
+if(column.name==="contenu"){input=el("textarea")}else if(column.name==="statut"){input=el("select");for(const value of ["brouillon","publié"]){const option=el("option","",value);option.value=value;input.append(option)}}else{input=el("input");input.type=column.name==="date_publication"?"date":"text";if(column.name==="image_url")input.placeholder="https://…"}
+input.id="field_"+column.name;input.name=column.name;wrap.append(input);fields.append(wrap)}}
+function resetForm(){editingId=null;document.getElementById("newsForm").reset();document.getElementById("formTitle").textContent="Nouvelle actualité";document.getElementById("saveButton").textContent="Enregistrer l’actualité"}
+function renderList(){list.replaceChildren();if(!rows.length){list.textContent="Aucune actualité enregistrée.";return}for(const row of rows){const item=el("div","item");const title=el("strong","",row.titre||"Sans titre");const status=el("span","status",row.statut||"sans statut");title.append(status);item.append(title);item.append(el("div","muted",(row.categorie||"Sans catégorie")+" · "+(row.date_publication||"Date non précisée")));const excerpt=String(row.contenu||"");item.append(el("p","muted",excerpt.length>180?excerpt.slice(0,180)+"…":excerpt));const edit=el("button","secondary","Modifier");edit.type="button";edit.addEventListener("click",()=>{editingId=row.row_id;document.getElementById("formTitle").textContent="Modifier l’actualité";document.getElementById("saveButton").textContent="Enregistrer les modifications";for(const column of columns){const input=document.getElementById("field_"+column.name);if(input)input.value=row[column.name]??""}window.scrollTo({top:0,behavior:"smooth"})});item.append(edit);list.append(item)}}
+async function load(){try{const data=await request(apiUrl);columns=data.columns||[];rows=data.rows||[];buildForm();renderList()}catch(error){list.textContent=error.message}}
+document.getElementById("newsForm").addEventListener("submit",async event=>{event.preventDefault();const button=document.getElementById("saveButton");button.disabled=true;message.textContent="Enregistrement…";const values={};for(const column of columns){const input=document.getElementById("field_"+column.name);if(input)values[column.name]=input.value.trim()}try{const url=editingId?apiUrl+"/"+encodeURIComponent(editingId):apiUrl;const result=await request(url,{method:editingId?"PATCH":"POST",body:JSON.stringify({values})});message.textContent=result.message||"Enregistré.";resetForm();await load()}catch(error){message.textContent=error.message}finally{button.disabled=false}});
+document.getElementById("cancelButton").addEventListener("click",()=>{resetForm();message.textContent=""});
+load();
+</script></body></html>`;
+      return new Response(html, {
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+          "X-Frame-Options": "DENY",
+          "Referrer-Policy": "same-origin"
+        }
+      });
     }
 
     // PUBLICATION D'APPLICATION : SERVIR UNIQUEMENT LA VERSION ACTIVE
