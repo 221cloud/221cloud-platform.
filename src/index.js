@@ -1695,6 +1695,209 @@ async function runAutomationScheduler(env, scheduledTime) {
   }
 }
 
+
+async function handleAssistantMcpRequest(request, env) {
+  if (request.method !== "POST") {
+    return json({ error: "Le serveur MCP accepte les requêtes POST JSON." }, 405, {
+      "Allow": "POST",
+      "WWW-Authenticate": "Bearer"
+    });
+  }
+
+  const access = await authenticateAssistantAccess(request, env);
+  if (!access) {
+    return json({ error: "Clé d'accès invalide, expirée ou révoquée." }, 401, {
+      "WWW-Authenticate": "Bearer"
+    });
+  }
+
+  const rateLimit = await incrementApiRateLimit(
+    env,
+    "mcp-token:" + await hashToken(access.id),
+    120
+  );
+  if (!rateLimit.allowed) {
+    return json({ error: "Limite de requêtes MCP atteinte. Réessaie plus tard." }, 429, {
+      "Retry-After": String(rateLimit.retryAfter)
+    });
+  }
+
+  let message;
+  try {
+    message = await readLimitedJsonBody(request);
+  } catch {
+    return json({ error: "Corps JSON MCP invalide ou trop volumineux." }, 400);
+  }
+
+  if (!message || message.jsonrpc !== "2.0" || typeof message.method !== "string") {
+    return json({
+      jsonrpc: "2.0",
+      id: message?.id ?? null,
+      error: { code: -32600, message: "Requête JSON-RPC invalide." }
+    }, 400);
+  }
+
+  const hasId = Object.prototype.hasOwnProperty.call(message, "id");
+  const requestId = hasId ? message.id : null;
+  const response = (result, status = 200) =>
+    json({ jsonrpc: "2.0", id: requestId, result }, status);
+  const rpcError = (code, messageText, status = 200) =>
+    json({
+      jsonrpc: "2.0",
+      id: requestId,
+      error: { code, message: messageText }
+    }, status);
+
+  if (message.method === "notifications/initialized" ||
+      message.method === "notifications/cancelled") {
+    return new Response(null, { status: 202 });
+  }
+
+  if (!hasId) return new Response(null, { status: 202 });
+
+  if (message.method === "initialize") {
+    const requestedVersion = message.params?.protocolVersion;
+    const supportedVersions = ["2025-03-26", "2025-06-18"];
+    const protocolVersion = supportedVersions.includes(requestedVersion)
+      ? requestedVersion
+      : "2025-03-26";
+    return response({
+      protocolVersion,
+      capabilities: { tools: { listChanged: false } },
+      serverInfo: { name: "221cloud-assistant", version: "1.0.0" },
+      instructions: "Serveur 221Cloud en lecture seule. Les outils ne donnent accès qu’aux projets appartenant au propriétaire de la clé. Aucun outil ne modifie, supprime ou publie des données."
+    });
+  }
+
+  if (message.method === "ping") return response({});
+
+  if (message.method === "tools/list") {
+    return response({
+      tools: [
+        {
+          name: "list_projects",
+          description: "Liste les projets 221Cloud appartenant au titulaire de cette clé.",
+          inputSchema: { type: "object", properties: {}, additionalProperties: false }
+        },
+        {
+          name: "get_project",
+          description: "Consulte les informations d’un projet appartenant au titulaire de cette clé.",
+          inputSchema: {
+            type: "object",
+            properties: { project_id: { type: "string", minLength: 1 } },
+            required: ["project_id"],
+            additionalProperties: false
+          }
+        },
+        {
+          name: "list_application_files",
+          description: "Liste les fichiers autorisés d’une application appartenant au titulaire de cette clé.",
+          inputSchema: {
+            type: "object",
+            properties: { project_id: { type: "string", minLength: 1 } },
+            required: ["project_id"],
+            additionalProperties: false
+          }
+        },
+        {
+          name: "read_application_file",
+          description: "Lit un fichier autorisé d’une application appartenant au titulaire de cette clé. Les fichiers secrets et extensions non autorisées sont refusés.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              project_id: { type: "string", minLength: 1 },
+              path: { type: "string", minLength: 1, maxLength: 240 }
+            },
+            required: ["project_id", "path"],
+            additionalProperties: false
+          }
+        }
+      ]
+    });
+  }
+
+  if (message.method !== "tools/call") {
+    return rpcError(-32601, "Méthode MCP inconnue.");
+  }
+
+  const toolName = message.params?.name;
+  const args = message.params?.arguments || {};
+  const toolResult = data => response({
+    content: [{ type: "text", text: JSON.stringify(data) }],
+    structuredContent: data,
+    isError: false
+  });
+  const toolFailure = textValue => response({
+    content: [{ type: "text", text: textValue }],
+    isError: true
+  });
+
+  try {
+    if (toolName === "list_projects") {
+      if (!access.scopes.includes("projects:read")) return toolFailure("Autorisation projects:read manquante.");
+      const result = await env.DB.prepare(
+        "SELECT id, name, type, status, created_at FROM projects WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC"
+      ).bind(access.user_id).all();
+      return toolResult({ projects: result.results || [] });
+    }
+
+    if (toolName === "get_project") {
+      if (!access.scopes.includes("projects:read")) return toolFailure("Autorisation projects:read manquante.");
+      const projectId = String(args.project_id || "");
+      if (!projectId || projectId.length > 200) return toolFailure("Identifiant de projet invalide.");
+      const project = await env.DB.prepare(
+        "SELECT id, name, type, status, created_at FROM projects WHERE id = ? AND user_id = ? AND deleted_at IS NULL LIMIT 1"
+      ).bind(projectId, access.user_id).first();
+      if (!project) return toolFailure("Projet introuvable ou non autorisé.");
+      return toolResult({ project });
+    }
+
+    if (toolName === "list_application_files" || toolName === "read_application_file") {
+      if (!access.scopes.includes("applications:read") || !access.scopes.includes("files:read")) {
+        return toolFailure("Autorisations applications:read et files:read requises.");
+      }
+      const projectId = String(args.project_id || "");
+      if (!projectId || projectId.length > 200) return toolFailure("Identifiant de projet invalide.");
+      const project = await env.DB.prepare(
+        "SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
+      ).bind(projectId, access.user_id).first();
+      if (!project) return toolFailure("Application introuvable ou non autorisée.");
+
+      await ensureApplicationFilesSchema(env);
+      await ensureApplicationDirectoriesSchema(env);
+
+      if (toolName === "read_application_file") {
+        const filePath = args.path;
+        if (!validApplicationFilePath(filePath)) return toolFailure("Chemin de fichier non autorisé.");
+        const file = await env.DB.prepare(
+          "SELECT file_name, content, mime_type, updated_at FROM application_files WHERE project_id = ? AND file_name = ? AND deleted_at IS NULL LIMIT 1"
+        ).bind(projectId, filePath).first();
+        if (!file) return toolFailure("Fichier introuvable.");
+        return toolResult({ file });
+      }
+
+      const [files, directories] = await Promise.all([
+        env.DB.prepare(
+          "SELECT file_name, mime_type, created_at, updated_at FROM application_files WHERE project_id = ? AND deleted_at IS NULL ORDER BY file_name ASC"
+        ).bind(projectId).all(),
+        env.DB.prepare(
+          "SELECT directory_path, created_at FROM application_directories WHERE project_id = ? AND deleted_at IS NULL ORDER BY directory_path ASC"
+        ).bind(projectId).all()
+      ]);
+      return toolResult({
+        project_id: projectId,
+        files: files.results || [],
+        directories: directories.results || []
+      });
+    }
+
+    return rpcError(-32602, "Outil MCP inconnu ou arguments invalides.");
+  } catch (error) {
+    console.error("ERREUR SERVEUR MCP ASSISTANT:", error);
+    return toolFailure("Impossible de traiter cette demande MCP.");
+  }
+}
+
 export default {
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(runAutomationScheduler(env, controller?.scheduledTime || Date.now()));
@@ -1703,6 +1906,16 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
+
+    // Serveur MCP distant : accès strictement en lecture via une clé personnelle.
+    if (path === "/mcp") {
+      try {
+        return await handleAssistantMcpRequest(request, env);
+      } catch (error) {
+        console.error("ERREUR ENDPOINT MCP:", error);
+        return json({ error: "Serveur MCP temporairement indisponible." }, 500);
+      }
+    }
 
     // Limitation générale : les routes de connexion et d'inscription gardent
     // leurs protections spécifiques déjà en place.
