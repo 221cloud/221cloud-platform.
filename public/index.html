@@ -677,6 +677,8 @@ footer {
 <script>
 const API = "/api";
 let currentUser = null;
+let proQuotesCache = [];
+let proEditingQuoteId = null;
 let projectsCache = [];
 let databasesCache = [];
 let activeDatabaseStructure = null;
@@ -6265,7 +6267,10 @@ function renderProPage() {
           <div>Main-d'œuvre : <strong id="proQuoteLabourSummary">0 FCFA</strong></div>
           <div style="margin-top:8px"><strong>Total du devis : <span id="proQuoteTotal">0 FCFA</span></strong></div>
         </div>
-        <button id="proQuoteSave" type="submit">＋ Enregistrer le devis en brouillon</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+          <button id="proQuoteSave" type="submit">＋ Enregistrer le devis en brouillon</button>
+          <button id="proQuoteCancelEdit" type="button" class="secondary hidden" onclick="cancelProQuoteEdit()">Annuler la modification</button>
+        </div>
         <div id="proQuoteMessage" class="notice" role="status" aria-live="polite"></div>
       </form>
       <div class="section-head"><h3>Mes devis enregistrés</h3></div>
@@ -6426,6 +6431,7 @@ async function loadProQuotes() {
   try {
     const data = await api("/pro/quotes");
     const quotes = Array.isArray(data.quotes) ? data.quotes : [];
+    proQuotesCache = quotes;
     if (!quotes.length) {
       list.innerHTML = '<div class="empty">Aucun devis pour le moment.</div>';
       return;
@@ -6454,6 +6460,7 @@ async function loadProQuotes() {
             </div>
             <span class="status">Brouillon</span>
           </div>
+          <div class="item-actions"><button type="button" class="secondary" onclick="editProQuote('${escapeHTML(quote.id)}')">✏️ Modifier ce devis</button></div>
           <p style="font-size:19px;margin:14px 0 8px"><strong>${escapeHTML(formatProMoney(quote.total_amount))}</strong></p>
           <details style="margin-top:12px">
             <summary style="cursor:pointer;color:#8eb6ff;font-weight:700;padding:8px 0">📄 Consulter le devis complet</summary>
@@ -6479,6 +6486,56 @@ async function loadProQuotes() {
   } catch (error) {
     list.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message || "Impossible de charger les devis.") + '</div>';
   }
+}
+
+function editProQuote(quoteId) {
+  const quote = proQuotesCache.find(item => item.id === quoteId);
+  if (!quote || quote.status !== "draft") { alert("Ce devis n'est pas disponible pour modification."); return; }
+  const form = document.getElementById("proQuoteForm");
+  const client = document.getElementById("proQuoteClient");
+  const description = document.getElementById("proQuoteDescription");
+  const labour = document.getElementById("proQuoteLabour");
+  const rows = document.getElementById("proQuoteItems");
+  const save = document.getElementById("proQuoteSave");
+  const cancel = document.getElementById("proQuoteCancelEdit");
+  const message = document.getElementById("proQuoteMessage");
+  if (!form || !client || !description || !labour || !rows || !save) return;
+  proEditingQuoteId = quote.id;
+  client.value = quote.client_id;
+  description.value = quote.description || "";
+  labour.value = String(quote.labour_amount || 0);
+  rows.innerHTML = "";
+  const items = Array.isArray(quote.items) ? quote.items : [];
+  if (items.length) {
+    items.forEach(item => {
+      addProMaterialRow();
+      const row = rows.lastElementChild;
+      row.querySelector(".pro-material-label").value = item.label || "";
+      row.querySelector(".pro-material-quantity").value = String(item.quantity ?? 1);
+      row.querySelector(".pro-material-unit").value = item.unit || "Pièce";
+      row.querySelector(".pro-material-price").value = String(item.unit_price ?? 0);
+    });
+  } else { addProMaterialRow(); }
+  save.textContent = "Enregistrer les modifications";
+  if (cancel) cancel.classList.remove("hidden");
+  if (message) message.textContent = "Modifiez les informations, puis enregistrez le brouillon.";
+  updateProQuoteTotal();
+  form.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function cancelProQuoteEdit() {
+  const form = document.getElementById("proQuoteForm");
+  const rows = document.getElementById("proQuoteItems");
+  const save = document.getElementById("proQuoteSave");
+  const cancel = document.getElementById("proQuoteCancelEdit");
+  const message = document.getElementById("proQuoteMessage");
+  proEditingQuoteId = null;
+  if (form) form.reset();
+  if (rows) { rows.innerHTML = ""; addProMaterialRow(); }
+  if (save) save.textContent = "＋ Enregistrer le devis en brouillon";
+  if (cancel) cancel.classList.add("hidden");
+  if (message) message.textContent = "Modification annulée.";
+  updateProQuoteTotal();
 }
 
 async function saveProQuote(event) {
@@ -6509,7 +6566,11 @@ async function saveProQuote(event) {
   button.disabled = true;
   message.textContent = "Enregistrement du brouillon…";
   try {
-    await api("/pro/quotes", { method: "POST", body: JSON.stringify(body) });
+    const editingId = proEditingQuoteId;
+    await api(editingId ? "/pro/quotes/" + encodeURIComponent(editingId) : "/pro/quotes", {
+      method: editingId ? "PATCH" : "POST", body: JSON.stringify(body)
+    });
+    proEditingQuoteId = null;
     form.reset();
     const materialRows = document.getElementById("proQuoteItems");
     if (materialRows) {
@@ -6517,7 +6578,10 @@ async function saveProQuote(event) {
       addProMaterialRow();
     }
     updateProQuoteTotal();
-    message.textContent = "Devis enregistré en brouillon.";
+    const cancelButton = document.getElementById("proQuoteCancelEdit");
+    if (cancelButton) cancelButton.classList.add("hidden");
+    button.textContent = "＋ Enregistrer le devis en brouillon";
+    message.textContent = editingId ? "Devis modifié." : "Devis enregistré en brouillon.";
     await loadProQuotes();
   } catch (error) {
     message.textContent = error.message || "Impossible d'enregistrer le devis.";
