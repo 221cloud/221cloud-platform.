@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="google-site-verification" content="giW4nxeEBnFBJPjpUrF_vOARjwK9YJ5xBULpD-0qqVk" />
 <meta name="theme-color" content="#080b18">
+<meta name="application-name" content="221Cloud Pro">
 <title>221Cloud — Votre espace numérique</title>
 
 <style>
@@ -603,6 +604,12 @@ footer {
   .dashboard-hero h1 { font-size:24px; }
   .stat { font-size:28px; }
 }
+
+body.pro-mode .layout { display:block; }
+body.pro-mode .layout aside { display:none; }
+body.pro-mode .layout main { width:100%; max-width:980px; margin:0 auto; padding:22px 16px; }
+body.pro-mode footer { display:none; }
+body.pro-mode .app > header .brand { letter-spacing:-1px; }
 </style>
 </head>
 
@@ -676,6 +683,14 @@ footer {
 
 <script>
 const API = "/api";
+const IS_PRO_MODE = window.location.pathname === "/pro" || window.location.pathname === "/pro/";
+if (IS_PRO_MODE) {
+  document.body.classList.add("pro-mode");
+  document.title = "221Cloud Pro";
+  document.querySelectorAll(".auth-card .brand, #appScreen header .brand").forEach(el => {
+    el.innerHTML = '221<span>Cloud Pro</span>';
+  });
+}
 let currentUser = null;
 let proQuotesCache = [];
 let proEditingQuoteId = null;
@@ -991,7 +1006,7 @@ function setLoggedIn(user) {
     );
   }
 
-  showPage("overview");
+  showPage(IS_PRO_MODE ? "pro" : "overview");
 }
 
 async function register() {
