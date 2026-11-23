@@ -636,6 +636,35 @@ let activeStorageFolderId = null;
 let storageView = "files";
 let applicationEditorState = null;
 
+function hasUnsavedApplicationChanges() {
+  if (!applicationEditorState) return false;
+  const editor = document.getElementById("applicationCodeEditor");
+  if (editor) applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
+  return ["index.html", "style.css", "script.js"].some(fileName =>
+    applicationEditorState.files[fileName] !== applicationEditorState.savedFiles[fileName]
+  );
+}
+
+function confirmLeaveApplicationEditor() {
+  if (!applicationEditorState) return true;
+  if (applicationEditorState.saving) {
+    alert("Une sauvegarde est en cours. Attendez sa fin avant de quitter l'éditeur.");
+    return false;
+  }
+  if (hasUnsavedApplicationChanges() &&
+      !confirm("Certaines modifications ne sont pas enregistrées. Voulez-vous vraiment quitter l'éditeur et les abandonner ?")) {
+    return false;
+  }
+  applicationEditorState = null;
+  return true;
+}
+
+window.addEventListener("beforeunload", event => {
+  if (!hasUnsavedApplicationChanges()) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
+
 const STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;
 let storageQuotaLimit = STORAGE_LIMIT_BYTES;
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
@@ -981,6 +1010,7 @@ async function login() {
 }
 
 async function logout() {
+  if (!confirmLeaveApplicationEditor()) return;
   try {
     await api("/logout", {method:"POST",body:"{}"});
   } catch(error) {
@@ -1004,6 +1034,7 @@ async function checkSession() {
 }
 
 function showPage(page) {
+  if (!confirmLeaveApplicationEditor()) return;
   document.querySelectorAll(".nav-btn").forEach(button => {
     button.classList.toggle("active", button.dataset.page === page);
   });
@@ -5874,6 +5905,7 @@ ${
 /* APPLICATIONS */
 
 async function renderApplicationsPage() {
+  if (!confirmLeaveApplicationEditor()) return;
   document.getElementById("mainContent").innerHTML = `
     <h1 class="page-title">Applications</h1>
     <p class="page-subtitle">Créez et suivez vos applications depuis votre espace 221Cloud.</p>
@@ -6034,6 +6066,7 @@ async function moveApplicationToTrash(id) {
 
 
 async function openApplicationEditor(projectId) {
+  if (!confirmLeaveApplicationEditor()) return;
   const application = projectsCache.find(item => item.id === projectId && item.type === "application");
   if (!application) {
     alert("Application introuvable. Actualisez la liste.");
@@ -6161,7 +6194,8 @@ function renderApplicationEditorFile() {
 }
 
 function selectApplicationEditorFile(fileName) {
-  if (!applicationEditorState || !["index.html", "style.css", "script.js"].includes(fileName)) return;
+  if (!applicationEditorState || applicationEditorState.saving ||
+      !["index.html", "style.css", "script.js"].includes(fileName)) return;
   const editor = document.getElementById("applicationCodeEditor");
   if (editor) applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
   applicationEditorState.activeFile = fileName;
@@ -6169,7 +6203,8 @@ function selectApplicationEditorFile(fileName) {
 }
 
 async function saveApplicationFiles() {
-  if (!applicationEditorState) return;
+  if (!applicationEditorState || applicationEditorState.saving) return;
+  applicationEditorState.saving = true;
   const editor = document.getElementById("applicationCodeEditor");
   const button = document.getElementById("saveApplicationFilesButton");
   const status = document.getElementById("applicationSaveStatus");
@@ -6178,6 +6213,7 @@ async function saveApplicationFiles() {
     applicationEditorState.files[fileName] !== applicationEditorState.savedFiles[fileName]
   );
   if (!changedFiles.length) {
+    applicationEditorState.saving = false;
     if (status) status.textContent = "Aucune modification à enregistrer.";
     return;
   }
@@ -6185,6 +6221,8 @@ async function saveApplicationFiles() {
     button.disabled = true;
     button.textContent = "Enregistrement...";
   }
+  if (editor) editor.disabled = true;
+  document.querySelectorAll("#applicationFileTabs button").forEach(tab => { tab.disabled = true; });
   if (status) status.textContent = "Sauvegarde et création des versions...";
   let savedCount = 0;
   let failedFile = null;
@@ -6217,6 +6255,9 @@ async function saveApplicationFiles() {
       ? savedCount + " fichier(s) enregistré(s), mais l'historique n'a pas pu être actualisé : " + error.message
       : error.message;
   } finally {
+    if (applicationEditorState) applicationEditorState.saving = false;
+    if (editor) editor.disabled = false;
+    document.querySelectorAll("#applicationFileTabs button").forEach(tab => { tab.disabled = false; });
     if (button) {
       button.disabled = false;
       button.textContent = "Enregistrer tous les fichiers";
