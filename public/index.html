@@ -6132,7 +6132,9 @@ async function openApplicationEditor(projectId) {
     "<button class=\"secondary\" type=\"button\" onclick=\"renderApplicationsPage()\">← Mes applications</button></div>" +
     "<div class=\"card\"><div class=\"section-head\"><h2>Explorateur du projet</h2><div class=\"item-actions\"><button class=\"secondary\" type=\"button\" onclick=\"createApplicationFile()\">＋ Nouveau fichier</button><button class=\"secondary\" type=\"button\" onclick=\"createApplicationFolder()\">＋ Nouveau dossier</button></div></div>" +
     "<p class=\"muted\">Organisez vos fichiers dans des dossiers. Les fichiers existants sont conservés.</p>" +
-    "<div id=\"applicationFileTree\" class=\"application-file-tree\"><p class=\"muted\">Chargement de l'arborescence...</p></div></div>" +
+    "<div id=\"applicationFileTree\" class=\"application-file-tree\"><p class=\"muted\">Chargement de l'arborescence...</p></div>" +
+    "<div class=\"item-actions\" style=\"margin-top:12px\"><button class=\"secondary\" type=\"button\" onclick=\"toggleApplicationTrash()\">🗑 Corbeille</button></div>" +
+    "<div id=\"applicationTrashPanel\" class=\"item-card\" hidden><div class=\"section-head\"><h3>Corbeille de l'application</h3><button class=\"secondary\" type=\"button\" onclick=\"toggleApplicationTrash(false)\">Fermer</button></div><div id=\"applicationTrashList\"><p class=\"muted\">Chargement...</p></div></div></div>" +
     "<div class=\"card\"><div class=\"section-head\"><h2 id=\"applicationActiveFileTitle\">Éditeur</h2><span class=\"muted\">Code du fichier sélectionné</span></div>" +
     "<label for=\"applicationCodeEditor\">Contenu du fichier</label>" +
     "<textarea id=\"applicationCodeEditor\" spellcheck=\"false\" autocapitalize=\"off\" autocomplete=\"off\" style=\"width:100%;min-height:320px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.5;white-space:pre;overflow:auto\" placeholder=\"Chargement du code...\"></textarea>" +
@@ -6242,6 +6244,70 @@ async function publishApplication() {
   }
 }
 
+async function toggleApplicationTrash(forceOpen) {
+  if (!applicationEditorState || applicationEditorState.saving) return;
+  const panel = document.getElementById("applicationTrashPanel");
+  if (!panel) return;
+  const shouldOpen = typeof forceOpen === "boolean" ? forceOpen : panel.hidden;
+  panel.hidden = !shouldOpen;
+  if (shouldOpen) await loadApplicationTrash();
+}
+async function loadApplicationTrash() {
+  if (!applicationEditorState) return;
+  const container = document.getElementById("applicationTrashList");
+  if (!container) return;
+  container.innerHTML = "<p class=\"muted\">Chargement de la corbeille...</p>";
+  try {
+    const data = await api("/projects/" + encodeURIComponent(applicationEditorState.projectId) + "/application-trash");
+    const items = Array.isArray(data.items) ? data.items : [];
+    if (!items.length) { container.innerHTML = "<p class=\"muted\">La corbeille est vide.</p>"; return; }
+    container.innerHTML = items.map(item => {
+      const typeLabel = item.item_type === "folder" ? "Dossier" : "Fichier";
+      const countLabel = item.item_type === "folder"
+        ? Number(item.file_count || 0) + " fichier(s), " + Number(item.directory_count || 0) + " dossier(s)"
+        : "Fichier et historique conservés";
+      return "<div class=\"item-card\"><div class=\"storage-file-heading\"><div class=\"storage-file-details\"><strong>" +
+        (item.item_type === "folder" ? "📁 " : "📄 ") + escapeHTML(item.original_path) + "</strong>" +
+        "<div class=\"muted\">" + typeLabel + " · " + escapeHTML(formatDate(item.deleted_at)) + " · " + escapeHTML(countLabel) + "</div></div>" +
+        "<button type=\"button\" onclick=\"restoreApplicationTrashItem(" + escapeJSAttribute(item.id) + ")\">Restaurer</button></div></div>";
+    }).join("");
+  } catch (error) { container.innerHTML = "<p class=\"error-text\">" + escapeHTML(error.message) + "</p>"; }
+}
+async function moveApplicationItemToTrash(itemType, itemPath) {
+  if (!applicationEditorState || applicationEditorState.saving) return;
+  const unsavedPaths = Object.keys(applicationEditorState.files).filter(name =>
+    applicationEditorState.files[name] !== applicationEditorState.savedFiles[name] &&
+    (itemType === "file" ? name === itemPath : name === itemPath || name.startsWith(itemPath + "/"))
+  );
+  if (unsavedPaths.length) { alert("Enregistrez d'abord les modifications non sauvegardées dans : " + unsavedPaths.join(", ")); return; }
+  const label = itemType === "folder" ? "le dossier et tout son contenu" : "ce fichier";
+  if (!confirm("Placer " + label + " « " + itemPath + " » dans la corbeille ? Le contenu et l'historique seront conservés et pourront être restaurés.")) return;
+  try {
+    await api("/projects/" + encodeURIComponent(applicationEditorState.projectId) + "/application-items/trash", {
+      method: "POST", body: JSON.stringify({ item_type: itemType, path: itemPath })
+    });
+    await refreshApplicationFileList();
+    const panel = document.getElementById("applicationTrashPanel");
+    if (panel && !panel.hidden) await loadApplicationTrash();
+    const status = document.getElementById("applicationSaveStatus");
+    if (status) status.textContent = "Élément placé dans la corbeille : " + itemPath;
+  } catch (error) { alert(error.message); }
+}
+async function restoreApplicationTrashItem(trashId) {
+  if (!applicationEditorState || applicationEditorState.saving) return;
+  if (hasUnsavedApplicationChanges()) { alert("Enregistrez ou abandonnez vos modifications avant de restaurer un élément."); return; }
+  if (!confirm("Restaurer cet élément à son emplacement d'origine ? Son contenu et son historique seront réintégrés dans l'explorateur.")) return;
+  try {
+    await api("/projects/" + encodeURIComponent(applicationEditorState.projectId) + "/application-trash/" + encodeURIComponent(trashId) + "/restore", {
+      method: "POST", body: JSON.stringify({})
+    });
+    await refreshApplicationFileList();
+    await loadApplicationTrash();
+    const status = document.getElementById("applicationSaveStatus");
+    if (status) status.textContent = "Élément restauré avec son historique.";
+  } catch (error) { alert(error.message); }
+}
+
 function renderApplicationFileTree() {
   if (!applicationEditorState) return;
   const container = document.getElementById("applicationFileTree");
@@ -6270,7 +6336,8 @@ function renderApplicationFileTree() {
   const renderNode = (node, prefix = "") => {
     const folders = Object.keys(node.folders).sort().map(name => {
       const path = prefix ? prefix + "/" + name : name;
-      return "<details class=\"application-tree-folder\" open><summary>📁 " + escapeHTML(name) + "</summary>" +
+      return "<details class=\"application-tree-folder\" open><summary>📁 " + escapeHTML(name) +
+        " <button type=\"button\" class=\"secondary\" onclick=\"event.preventDefault();event.stopPropagation();moveApplicationItemToTrash('folder'," + escapeJSAttribute(path) + ")\">Corbeille</button></summary>" +
         "<div class=\"application-tree-children\">" + renderNode(node.folders[name], path) + "</div></details>";
     }).join("");
     const files = node.files.map(file => {
@@ -6279,7 +6346,7 @@ function renderApplicationFileTree() {
       return "<button type=\"button\" class=\"application-tree-file " + (active ? "active" : "") +
         "\" onclick=\"selectApplicationEditorFile(" + escapeJSAttribute(file.path) + ")\">" +
         "📄 " + escapeHTML(file.name) + (modified ? " <span aria-label=\"Modifications non enregistrées\">●</span>" : "") +
-        "</button>";
+        "</button><button type=\"button\" class=\"secondary\" onclick=\"moveApplicationItemToTrash('file'," + escapeJSAttribute(file.path) + ")\">Corbeille</button>";
     }).join("");
     return folders + files;
   };
