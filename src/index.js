@@ -3959,9 +3959,15 @@ hosting
         const versionId = String(body.version_id || "");
         if (!versionId) return json({ error: "Version non indiquée." }, 400);
         const version = await env.DB.prepare(
-          "SELECT id, content, mime_type, version_number FROM application_file_versions WHERE id = ? AND project_id = ? AND file_name = ? LIMIT 1"
+          "SELECT id, content, mime_type, version_number FROM application_file_versions WHERE id = ? AND project_id = ? AND file_name = ? AND deleted_at IS NULL LIMIT 1"
         ).bind(versionId, projectId, fileName).first();
-        if (!version) return json({ error: "Cette version est introuvable." }, 404);
+        if (!version) return json({ error: "Cette version est introuvable ou se trouve dans la corbeille." }, 404);
+        const trashedFile = await env.DB.prepare(
+          "SELECT id FROM application_files WHERE project_id = ? AND file_name = ? AND deleted_at IS NOT NULL LIMIT 1"
+        ).bind(projectId, fileName).first();
+        if (trashedFile) {
+          return json({ error: "Ce fichier se trouve dans la corbeille. Restaurez-le avant de restaurer une ancienne version." }, 409);
+        }
         const contentSize = new TextEncoder().encode(version.content || "").length;
         if (contentSize > 262144) return json({ error: "Cette version dépasse la limite autorisée." }, 413);
         const usage = await env.DB.prepare(
@@ -3973,17 +3979,17 @@ hosting
         const restoredVersionId = crypto.randomUUID();
         await env.DB.batch([
           env.DB.prepare(
-            "INSERT INTO application_files (id, project_id, file_name, content, mime_type, created_at, updated_at) SELECT ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL) ON CONFLICT(project_id, file_name) DO UPDATE SET content = excluded.content, mime_type = excluded.mime_type, updated_at = CURRENT_TIMESTAMP"
-          ).bind(crypto.randomUUID(), projectId, fileName, version.content, version.mime_type, projectId, user.id),
+            "INSERT INTO application_files (id, project_id, file_name, content, mime_type, created_at, updated_at) SELECT ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL) AND NOT EXISTS (SELECT 1 FROM application_files WHERE project_id = ? AND file_name = ? AND deleted_at IS NOT NULL) ON CONFLICT(project_id, file_name) DO UPDATE SET content = excluded.content, mime_type = excluded.mime_type, updated_at = CURRENT_TIMESTAMP"
+          ).bind(crypto.randomUUID(), projectId, fileName, version.content, version.mime_type, projectId, user.id, projectId, fileName),
           env.DB.prepare(
-            "INSERT INTO application_file_versions (id, project_id, file_name, version_number, content, mime_type) SELECT ?, ?, ?, COALESCE(MAX(version_number), 0) + 1, ?, ? FROM application_file_versions WHERE project_id = ? AND file_name = ? AND EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)"
-          ).bind(restoredVersionId, projectId, fileName, version.content, version.mime_type, projectId, fileName, projectId, user.id),
+            "INSERT INTO application_file_versions (id, project_id, file_name, version_number, content, mime_type) SELECT ?, ?, ?, COALESCE(MAX(version_number), 0) + 1, ?, ? FROM application_file_versions WHERE project_id = ? AND file_name = ? AND EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL) AND NOT EXISTS (SELECT 1 FROM application_files WHERE project_id = ? AND file_name = ? AND deleted_at IS NOT NULL)"
+          ).bind(restoredVersionId, projectId, fileName, version.content, version.mime_type, projectId, fileName, projectId, user.id, projectId, fileName),
           env.DB.prepare(
             "DELETE FROM application_file_versions WHERE project_id = ? AND file_name = ? AND version_number NOT IN (SELECT version_number FROM application_file_versions WHERE project_id = ? AND file_name = ? ORDER BY version_number DESC LIMIT 30) AND EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)"
           ).bind(projectId, fileName, projectId, fileName, projectId, user.id)
         ]);
         const restoredVersion = await env.DB.prepare(
-          "SELECT version_number FROM application_file_versions WHERE id = ? AND project_id = ? AND file_name = ? LIMIT 1"
+          "SELECT version_number FROM application_file_versions WHERE id = ? AND project_id = ? AND file_name = ? AND deleted_at IS NULL LIMIT 1"
         ).bind(restoredVersionId, projectId, fileName).first();
         const nextVersion = Number(restoredVersion?.version_number || 0);
         if (!nextVersion) return json({ error: "Cette application a été déplacée dans la corbeille. La version n'a pas été restaurée." }, 409);
