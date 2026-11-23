@@ -1413,6 +1413,24 @@ async function ensureApplicationPublicationSchema(env) {
 }
 
 
+async function ensureApplicationDatabaseConnectionSchema(env) {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS application_database_connections (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      project_id TEXT NOT NULL UNIQUE,
+      database_id TEXT NOT NULL UNIQUE,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE INDEX IF NOT EXISTS idx_application_database_connections_owner
+    ON application_database_connections(user_id, project_id)
+  `).run();
+}
+
+
 async function ensureProjectTrashSchema(env) {
   const columns = await env.DB.prepare("PRAGMA table_info(projects)").all();
   const hasDeletedAt = (columns.results || []).some(column => column.name === "deleted_at");
@@ -4316,6 +4334,106 @@ hosting
         }
         console.error("ERREUR PUBLICATION APPLICATION:", error);
         return json({ error: "Impossible de publier l'application pour le moment. Vérifiez votre connexion et réessayez." }, 500);
+      }
+    }
+
+    // APPLICATIONS : LIAISON SÉCURISÉE À UNE BASE DE DONNÉES
+    const applicationDatabaseMatch = path.match(/^\/api\/projects\/([^/]+)\/application-database$/);
+    if (applicationDatabaseMatch && ["GET", "PUT"].includes(request.method)) {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureApplicationDatabaseConnectionSchema(env);
+        const projectId = decodeURIComponent(applicationDatabaseMatch[1]);
+        const project = await env.DB.prepare(
+          "SELECT id, name FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
+        ).bind(projectId, user.id).first();
+        if (!project) return json({ error: "Application introuvable." }, 404);
+
+        if (request.method === "GET") {
+          const connection = await env.DB.prepare(`
+            SELECT connections.database_id, databases.name AS database_name,
+                   connections.created_at, connections.updated_at
+            FROM application_database_connections AS connections
+            JOIN customer_databases AS databases
+              ON databases.id = connections.database_id
+             AND databases.user_id = connections.user_id
+            WHERE connections.project_id = ? AND connections.user_id = ?
+            LIMIT 1
+          `).bind(projectId, user.id).first();
+          return json({ connection: connection || null });
+        }
+
+        const body = await readLimitedJsonBody(request);
+        const databaseId = body.database_id === null || body.database_id === ""
+          ? null
+          : String(body.database_id || "").trim();
+
+        if (!databaseId) {
+          await env.DB.prepare(
+            "DELETE FROM application_database_connections WHERE project_id = ? AND user_id = ?"
+          ).bind(projectId, user.id).run();
+          return json({ message: "La base de données a été déconnectée.", connection: null });
+        }
+
+        const database = await env.DB.prepare(`
+          SELECT id, name, project_id
+          FROM customer_databases
+          WHERE id = ? AND user_id = ?
+            AND (project_id IS NULL OR project_id = ?)
+          LIMIT 1
+        `).bind(databaseId, user.id, projectId).first();
+        if (!database) {
+          return json({
+            error: "Base introuvable, appartenant à un autre compte ou déjà associée à un autre projet."
+          }, 404);
+        }
+
+        await env.DB.prepare(`
+          INSERT INTO application_database_connections
+            (id, user_id, project_id, database_id)
+          SELECT ?, ?, ?, ?
+          WHERE EXISTS (
+            SELECT 1 FROM projects
+            WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL
+          )
+          AND EXISTS (
+            SELECT 1 FROM customer_databases
+            WHERE id = ? AND user_id = ?
+              AND (project_id IS NULL OR project_id = ?)
+          )
+          ON CONFLICT(project_id) DO UPDATE SET
+            database_id = excluded.database_id,
+            updated_at = CURRENT_TIMESTAMP
+        `).bind(
+          crypto.randomUUID(), user.id, projectId, databaseId,
+          projectId, user.id, databaseId, user.id, projectId
+        ).run();
+
+        const saved = await env.DB.prepare(`
+          SELECT connections.database_id, databases.name AS database_name,
+                 connections.created_at, connections.updated_at
+          FROM application_database_connections AS connections
+          JOIN customer_databases AS databases
+            ON databases.id = connections.database_id
+           AND databases.user_id = connections.user_id
+          WHERE connections.project_id = ? AND connections.user_id = ?
+          LIMIT 1
+        `).bind(projectId, user.id).first();
+
+        if (!saved) return json({ error: "La liaison n'a pas pu être enregistrée. Actualisez puis réessayez." }, 409);
+        return json({
+          message: "Base de données reliée à l'application.",
+          connection: saved
+        });
+      } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
+        const message = String(error?.message || "");
+        if (message.includes("UNIQUE constraint failed")) {
+          return json({ error: "Cette base est déjà reliée à une autre application." }, 409);
+        }
+        console.error("ERREUR LIAISON BASE APPLICATION:", error);
+        return json({ error: "Impossible de gérer la liaison avec cette base de données." }, 500);
       }
     }
 
