@@ -6435,18 +6435,6 @@ const used = Number(usage?.used || 0);
             /^[a-f0-9]{40}$/i.test(String(uploadedFile.contentSha1 || "")) ? uploadedFile.contentSha1.toLowerCase() : null
           ).run();
 
-          // Réappliquer explicitement le dossier puis vérifier la valeur persistée.
-          await env.DB.prepare(
-            "UPDATE cloud_files SET folder_id = ? WHERE id = ? AND user_id = ?"
-          ).bind(requestedFolderId, id, user.id).run();
-
-          const savedFile = await env.DB.prepare(
-            "SELECT folder_id FROM cloud_files WHERE id = ? AND user_id = ? LIMIT 1"
-          ).bind(id, user.id).first();
-
-          if ((savedFile?.folder_id || null) !== requestedFolderId) {
-            throw new Error("Le dossier du fichier n'a pas été enregistré correctement.");
-          }
           let destinationName = "Racine";
           if (requestedFolderId) {
             const destination = await env.DB.prepare("SELECT name FROM storage_folders WHERE id = ? AND user_id = ? LIMIT 1").bind(requestedFolderId, user.id).first();
