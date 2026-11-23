@@ -6347,6 +6347,10 @@ async function openApplicationEditor(projectId) {
   main.innerHTML =
     "<div class=\"section-head\"><div><h1 class=\"page-title\">" + escapeHTML(application.name) + "</h1><p class=\"page-subtitle\">Éditeur de code · Application web</p></div>" +
     "<button class=\"secondary\" type=\"button\" onclick=\"renderApplicationsPage()\">← Mes applications</button></div>" +
+    "<div class=\"card\"><div class=\"section-head\"><h2>Base de données de l'application</h2><span class=\"muted\" id=\"applicationDatabaseBadge\">Non reliée</span></div>" +
+    "<p class=\"muted\">Reliez une base à cette application pour préparer son utilisation dans votre code. Seules vos bases libres ou déjà associées à cette application sont proposées.</p>" +
+    "<label for=\"applicationDatabaseSelect\">Base de données</label><select id=\"applicationDatabaseSelect\"><option value=\"\">Chargement des bases...</option></select>" +
+    "<div class=\"item-actions\"><button class=\"secondary\" type=\"button\" id=\"saveApplicationDatabaseButton\" onclick=\"saveApplicationDatabaseConnection()\">Enregistrer la liaison</button><span id=\"applicationDatabaseStatus\" class=\"muted\" aria-live=\"polite\"></span></div></div>" +
     "<div class=\"card\"><div class=\"section-head\"><h2>Explorateur du projet</h2><div class=\"item-actions\"><button class=\"secondary\" type=\"button\" onclick=\"createApplicationFile()\">＋ Nouveau fichier</button><button class=\"secondary\" type=\"button\" onclick=\"createApplicationFolder()\">＋ Nouveau dossier</button></div></div>" +
     "<p class=\"muted\">Organisez vos fichiers dans des dossiers. Les fichiers existants sont conservés.</p>" +
     "<div id=\"applicationFileTree\" class=\"application-file-tree\"><p class=\"muted\">Chargement de l'arborescence...</p></div>" +
@@ -6394,8 +6398,83 @@ async function openApplicationEditor(projectId) {
     refreshApplicationPreview();
     status.textContent = "Fichiers chargés.";
     await loadApplicationPublication();
+    await loadApplicationDatabaseConnection();
   } catch (error) {
     status.textContent = error.message;
+  }
+}
+
+
+async function loadApplicationDatabaseConnection() {
+  if (!applicationEditorState) return;
+  const select = document.getElementById("applicationDatabaseSelect");
+  const status = document.getElementById("applicationDatabaseStatus");
+  const badge = document.getElementById("applicationDatabaseBadge");
+  if (!select) return;
+  select.disabled = true;
+  if (status) status.textContent = "Chargement...";
+  try {
+    const [databaseData, connectionData] = await Promise.all([
+      api("/databases"),
+      api("/projects/" + encodeURIComponent(applicationEditorState.projectId) + "/application-database")
+    ]);
+    const databases = Array.isArray(databaseData.databases) ? databaseData.databases : [];
+    const connection = connectionData.connection || null;
+    const available = databases.filter(database =>
+      !database.project_id || database.project_id === applicationEditorState.projectId
+    );
+    select.innerHTML = '<option value="">Aucune base reliée</option>' +
+      available.map(database =>
+        '<option value="' + escapeHTML(database.id) + '">' + escapeHTML(database.name) + '</option>'
+      ).join("");
+    if (connection && available.some(database => database.id === connection.database_id)) {
+      select.value = connection.database_id;
+      if (badge) badge.textContent = "Reliée";
+      if (status) status.textContent = "Base actuelle : " + connection.database_name;
+    } else {
+      if (badge) badge.textContent = "Non reliée";
+      if (status) status.textContent = available.length
+        ? "Choisissez une base pour la relier."
+        : "Aucune base disponible. Créez-en une dans Bases de données.";
+    }
+  } catch (error) {
+    select.innerHTML = '<option value="">Indisponible</option>';
+    if (status) status.textContent = error.message;
+  } finally {
+    select.disabled = false;
+  }
+}
+
+async function saveApplicationDatabaseConnection() {
+  if (!applicationEditorState) return;
+  const select = document.getElementById("applicationDatabaseSelect");
+  const button = document.getElementById("saveApplicationDatabaseButton");
+  const status = document.getElementById("applicationDatabaseStatus");
+  const badge = document.getElementById("applicationDatabaseBadge");
+  if (!select || select.disabled) return;
+  const previousText = button ? button.textContent : "Enregistrer la liaison";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Enregistrement...";
+  }
+  if (status) status.textContent = "Enregistrement de la liaison...";
+  try {
+    const result = await api("/projects/" + encodeURIComponent(applicationEditorState.projectId) + "/application-database", {
+      method: "PUT",
+      body: JSON.stringify({ database_id: select.value || null })
+    });
+    if (badge) badge.textContent = result.connection ? "Reliée" : "Non reliée";
+    if (status) status.textContent = result.connection
+      ? "Base reliée : " + result.connection.database_name
+      : "Aucune base n'est reliée à cette application.";
+  } catch (error) {
+    if (status) status.textContent = error.message;
+    await loadApplicationDatabaseConnection();
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = previousText;
+    }
   }
 }
 
