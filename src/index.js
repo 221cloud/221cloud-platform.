@@ -1165,6 +1165,10 @@ async function ensureAutomationTasksSchema(env) {
       await env.DB.prepare(
         "CREATE INDEX IF NOT EXISTS idx_automation_tasks_project_owner ON automation_tasks(user_id, project_id, created_at DESC)"
       ).run();
+      const automationColumns = await env.DB.prepare("PRAGMA table_info(automation_tasks)").all();
+      if (!(automationColumns.results || []).some(column => column.name === "result_json")) {
+        await env.DB.prepare("ALTER TABLE automation_tasks ADD COLUMN result_json TEXT").run();
+      }
     })().catch(error => {
       automationTasksSchemaPromise = null;
       throw error;
@@ -1352,7 +1356,161 @@ async function ensureProjectTrashSchema(env) {
   }
 }
 
+async function executeProjectHealthCheck(env, task) {
+  await ensureProjectTrashSchema(env);
+  await ensureApplicationFilesSchema(env);
+  await ensureApplicationPublicationSchema(env);
+
+  const project = await env.DB.prepare(
+    "SELECT id, user_id FROM projects WHERE id = ? AND user_id = ? AND deleted_at IS NULL LIMIT 1"
+  ).bind(task.project_id, task.user_id).first();
+
+  if (!project) {
+    return {
+      status: "unavailable",
+      checked_at: new Date().toISOString(),
+      message: "Le projet n'existe plus ou n'est plus accessible."
+    };
+  }
+
+  const [files, publication] = await Promise.all([
+    env.DB.prepare(
+      "SELECT COUNT(*) AS total FROM application_files WHERE project_id = ?"
+    ).bind(task.project_id).first(),
+    env.DB.prepare(`
+      SELECT publications.slug, publications.active_version_id,
+             versions.id AS verified_version_id
+      FROM application_publications AS publications
+      LEFT JOIN application_publication_versions AS versions
+        ON versions.id = publications.active_version_id
+       AND versions.publication_id = publications.id
+      WHERE publications.project_id = ? AND publications.user_id = ?
+      LIMIT 1
+    `).bind(task.project_id, task.user_id).first()
+  ]);
+
+  const fileCount = Number(files?.total || 0);
+  const isPublished = Boolean(publication?.slug && publication?.verified_version_id);
+
+  return {
+    status: "checked",
+    checked_at: new Date().toISOString(),
+    project_id: task.project_id,
+    checks: {
+      project_accessible: true,
+      application_files_count: fileCount,
+      publication_exists: Boolean(publication),
+      publication_version_valid: isPublished
+    },
+    summary: fileCount === 0
+      ? "Projet accessible, mais aucun fichier d'application n'est enregistré."
+      : "Projet accessible et fichiers d'application recensés."
+  };
+}
+
+async function runAutomationScheduler(env, scheduledTime) {
+  await ensureAutomationTasksSchema(env);
+  const now = Math.floor(Date.now() / 1000);
+
+  await env.DB.prepare(`
+    UPDATE automation_tasks
+    SET status = 'failed',
+        lock_token = NULL,
+        locked_until = NULL,
+        last_error = 'Verrou expiré après la dernière tentative.',
+        updated_at = CURRENT_TIMESTAMP
+    WHERE status = 'running'
+      AND locked_until <= ?
+      AND attempts >= max_attempts
+  `).bind(now).run();
+
+  const lockToken = crypto.randomUUID();
+  const lockUntil = now + 120;
+  const claimed = await env.DB.prepare(`
+    UPDATE automation_tasks
+    SET status = 'running',
+        lock_token = ?,
+        locked_until = ?,
+        attempts = attempts + 1,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = (
+      SELECT id
+      FROM automation_tasks
+      WHERE scheduled_at <= ?
+        AND attempts < max_attempts
+        AND (
+          status = 'pending'
+          OR (status = 'running' AND locked_until <= ?)
+        )
+      ORDER BY scheduled_at ASC, created_at ASC
+      LIMIT 1
+    )
+      AND attempts < max_attempts
+      AND (
+        status = 'pending'
+        OR (status = 'running' AND locked_until <= ?)
+      )
+  `).bind(lockToken, lockUntil, now, now, now).run();
+
+  if (!claimed.meta || Number(claimed.meta.changes || 0) !== 1) return;
+
+  const task = await env.DB.prepare(
+    "SELECT id, user_id, project_id, task_type, attempts, max_attempts FROM automation_tasks WHERE lock_token = ? AND status = 'running' LIMIT 1"
+  ).bind(lockToken).first();
+
+  if (!task) return;
+
+  try {
+    if (task.task_type !== "project_health_check") {
+      throw new Error("Type de tâche non autorisé par le moteur.");
+    }
+
+    const result = await executeProjectHealthCheck(env, task);
+    await env.DB.prepare(`
+      UPDATE automation_tasks
+      SET status = 'completed',
+          result_json = ?,
+          last_error = NULL,
+          lock_token = NULL,
+          locked_until = NULL,
+          completed_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND status = 'running' AND lock_token = ?
+    `).bind(JSON.stringify(result), task.id, lockToken).run();
+  } catch (error) {
+    const message = String(error?.message || "Erreur d'exécution").slice(0, 1000);
+    const canRetry = Number(task.attempts) < Number(task.max_attempts);
+    await env.DB.prepare(`
+      UPDATE automation_tasks
+      SET status = ?,
+          scheduled_at = CASE WHEN ? = 1 THEN ? ELSE scheduled_at END,
+          last_error = ?,
+          lock_token = NULL,
+          locked_until = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND status = 'running' AND lock_token = ?
+    `).bind(
+      canRetry ? "pending" : "failed",
+      canRetry ? 1 : 0,
+      now + 60,
+      message,
+      task.id,
+      lockToken
+    ).run();
+    console.error("ERREUR EXÉCUTION AUTOMATISATION:", {
+      taskId: task.id,
+      attempt: task.attempts,
+      retry: canRetry,
+      error: message
+    });
+  }
+}
+
 export default {
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(runAutomationScheduler(env, controller?.scheduledTime || Date.now()));
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
@@ -2115,7 +2273,7 @@ if (path === "/api/subscription" && request.method === "GET") {
 
         if (request.method === "GET") {
           const result = await env.DB.prepare(`
-            SELECT id, project_id, task_type, payload_json, status,
+            SELECT id, project_id, task_type, payload_json, result_json, status,
                    scheduled_at, attempts, max_attempts, last_error,
                    created_at, updated_at, completed_at, cancelled_at
             FROM automation_tasks
@@ -2130,6 +2288,10 @@ if (path === "/api/subscription" && request.method === "GET") {
               payload: (() => {
                 try { return JSON.parse(task.payload_json || "{}"); }
                 catch { return {}; }
+              })(),
+              result: (() => {
+                try { return task.result_json ? JSON.parse(task.result_json) : null; }
+                catch { return null; }
               })()
             }))
           });
@@ -2137,8 +2299,10 @@ if (path === "/api/subscription" && request.method === "GET") {
 
         const body = await readLimitedJsonBody(request);
         const taskType = String(body.task_type || "").trim();
-        if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,79}$/.test(taskType)) {
-          return json({ error: "Type de tâche invalide." }, 400);
+        if (taskType !== "project_health_check") {
+          return json({
+            error: "Type de tâche non disponible. Le type autorisé actuellement est project_health_check."
+          }, 400);
         }
 
         const payload = body.payload === undefined ? {} : body.payload;
@@ -2228,7 +2392,7 @@ if (path === "/api/subscription" && request.method === "GET") {
         }
 
         return json({
-          message: "Tâche programmée. Son exécution n'est pas encore activée.",
+          message: "Vérification de projet programmée. Elle sera exécutée automatiquement par le planificateur.",
           task: {
             id: taskId,
             project_id: projectId,
