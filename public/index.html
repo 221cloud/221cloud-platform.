@@ -6137,6 +6137,7 @@ async function openApplicationEditor(projectId) {
     "<div id=\"applicationTrashPanel\" class=\"item-card\" hidden><div class=\"section-head\"><h3>Corbeille de l'application</h3><button class=\"secondary\" type=\"button\" onclick=\"toggleApplicationTrash(false)\">Fermer</button></div><div id=\"applicationTrashList\"><p class=\"muted\">Chargement...</p></div></div></div>" +
     "<div class=\"card\"><div class=\"section-head\"><h2 id=\"applicationActiveFileTitle\">Éditeur</h2><span class=\"muted\">Code du fichier sélectionné</span></div>" +
     "<label for=\"applicationCodeEditor\">Contenu du fichier</label>" +
+    "<p class=\"muted\">Tab : indentation · Maj+Tab : réduire · Entrée : indentation automatique · Ctrl/Cmd+S : enregistrer</p>" +
     "<textarea id=\"applicationCodeEditor\" spellcheck=\"false\" autocapitalize=\"off\" autocomplete=\"off\" style=\"width:100%;min-height:320px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.5;white-space:pre;overflow:auto\" placeholder=\"Chargement du code...\"></textarea>" +
     "<div class=\"item-actions\" style=\"margin-top:12px\"><button id=\"saveApplicationFilesButton\" type=\"button\" onclick=\"saveApplicationFiles()\">Enregistrer tous les fichiers</button>" +
     "<button class=\"secondary\" type=\"button\" onclick=\"refreshApplicationPreview()\">Actualiser l'aperçu</button><span id=\"applicationSaveStatus\" class=\"muted\" aria-live=\"polite\"></span></div>" +
@@ -6151,6 +6152,9 @@ async function openApplicationEditor(projectId) {
     "<div class=\"section-head\"><h2>Aperçu de l'application</h2><span class=\"muted\">Exécution isolée</span></div>" +
     "<div class=\"card\" style=\"padding:8px\"><iframe id=\"applicationPreviewFrame\" title=\"Aperçu de l'application\" sandbox=\"allow-scripts\" style=\"display:block;width:100%;min-height:420px;border:1px solid var(--border-color,#d8deea);border-radius:10px;background:white\"></iframe></div>" +
     "<div class=\"notice\">Limites actuelles : 50 fichiers maximum, 256 Ko par fichier et 1 Mo de code au total. L'historique conserve les 30 dernières versions de chaque fichier. Les fichiers additionnels ne sont pas encore inclus dans la publication publique.</div>";
+
+  const codeEditor = document.getElementById("applicationCodeEditor");
+  if (codeEditor) codeEditor.addEventListener("keydown", handleApplicationEditorKeydown);
 
   const status = document.getElementById("applicationSaveStatus");
   status.textContent = "Chargement des fichiers...";
@@ -6175,6 +6179,75 @@ async function openApplicationEditor(projectId) {
   }
 }
 
+
+function handleApplicationEditorKeydown(event) {
+  const editor = event.currentTarget;
+
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+    event.preventDefault();
+    if (applicationEditorState && !applicationEditorState.saving) saveApplicationFiles();
+    return;
+  }
+
+  if (editor.disabled || !applicationEditorState || applicationEditorState.saving) return;
+
+  if (event.key === "Tab") {
+    event.preventDefault();
+    const value = editor.value;
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+
+    if (start === end && !event.shiftKey) {
+      editor.setRangeText("    ", start, end, "end");
+      return;
+    }
+
+    const firstLineStart = value.lastIndexOf("\n", start - 1) + 1;
+    const lastLineStart = value.lastIndexOf("\n", Math.max(start, end - 1)) + 1;
+    const nextLineBreak = value.indexOf("\n", lastLineStart);
+    const blockEnd = nextLineBreak === -1 ? value.length : nextLineBreak;
+    const lines = value.slice(firstLineStart, blockEnd).split("\n");
+    let lineOffset = firstLineStart;
+    let startAdjustment = 0;
+    let endAdjustment = 0;
+
+    const updatedLines = lines.map(line => {
+      const currentLineStart = lineOffset;
+      lineOffset += line.length + 1;
+
+      if (event.shiftKey) {
+        const removed = line.startsWith("\t") ? 1 : ((line.match(/^ {1,4}/) || [""])[0].length);
+        if (currentLineStart < start) startAdjustment += removed;
+        if (currentLineStart < end) endAdjustment += removed;
+        return line.slice(removed);
+      }
+
+      if (currentLineStart <= start) startAdjustment += 4;
+      if (currentLineStart < end) endAdjustment += 4;
+      return "    " + line;
+    });
+
+    editor.value = value.slice(0, firstLineStart) + updatedLines.join("\n") + value.slice(blockEnd);
+    editor.setSelectionRange(
+      Math.max(firstLineStart, start + (event.shiftKey ? -startAdjustment : startAdjustment)),
+      Math.max(firstLineStart, end + (event.shiftKey ? -endAdjustment : endAdjustment))
+    );
+    return;
+  }
+
+  if (event.key === "Enter") {
+    event.preventDefault();
+    const value = editor.value;
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+    const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+    const linePrefix = value.slice(lineStart, start);
+    const indentation = (linePrefix.match(/^[\t ]*/) || [""])[0];
+    const trimmedPrefix = linePrefix.trimEnd();
+    const extraIndentation = /[\{\[\(]$/.test(trimmedPrefix) ? "    " : "";
+    editor.setRangeText("\n" + indentation + extraIndentation, start, end, "end");
+  }
+}
 
 async function loadApplicationPublication() {
   if (!applicationEditorState) return;
