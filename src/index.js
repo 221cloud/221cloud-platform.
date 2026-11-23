@@ -1744,6 +1744,14 @@ function oauthLoginPage() {
 
 async function oauthAuthorizePage(request, env) {
   const url = new URL(request.url);
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  const authorizeLimit = await incrementApiRateLimit(env, "oauth-authorize:" + await hashToken(ip), 60);
+  if (!authorizeLimit.allowed) {
+    return json({ error: "Trop de demandes d’autorisation." }, 429, {
+      "Retry-After": String(authorizeLimit.retryAfter),
+      "Cache-Control": "no-store"
+    });
+  }
   const params = request.method === "POST"
     ? await readLimitedJsonBody(request).catch(() => ({}))
     : Object.fromEntries(url.searchParams.entries());
@@ -2009,8 +2017,10 @@ async function handleAssistantMcpRequest(request, env) {
 
   const access = await authenticateAssistantAccess(request, env);
   if (!access) {
-    return json({ error: "Clé d'accès invalide, expirée ou révoquée." }, 401, {
-      "WWW-Authenticate": "Bearer"
+    const metadataUrl = new URL("/.well-known/oauth-protected-resource", request.url).href;
+    return json({ error: "Clé ou jeton d'accès invalide, expiré ou révoqué." }, 401, {
+      "WWW-Authenticate": 'Bearer resource_metadata="' + metadataUrl + '"',
+      "Cache-Control": "no-store"
     });
   }
 
