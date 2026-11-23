@@ -7,6 +7,16 @@ const DATABASE_NAME_MAX = 80;
 const STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 
+const PLAN_LIMITS = Object.freeze({
+  free: Object.freeze({ storage_bytes: 1024 * 1024 * 1024, projects: 1 }),
+  starter: Object.freeze({ storage_bytes: 5 * 1024 * 1024 * 1024, projects: 5 }),
+  pro: Object.freeze({ storage_bytes: 20 * 1024 * 1024 * 1024, projects: 20 })
+});
+
+function getPlanLimits(plan) {
+  return PLAN_LIMITS[String(plan || "free").toLowerCase()] || PLAN_LIMITS.free;
+}
+
 const MAX_UPLOAD_REQUEST_BYTES = MAX_FILE_SIZE_BYTES + 2 * 1024 * 1024;
 
 const MAX_JSON_REQUEST_BYTES = 4 * 1024 * 1024;
@@ -1813,12 +1823,7 @@ if (path === "/api/subscription" && request.method === "GET") {
 
     const plan = String(subscription.plan || "free").toLowerCase();
 
-    const planLimits = {
-      free: { storage_bytes: 1024 * 1024 * 1024, projects: 1 },
-      starter: { storage_bytes: 5 * 1024 * 1024 * 1024, projects: 5 },
-      pro: { storage_bytes: 20 * 1024 * 1024 * 1024, projects: 20 }
-    };
-    const limits = planLimits[plan] || planLimits.free;
+    const limits = getPlanLimits(plan);
 
     const storageUsage = await env.DB.prepare(`
       SELECT
@@ -2123,11 +2128,7 @@ if (path === "/api/subscription" && request.method === "GET") {
 
         const plan = String(subscription?.effective_plan || "free").toLowerCase();
 
-        const storageLimits = {
-          free: 1024 * 1024 * 1024,
-          starter: 5 * 1024 * 1024 * 1024,
-          pro: 20 * 1024 * 1024 * 1024
-        };
+        const maxStorage = getPlanLimits(plan).storage_bytes;
 
         const maxStorage = storageLimits[plan] ?? storageLimits.free;
 
@@ -2395,11 +2396,7 @@ if (path === "/api/subscription" && request.method === "GET") {
           LIMIT 1
         `).bind(user.id).first();
         const plan = String(subscription?.effective_plan || "free").toLowerCase();
-        const storageLimits = {
-          free: 1024 * 1024 * 1024,
-          starter: 5 * 1024 * 1024 * 1024,
-          pro: 20 * 1024 * 1024 * 1024
-        };
+        const maxStorage = getPlanLimits(plan).storage_bytes;
         const maxStorage = storageLimits[plan] ?? storageLimits.free;
         const usage = await env.DB.prepare(`
           SELECT
@@ -3332,11 +3329,7 @@ if (downloadRequested) {
 
         const plan = String(subscription?.effective_plan || "free").toLowerCase();
 
-        const projectLimits = {
-          free: 1,
-          starter: 5,
-          pro: 20
-        };
+        const maxProjects = getPlanLimits(plan).projects;
 
         const maxProjects = projectLimits[plan] ?? 1;
 
@@ -3449,7 +3442,7 @@ hosting
           LIMIT 1
         `).bind(user.id).first();
         const plan = String(subscription?.effective_plan || "free").toLowerCase();
-        const projectLimits = { free: 1, starter: 5, pro: 20 };
+        const maxProjects = getPlanLimits(plan).projects;
         const maxProjects = projectLimits[plan] ?? 1;
         const activeCount = await env.DB.prepare(`
           SELECT COUNT(*) AS total
@@ -5628,11 +5621,7 @@ const used = Number(usage?.used || 0);
         const plan = String(subscription?.effective_plan || "free").toLowerCase();
 
         // Limites selon le forfait
-        const storageLimits = {
-          free: 1024 * 1024 * 1024,
-          starter: 5 * 1024 * 1024 * 1024,
-          pro: 20 * 1024 * 1024 * 1024
-        };
+        const maxStorage = getPlanLimits(plan).storage_bytes;
 
         const limit = storageLimits[plan] ?? storageLimits.free;
 
@@ -5740,11 +5729,7 @@ const used = Number(usage?.used || 0);
         const plan = String(subscription?.effective_plan || "free").toLowerCase();
 
         // Quotas de stockage en octets
-        const storageLimits = {
-          free: 1024 * 1024 * 1024,
-          starter: 5 * 1024 * 1024 * 1024,
-          pro: 20 * 1024 * 1024 * 1024
-        };
+        const maxStorage = getPlanLimits(plan).storage_bytes;
 
         const maxStorage = storageLimits[plan] ?? storageLimits.free;
 
