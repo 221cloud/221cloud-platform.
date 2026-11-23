@@ -6433,24 +6433,46 @@ async function loadProQuotes() {
     list.innerHTML = quotes.map(quote => {
       const items = Array.isArray(quote.items) ? quote.items : [];
       const itemsHtml = items.length ? `
-        <div style="margin-top:10px">
-          <strong>Matériaux détaillés</strong>
+        <div style="margin-top:12px">
+          <strong>🔌 Matériaux et fournitures</strong>
           ${items.map(item => `
-            <div class="muted" style="padding:6px 0;border-bottom:1px solid var(--border)">
-              ${escapeHTML(item.label)} — ${escapeHTML(String(item.quantity))} ${escapeHTML(item.unit)}
-              × ${escapeHTML(formatProMoney(item.unit_price))} = <strong>${escapeHTML(formatProMoney(item.total_amount))}</strong>
+            <div style="display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--border)">
+              <div>
+                <strong>${escapeHTML(item.label)}</strong>
+                <div class="muted">${escapeHTML(String(item.quantity))} ${escapeHTML(item.unit)} × ${escapeHTML(formatProMoney(item.unit_price))}</div>
+              </div>
+              <strong style="white-space:nowrap">${escapeHTML(formatProMoney(item.total_amount))}</strong>
             </div>
           `).join("")}
-        </div>` : '<div class="muted">Ancien devis : détail des matériaux non disponible.</div>';
+        </div>` : '<div class="muted" style="margin-top:10px">Ancien devis : détail des matériaux non disponible.</div>';
       return `
-        <div class="item">
-          <strong>${escapeHTML(quote.client_name || "Client")}</strong>
-          <div>${escapeHTML(quote.description)}</div>
-          ${itemsHtml}
-          <div class="muted" style="margin-top:8px">Total matériaux : ${escapeHTML(formatProMoney(quote.material_amount))}</div>
-          <div class="muted">Main-d'œuvre : ${escapeHTML(formatProMoney(quote.labour_amount))}</div>
-          <p><strong>Total : ${escapeHTML(formatProMoney(quote.total_amount))}</strong></p>
-          <span class="status">Brouillon</span>
+        <div class="item-card">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
+            <div>
+              <strong style="font-size:16px">${escapeHTML(quote.client_name || "Client")}</strong>
+              <div class="muted" style="margin-top:5px">${escapeHTML(quote.description)}</div>
+            </div>
+            <span class="status">Brouillon</span>
+          </div>
+          <p style="font-size:19px;margin:14px 0 8px"><strong>${escapeHTML(formatProMoney(quote.total_amount))}</strong></p>
+          <details style="margin-top:12px">
+            <summary style="cursor:pointer;color:#8eb6ff;font-weight:700;padding:8px 0">📄 Consulter le devis complet</summary>
+            <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+              <h4 style="margin:0 0 8px">👤 Informations du client</h4>
+              <div><strong>${escapeHTML(quote.client_name || "Client")}</strong></div>
+              ${quote.client_phone ? '<div class="muted">☎ ' + escapeHTML(quote.client_phone) + '</div>' : '<div class="muted">Téléphone non renseigné</div>'}
+              ${quote.client_address ? '<div class="muted">📍 ' + escapeHTML(quote.client_address) + '</div>' : '<div class="muted">Adresse non renseignée</div>'}
+              <h4 style="margin:16px 0 8px">🛠️ Travail à réaliser</h4>
+              <div style="line-height:1.6">${escapeHTML(quote.description)}</div>
+              ${itemsHtml}
+              <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border)">
+                <div style="display:flex;justify-content:space-between;gap:10px"><span class="muted">Total matériaux</span><strong>${escapeHTML(formatProMoney(quote.material_amount))}</strong></div>
+                <div style="display:flex;justify-content:space-between;gap:10px;margin-top:7px"><span class="muted">Main-d'œuvre</span><strong>${escapeHTML(formatProMoney(quote.labour_amount))}</strong></div>
+                <div style="display:flex;justify-content:space-between;gap:10px;margin-top:12px;font-size:18px"><strong>Total du devis</strong><strong>${escapeHTML(formatProMoney(quote.total_amount))}</strong></div>
+              </div>
+              <div class="muted" style="margin-top:12px;font-size:12px">Créé le : ${escapeHTML(formatDate(quote.created_at))}</div>
+            </div>
+          </details>
         </div>
       `;
     }).join("");
