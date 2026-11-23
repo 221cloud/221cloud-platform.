@@ -1,0 +1,21 @@
+{
+  "id": "/pro/",
+  "name": "221Cloud Pro",
+  "short_name": "221Cloud Pro",
+  "description": "Gérez vos clients et vos devis simplement.",
+  "lang": "fr",
+  "start_url": "/pro/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#080b18",
+  "theme_color": "#080b18",
+  "icons": [
+    {
+      "src": "/icons/221cloud-pro.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
