@@ -2499,8 +2499,23 @@ export default {
     // API PUBLIQUE DES APPLICATIONS : LECTURE DES TABLES EXPLICITEMENT AUTORISÉES
     const publicApplicationDataMatch = path.match(/^\/api\/public\/applications\/([a-z0-9-]+)\/tables\/([^/]+)\/rows$/);
     if (publicApplicationDataMatch) {
+      // Cette API expose uniquement les lignes explicitement autorisées à la lecture.
+      // Les applications publiées peuvent être servies dans une iframe sandboxée
+      // avec une origine opaque ("null") : CORS * est nécessaire pour leur GET public.
+      const publicApiHeaders = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Accept, Content-Type",
+        "Vary": "Origin"
+      };
+      const publicApiJson = (data, status = 200, extraHeaders = {}) =>
+        json(data, status, { ...extraHeaders, ...publicApiHeaders });
+
+      if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: publicApiHeaders });
+      }
       if (request.method !== "GET") {
-        return json({ error: "Méthode non autorisée." }, 405);
+        return publicApiJson({ error: "Méthode non autorisée." }, 405);
       }
       try {
         await ensureApplicationPublicationSchema(env);
@@ -2530,7 +2545,7 @@ export default {
         `).bind(slug).first();
 
         if (!publication) {
-          return json({ error: "Application publiée introuvable." }, 404);
+          return publicApiJson({ error: "Application publiée introuvable." }, 404);
         }
 
         const table = await env.DB.prepare(`
@@ -2552,7 +2567,7 @@ export default {
         ).first();
 
         if (!table || !safeInternalSqlIdentifier(table.physical_name)) {
-          return json({ error: "Lecture publique non autorisée pour cette table." }, 403);
+          return publicApiJson({ error: "Lecture publique non autorisée pour cette table." }, 403);
         }
 
         const columnResult = await env.DB.prepare(`
@@ -2563,7 +2578,7 @@ export default {
         `).bind(tableId, publication.database_id, publication.user_id).all();
         const columns = columnResult.results || [];
         if (columns.some(column => !safeInternalSqlIdentifier(column.physical_name))) {
-          return json({ error: "Structure de colonne invalide." }, 500);
+          return publicApiJson({ error: "Structure de colonne invalide." }, 500);
         }
 
         const quoteIdentifier = value => '"' + String(value).replace(/"/g, '""') + '"';
@@ -2592,7 +2607,7 @@ export default {
           " ORDER BY created_at DESC, row_id DESC LIMIT ? OFFSET ?"
         ).bind(limit, offset).all();
 
-        return json({
+        return publicApiJson({
           table: { id: table.id, name: table.name },
           rows: result.results || [],
           total: Number(count?.total || 0),
@@ -2605,7 +2620,7 @@ export default {
         }, 200, { "Cache-Control": "no-store" });
       } catch (error) {
         console.error("ERREUR LECTURE PUBLIQUE BASE APPLICATION:", error);
-        return json({ error: "Impossible de charger les données publiques de cette application." }, 500);
+        return publicApiJson({ error: "Impossible de charger les données publiques de cette application." }, 500);
       }
     }
 
