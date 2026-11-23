@@ -6514,8 +6514,7 @@ function toggleProPanel(type) {
 async function loadProClients() {
   const list = document.getElementById("proClientsList");
   const count = document.getElementById("proClientCount");
-  if (!list) return;
-  list.innerHTML = '<div class="empty">Chargement des clients…</div>';
+  if (list) list.innerHTML = '<div class="empty">Chargement des clients…</div>';
   try {
     const data = await api("/pro/clients");
     const clients = Array.isArray(data.clients) ? data.clients : [];
@@ -6529,6 +6528,7 @@ async function loadProClients() {
       if (!clients.length) quoteClient.innerHTML = '<option value="">Ajoutez d’abord un client</option>';
     }
     if (count) count.textContent = clients.length + (clients.length > 1 ? " clients" : " client");
+    if (!list) return;
     if (!clients.length) {
       list.innerHTML = '<div class="empty">Aucun client enregistré. Ajoutez votre premier client ci-dessus.</div>';
       return;
@@ -6542,7 +6542,8 @@ async function loadProClients() {
       </div>
     `).join("");
   } catch (error) {
-    list.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message) + '</div>';
+    if (list) list.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message) + '</div>';
+    if (quoteClient) quoteClient.innerHTML = '<option value="">Impossible de charger les clients</option>';
     if (count) count.textContent = "Indisponible";
   }
 }
