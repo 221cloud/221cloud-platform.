@@ -2420,6 +2420,30 @@ export default {
         if (!user) return json({ error: "Vous devez être connecté." }, 401);
         await ensureProSchema(env);
 
+        if (request.method === "DELETE" && proQuoteRouteMatch[1]) {
+          const quoteId = decodeURIComponent(proQuoteRouteMatch[1]);
+          const existing = await env.DB.prepare(
+            "SELECT id, status FROM pro_quotes WHERE id = ? AND user_id = ? LIMIT 1"
+          ).bind(quoteId, user.id).first();
+          if (!existing) return json({ error: "Devis introuvable." }, 404);
+          if (existing.status !== "draft") {
+            return json({ error: "Seuls les devis en brouillon peuvent être supprimés." }, 409);
+          }
+
+          const results = await env.DB.batch([
+            env.DB.prepare(
+              "DELETE FROM pro_quote_items WHERE quote_id = ? AND user_id = ? AND EXISTS (SELECT 1 FROM pro_quotes WHERE id = ? AND user_id = ? AND status = 'draft')"
+            ).bind(quoteId, user.id, quoteId, user.id),
+            env.DB.prepare(
+              "DELETE FROM pro_quotes WHERE id = ? AND user_id = ? AND status = 'draft'"
+            ).bind(quoteId, user.id)
+          ]);
+          if (!Number(results?.[1]?.meta?.changes || 0)) {
+            return json({ error: "Ce brouillon a déjà été supprimé ou ne peut plus l'être." }, 409);
+          }
+          return json({ message: "Brouillon supprimé avec succès." });
+        }
+
         if (request.method === "PATCH" && proQuoteRouteMatch[1]) {
           const quoteId = decodeURIComponent(proQuoteRouteMatch[1]);
           const existing = await env.DB.prepare(
