@@ -3720,51 +3720,158 @@ hosting
           "SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
         ).bind(projectId, user.id).first();
         if (!project) return json({ error: "Application introuvable." }, 404);
+
         const body = await readLimitedJsonBody(request);
         const fileName = String(body.file_name || "");
-        if (!validApplicationFilePath(fileName)) return json({ error: "Nom ou chemin de fichier non autorisé." }, 400);
-        const existing = await env.DB.prepare(
-          "SELECT file_name FROM application_files WHERE project_id = ? AND file_name = ? LIMIT 1"
-        ).bind(projectId, fileName).first();
-        if (existing) return json({ error: "Ce fichier existe déjà." }, 409);
-        const existingDirectory = await env.DB.prepare(
-          "SELECT directory_path FROM application_directories WHERE project_id = ? AND directory_path = ? LIMIT 1"
-        ).bind(projectId, fileName).first();
-        if (existingDirectory) return json({ error: "Un dossier porte déjà ce nom." }, 409);
-        const conflictingParentFile = await applicationFilePathHasFileConflict(env, projectId, fileName, false);
-        if (conflictingParentFile) {
-          return json({ error: "Un fichier empêche la création de ce chemin : " + conflictingParentFile }, 409);
+        if (!validApplicationFilePath(fileName)) {
+          return json({ error: "Nom ou chemin de fichier non autorisé." }, 400);
         }
+
+        const [fileRows, directoryRows] = await Promise.all([
+          env.DB.prepare("SELECT file_name, deleted_at FROM application_files WHERE project_id = ?")
+            .bind(projectId).all(),
+          env.DB.prepare("SELECT directory_path, deleted_at FROM application_directories WHERE project_id = ?")
+            .bind(projectId).all()
+        ]);
+        const files = fileRows.results || [];
+        const directories = directoryRows.results || [];
+
+        const existingFile = files.find(row => row.file_name === fileName);
+        if (existingFile) {
+          return json({
+            error: existingFile.deleted_at
+              ? "Ce fichier existe dans la corbeille. Restaurez-le ou videz la corbeille avant de réutiliser ce chemin."
+              : "Ce fichier existe déjà."
+          }, 409);
+        }
+
+        const existingDirectory = directories.find(row => row.directory_path === fileName);
+        if (existingDirectory) {
+          return json({
+            error: existingDirectory.deleted_at
+              ? "Un dossier situé dans la corbeille réserve ce chemin."
+              : "Un dossier porte déjà ce nom."
+          }, 409);
+        }
+
+        const parentParts = fileName.split("/").slice(0, -1);
+        const parentPaths = parentParts.map((_, index) => parentParts.slice(0, index + 1).join("/"));
+        for (const candidate of parentPaths) {
+          const blockingFile = files.find(row =>
+            candidate === row.file_name || candidate.startsWith(row.file_name + "/")
+          );
+          if (blockingFile) {
+            return json({
+              error: (blockingFile.deleted_at ? "Un fichier dans la corbeille" : "Un fichier") +
+                " bloque ce dossier parent : " + blockingFile.file_name + "."
+            }, 409);
+          }
+          const trashedDirectory = directories.find(row =>
+            row.deleted_at && (candidate === row.directory_path || candidate.startsWith(row.directory_path + "/"))
+          );
+          if (trashedDirectory) {
+            return json({
+              error: "Un dossier situé dans la corbeille réserve ce chemin : " +
+                trashedDirectory.directory_path + ". Restaurez-le ou videz-le avant de continuer."
+            }, 409);
+          }
+        }
+
+        const trashedDirectoryAncestor = directories.find(row =>
+          row.deleted_at && (fileName === row.directory_path || fileName.startsWith(row.directory_path + "/"))
+        );
+        if (trashedDirectoryAncestor) {
+          return json({
+            error: "Un dossier situé dans la corbeille réserve ce chemin : " +
+              trashedDirectoryAncestor.directory_path + ". Restaurez-le ou videz-le avant de continuer."
+          }, 409);
+        }
+
+        const descendantFile = files.find(row => row.file_name.startsWith(fileName + "/"));
+        if (descendantFile) {
+          return json({
+            error: "Un fichier existe déjà sous ce chemin : " + descendantFile.file_name + "."
+          }, 409);
+        }
+        const descendantDirectory = directories.find(row => row.directory_path.startsWith(fileName + "/"));
+        if (descendantDirectory) {
+          return json({
+            error: "Un dossier existe déjà sous ce chemin : " + descendantDirectory.directory_path + "."
+          }, 409);
+        }
+
         const count = await env.DB.prepare(
           "SELECT COUNT(*) AS total FROM application_files WHERE project_id = ?"
         ).bind(projectId).first();
-        if (Number(count?.total || 0) >= 50) return json({ error: "Cette application est limitée à 50 fichiers pour le moment." }, 413);
-        const mimeType = applicationFileMimeType(fileName);
-        const versionId = crypto.randomUUID();
-        await env.DB.batch([
-          env.DB.prepare(
-            "INSERT INTO application_files (id, project_id, file_name, content, mime_type) SELECT ?, ?, ?, '', ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)"
-          ).bind(crypto.randomUUID(), projectId, fileName, mimeType, projectId, user.id),
-          env.DB.prepare(
-            "INSERT INTO application_file_versions (id, project_id, file_name, version_number, content, mime_type) SELECT ?, ?, ?, 1, '', ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)"
-          ).bind(versionId, projectId, fileName, mimeType, projectId, user.id)
-        ]);
-        const saved = await env.DB.prepare(
-          "SELECT file_name FROM application_files WHERE project_id = ? AND file_name = ? LIMIT 1"
-        ).bind(projectId, fileName).first();
-        if (!saved) return json({ error: "L'application a changé d'état. Le fichier n'a pas été créé." }, 409);
-        const parentParts = fileName.split("/").slice(0, -1);
-        for (let index = 0; index < parentParts.length; index++) {
-          const directory = parentParts.slice(0, index + 1).join("/");
-          await env.DB.prepare(
-            "INSERT OR IGNORE INTO application_directories (id, project_id, directory_path) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)"
-          ).bind(crypto.randomUUID(), projectId, directory, projectId, user.id).run();
+        if (Number(count?.total || 0) >= 50) {
+          return json({ error: "Cette application est limitée à 50 fichiers pour le moment." }, 413);
         }
+
+        const mimeType = applicationFileMimeType(fileName);
+        const fileId = crypto.randomUUID();
+        const versionId = crypto.randomUUID();
+        const statements = parentPaths.map(directory => env.DB.prepare(
+          "INSERT OR IGNORE INTO application_directories (id, project_id, directory_path) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL) AND NOT EXISTS (SELECT 1 FROM application_directories WHERE project_id = ? AND deleted_at IS NOT NULL AND (? = directory_path OR ? LIKE directory_path || '/%')) AND NOT EXISTS (SELECT 1 FROM application_files WHERE project_id = ? AND (? = file_name OR ? LIKE file_name || '/%'))"
+        ).bind(
+          crypto.randomUUID(), projectId, directory, projectId, user.id,
+          projectId, directory, directory, projectId, directory, directory
+        ));
+
+        const parentConditions = parentPaths.map(() =>
+          "AND EXISTS (SELECT 1 FROM application_directories WHERE project_id = ? AND directory_path = ? AND deleted_at IS NULL)"
+        ).join(" ");
+        const fileInsertSql =
+          "INSERT INTO application_files (id, project_id, file_name, content, mime_type) " +
+          "SELECT ?, ?, ?, '', ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL) " +
+          "AND NOT EXISTS (SELECT 1 FROM application_files WHERE project_id = ? AND file_name = ?) " +
+          "AND NOT EXISTS (SELECT 1 FROM application_files WHERE project_id = ? AND ? LIKE file_name || '/%') " +
+          "AND NOT EXISTS (SELECT 1 FROM application_directories WHERE project_id = ? AND (directory_path = ? OR directory_path LIKE ? || '/%')) " +
+          "AND NOT EXISTS (SELECT 1 FROM application_directories WHERE project_id = ? AND deleted_at IS NOT NULL AND (? = directory_path OR ? LIKE directory_path || '/%')) " +
+          parentConditions;
+        const fileInsertValues = [
+          fileId, projectId, fileName, mimeType, projectId, user.id,
+          projectId, fileName, projectId, fileName,
+          projectId, fileName, fileName,
+          projectId, fileName, fileName
+        ];
+        for (const directory of parentPaths) {
+          fileInsertValues.push(projectId, directory);
+        }
+        statements.push(
+          env.DB.prepare(fileInsertSql).bind(...fileInsertValues),
+          env.DB.prepare(
+            "INSERT INTO application_file_versions (id, project_id, file_name, version_number, content, mime_type) SELECT ?, ?, ?, 1, '', ? WHERE EXISTS (SELECT 1 FROM application_files WHERE id = ? AND project_id = ?)"
+          ).bind(versionId, projectId, fileName, mimeType, fileId, projectId)
+        );
+
+        await env.DB.batch(statements);
+
+        const [savedFile, savedVersion, savedDirectories] = await Promise.all([
+          env.DB.prepare("SELECT id FROM application_files WHERE id = ? AND project_id = ? AND deleted_at IS NULL")
+            .bind(fileId, projectId).first(),
+          env.DB.prepare("SELECT id FROM application_file_versions WHERE id = ? AND project_id = ? AND deleted_at IS NULL")
+            .bind(versionId, projectId).first(),
+          parentPaths.length
+            ? env.DB.prepare("SELECT directory_path FROM application_directories WHERE project_id = ? AND deleted_at IS NULL")
+                .bind(projectId).all()
+            : Promise.resolve({ results: [] })
+        ]);
+
+        const savedPaths = new Set((savedDirectories.results || []).map(row => row.directory_path));
+        if (!savedFile || !savedVersion || parentPaths.some(directory => !savedPaths.has(directory))) {
+          return json({
+            error: "Le chemin est déjà réservé ou la création complète du fichier n'a pas pu être confirmée."
+          }, 409);
+        }
+
         return json({ message: "Fichier créé.", file_name: fileName, version_number: 1 }, 201);
       } catch (error) {
         if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
+        if (String(error?.message || "").toLowerCase().includes("unique")) {
+          return json({ error: "Ce chemin vient d'être utilisé ou réservé. Actualisez l'explorateur avant de réessayer." }, 409);
+        }
         console.error("ERREUR CRÉATION FICHIER APPLICATION:", error);
-        return json({ error: "Impossible de créer ce fichier." }, 500);
+        return json({ error: "Impossible de créer le fichier." }, 500);
       }
     }
 
