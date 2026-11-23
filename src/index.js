@@ -227,10 +227,15 @@ function sessionCookie(token) {
   return `221cloud_session=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}`;
 }
 
-async function currentUser(request, env) {
-  const token = getCookie(request, "221cloud_session");
+const currentUserCache = new WeakMap();
 
-  if (!token) return null;
+async function currentUser(request, env) {
+  if (currentUserCache.has(request)) return currentUserCache.get(request);
+
+  const lookup = (async () => {
+    const token = getCookie(request, "221cloud_session");
+
+    if (!token) return null;
 
   const tokenHash = await hashToken(token);
   const now = new Date();
@@ -255,7 +260,11 @@ async function currentUser(request, env) {
     "UPDATE sessions SET expires_at = ? WHERE token_hash = ? AND expires_at > ?"
   ).bind(nextExpiry, tokenHash, nowIso).run();
 
-  return result;
+    return result;
+  })();
+
+  currentUserCache.set(request, lookup);
+  return lookup;
 }
 async function generateWebsiteSlug(env, projectName) {
   const base = String(projectName || "site")
@@ -886,6 +895,100 @@ async function clearLoginFailures(env, keys) {
   ).bind(keys[0]).run();
 }
 
+let apiRateLimitSchemaPromise = null;
+let apiRateLimitLastCleanupHour = 0;
+
+async function ensureApiRateLimitSchema(env) {
+  if (!apiRateLimitSchemaPromise) {
+    apiRateLimitSchemaPromise = env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS api_rate_limits (
+        scope_key TEXT PRIMARY KEY,
+        window_started_at INTEGER NOT NULL,
+        request_count INTEGER NOT NULL DEFAULT 0
+      )
+    `).run().catch(error => {
+      apiRateLimitSchemaPromise = null;
+      throw error;
+    });
+  }
+  await apiRateLimitSchemaPromise;
+}
+
+async function incrementApiRateLimit(env, scopeKey, limit) {
+  await ensureApiRateLimitSchema(env);
+  const now = Math.floor(Date.now() / 1000);
+  const windowSeconds = 60;
+  const row = await env.DB.prepare(`
+    INSERT INTO api_rate_limits (scope_key, window_started_at, request_count)
+    VALUES (?, ?, 1)
+    ON CONFLICT(scope_key) DO UPDATE SET
+      request_count = CASE
+        WHEN api_rate_limits.window_started_at <= ? THEN 1
+        ELSE api_rate_limits.request_count + 1
+      END,
+      window_started_at = CASE
+        WHEN api_rate_limits.window_started_at <= ? THEN ?
+        ELSE api_rate_limits.window_started_at
+      END
+    RETURNING request_count, window_started_at
+  `).bind(scopeKey, now, now - windowSeconds, now - windowSeconds, now).first();
+
+  const count = Number(row?.request_count || 0);
+  const startedAt = Number(row?.window_started_at || now);
+  return {
+    allowed: count <= limit,
+    limit,
+    remaining: Math.max(0, limit - count),
+    retryAfter: Math.max(1, startedAt + windowSeconds - now)
+  };
+}
+
+async function enforceApiRateLimit(request, env, user) {
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  const ipKey = "ip:" + await hashToken(ip);
+  const ipLimit = await incrementApiRateLimit(env, ipKey, 300);
+
+  if (!ipLimit.allowed) {
+    return json({
+      error: "Trop de requêtes API depuis cette adresse. Réessaie dans quelques instants."
+    }, 429, {
+      "Retry-After": String(ipLimit.retryAfter),
+      "RateLimit-Limit": String(ipLimit.limit),
+      "RateLimit-Remaining": "0",
+      "RateLimit-Reset": String(ipLimit.retryAfter)
+    });
+  }
+
+  if (user?.id) {
+    const userKey = "user:" + await hashToken(user.id);
+    const userLimit = await incrementApiRateLimit(env, userKey, 240);
+    if (!userLimit.allowed) {
+      return json({
+        error: "La limite de requêtes API de ce compte est atteinte. Réessaie dans quelques instants."
+      }, 429, {
+        "Retry-After": String(userLimit.retryAfter),
+        "RateLimit-Limit": String(userLimit.limit),
+        "RateLimit-Remaining": "0",
+        "RateLimit-Reset": String(userLimit.retryAfter)
+      });
+    }
+  }
+
+  const currentHour = Math.floor(Date.now() / 3600000);
+  if (currentHour !== apiRateLimitLastCleanupHour) {
+    apiRateLimitLastCleanupHour = currentHour;
+    try {
+      await env.DB.prepare(
+        "DELETE FROM api_rate_limits WHERE window_started_at < ?"
+      ).bind(Math.floor(Date.now() / 1000) - 86400).run();
+    } catch (error) {
+      apiRateLimitLastCleanupHour = 0;
+      console.error("ERREUR NETTOYAGE LIMITES API:", error);
+    }
+  }
+
+  return null;
+}
 
 async function registrationProtectionKey(request) {
   const ip = request.headers.get("CF-Connecting-IP") || "unknown";
@@ -1208,6 +1311,22 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
+
+    // Limitation générale : les routes de connexion et d'inscription gardent
+    // leurs protections spécifiques déjà en place.
+    if (
+      path.startsWith("/api/") &&
+      !["/api/health", "/api/login", "/api/register"].includes(path)
+    ) {
+      try {
+        const rateLimitUser = await currentUser(request, env);
+        const rateLimitResponse = await enforceApiRateLimit(request, env, rateLimitUser);
+        if (rateLimitResponse) return rateLimitResponse;
+      } catch (error) {
+        console.error("ERREUR LIMITATION API:", error);
+        return json({ error: "Protection API temporairement indisponible." }, 503);
+      }
+    }
 
     // Protection CSRF : les mutations de l'API doivent provenir de la même origine.
     // Les appels du navigateur envoient Origin; Referer sert de repli si Origin est absent.
