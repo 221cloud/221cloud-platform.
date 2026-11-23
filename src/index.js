@@ -982,6 +982,54 @@ async function ensureApplicationFilesSchema(env) {
     "CREATE INDEX IF NOT EXISTS idx_application_file_versions_lookup ON application_file_versions(project_id, file_name, version_number DESC)"
   ).run();
 }
+
+function validApplicationFilePath(value) {
+  if (typeof value !== "string" || value.length < 1 || value.length > 240) return false;
+  if (value.startsWith("/") || value.endsWith("/") || value.includes("\\") || /[%?#]/.test(value)) return false;
+  const parts = value.split("/");
+  if (parts.length > 8 || parts.some(part =>
+    !part || part === "." || part === ".." || part.length > 64 ||
+    !/^[A-Za-z0-9][A-Za-z0-9 ._-]*$/.test(part) ||
+    part.endsWith(".") || part.endsWith(" ")
+  )) return false;
+  const name = parts[parts.length - 1];
+  if (/^\.env($|\.)/i.test(name) || /^\.dev\.vars$/i.test(name)) return false;
+  return /^(\.gitignore|[^.].*\.(html?|css|m?js|json|svg|txt|md|xml|webmanifest))$/i.test(name);
+}
+
+function applicationFileMimeType(fileName) {
+  const extension = String(fileName).split(".").pop().toLowerCase();
+  return ({
+    html: "text/html; charset=utf-8",
+    htm: "text/html; charset=utf-8",
+    css: "text/css; charset=utf-8",
+    js: "text/javascript; charset=utf-8",
+    mjs: "text/javascript; charset=utf-8",
+    json: "application/json; charset=utf-8",
+    svg: "image/svg+xml",
+    txt: "text/plain; charset=utf-8",
+    md: "text/markdown; charset=utf-8",
+    xml: "application/xml; charset=utf-8",
+    webmanifest: "application/manifest+json; charset=utf-8",
+    gitignore: "text/plain; charset=utf-8"
+  })[extension] || "text/plain; charset=utf-8";
+}
+
+async function ensureApplicationDirectoriesSchema(env) {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS application_directories (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      directory_path TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(project_id, directory_path)
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_application_directories_project ON application_directories(project_id, directory_path)"
+  ).run();
+}
+
 async function ensureApplicationPublicationSchema(env) {
   await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS application_publications (
@@ -1069,7 +1117,7 @@ export default {
           return Response.redirect(new URL(`/app/${slug}/`, url), 308);
         }
         const fileName = requestedFile || "index.html";
-        if (!["index.html", "style.css", "script.js"].includes(fileName)) {
+        if (!validApplicationFilePath(fileName)) {
           return new Response("Fichier introuvable.", { status: 404 });
         }
         const publication = await env.DB.prepare(`
@@ -3533,6 +3581,100 @@ hosting
       }
     }
 
+    // APPLICATIONS : CRÉER UN DOSSIER
+    const applicationFoldersMatch = path.match(/^\\/api\\/projects\\/([^/]+)\\/application-folders$/);
+    if (applicationFoldersMatch && request.method === "POST") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureApplicationFilesSchema(env);
+        await ensureApplicationDirectoriesSchema(env);
+        const projectId = decodeURIComponent(applicationFoldersMatch[1]);
+        const project = await env.DB.prepare(
+          "SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
+        ).bind(projectId, user.id).first();
+        if (!project) return json({ error: "Application introuvable." }, 404);
+        const body = await readLimitedJsonBody(request);
+        const directoryPath = String(body.directory_path || "");
+        if (!validApplicationFilePath(directoryPath + "/placeholder.txt")) {
+          return json({ error: "Nom ou chemin de dossier invalide." }, 400);
+        }
+        const existingFile = await env.DB.prepare(
+          "SELECT file_name FROM application_files WHERE project_id = ? AND file_name = ? LIMIT 1"
+        ).bind(projectId, directoryPath).first();
+        if (existingFile) return json({ error: "Un fichier porte déjà ce nom." }, 409);
+        const segments = directoryPath.split("/");
+        const paths = segments.map((_, index) => segments.slice(0, index + 1).join("/"));
+        const existing = await env.DB.prepare(
+          "SELECT directory_path FROM application_directories WHERE project_id = ?"
+        ).bind(projectId).all();
+        const known = new Set((existing.results || []).map(item => item.directory_path));
+        for (const directory of paths) {
+          if (known.has(directory)) continue;
+          await env.DB.prepare(
+            "INSERT OR IGNORE INTO application_directories (id, project_id, directory_path) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)"
+          ).bind(crypto.randomUUID(), projectId, directory, projectId, user.id).run();
+        }
+        return json({ message: "Dossier créé.", directory_path: directoryPath }, 201);
+      } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
+        console.error("ERREUR CRÉATION DOSSIER APPLICATION:", error);
+        return json({ error: "Impossible de créer ce dossier." }, 500);
+      }
+    }
+
+    // APPLICATIONS : CRÉER UN FICHIER
+    if (path.match(/^\\/api\\/projects\\/([^/]+)\\/application-files$/) && request.method === "POST") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureApplicationFilesSchema(env);
+        await ensureApplicationDirectoriesSchema(env);
+        const projectId = decodeURIComponent(path.match(/^\\/api\\/projects\\/([^/]+)\\/application-files$/)[1]);
+        const project = await env.DB.prepare(
+          "SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
+        ).bind(projectId, user.id).first();
+        if (!project) return json({ error: "Application introuvable." }, 404);
+        const body = await readLimitedJsonBody(request);
+        const fileName = String(body.file_name || "");
+        if (!validApplicationFilePath(fileName)) return json({ error: "Nom ou chemin de fichier non autorisé." }, 400);
+        const existing = await env.DB.prepare(
+          "SELECT file_name FROM application_files WHERE project_id = ? AND file_name = ? LIMIT 1"
+        ).bind(projectId, fileName).first();
+        if (existing) return json({ error: "Ce fichier existe déjà." }, 409);
+        const count = await env.DB.prepare(
+          "SELECT COUNT(*) AS total FROM application_files WHERE project_id = ?"
+        ).bind(projectId).first();
+        if (Number(count?.total || 0) >= 50) return json({ error: "Cette application est limitée à 50 fichiers pour le moment." }, 413);
+        const mimeType = applicationFileMimeType(fileName);
+        const versionId = crypto.randomUUID();
+        await env.DB.batch([
+          env.DB.prepare(
+            "INSERT INTO application_files (id, project_id, file_name, content, mime_type) SELECT ?, ?, ?, '', ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)"
+          ).bind(crypto.randomUUID(), projectId, fileName, mimeType, projectId, user.id),
+          env.DB.prepare(
+            "INSERT INTO application_file_versions (id, project_id, file_name, version_number, content, mime_type) SELECT ?, ?, ?, 1, '', ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)"
+          ).bind(versionId, projectId, fileName, mimeType, projectId, user.id)
+        ]);
+        const saved = await env.DB.prepare(
+          "SELECT file_name FROM application_files WHERE project_id = ? AND file_name = ? LIMIT 1"
+        ).bind(projectId, fileName).first();
+        if (!saved) return json({ error: "L'application a changé d'état. Le fichier n'a pas été créé." }, 409);
+        const parentParts = fileName.split("/").slice(0, -1);
+        for (let index = 0; index < parentParts.length; index++) {
+          const directory = parentParts.slice(0, index + 1).join("/");
+          await env.DB.prepare(
+            "INSERT OR IGNORE INTO application_directories (id, project_id, directory_path) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)"
+          ).bind(crypto.randomUUID(), projectId, directory, projectId, user.id).run();
+        }
+        return json({ message: "Fichier créé.", file_name: fileName, version_number: 1 }, 201);
+      } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
+        console.error("ERREUR CRÉATION FICHIER APPLICATION:", error);
+        return json({ error: "Impossible de créer ce fichier." }, 500);
+      }
+    }
+
     // APPLICATIONS : LISTER LES FICHIERS DU PROJET
     const applicationFilesMatch = path.match(/^\/api\/projects\/([^/]+)\/application-files$/);
     if (applicationFilesMatch && request.method === "GET") {
@@ -3628,7 +3770,11 @@ hosting
           "SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
         ).bind(projectId, user.id).first();
         if (!stillActive) return json({ error: "Cette application a été déplacée dans la corbeille." }, 404);
-        return json({ files: files.results || [] });
+        await ensureApplicationDirectoriesSchema(env);
+        const directories = await env.DB.prepare(
+          "SELECT directory_path, created_at FROM application_directories WHERE project_id = ? ORDER BY directory_path ASC"
+        ).bind(projectId).all();
+        return json({ files: files.results || [], directories: directories.results || [] });
       } catch (error) {
         if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         console.error("ERREUR FICHIERS APPLICATION:", error);
@@ -3663,7 +3809,7 @@ hosting
         if (Number(usage?.total || 0) + size > 1048576) {
           return json({ error: "L'espace de code de cette application est limité à 1 Mo pour le moment." }, 413);
         }
-        const mimeType = fileName === "index.html" ? "text/html; charset=utf-8" : fileName === "style.css" ? "text/css" : "text/javascript";
+        const mimeType = applicationFileMimeType(fileName);
         const nextFileVersionId = crypto.randomUUID();
         await env.DB.batch([
           env.DB.prepare(
