@@ -370,6 +370,23 @@ async function ensureProSchema(env) {
   await env.DB.prepare(
     "CREATE INDEX IF NOT EXISTS idx_pro_clients_owner_created ON pro_clients(user_id, created_at DESC)"
   ).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS pro_quotes (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      client_id TEXT NOT NULL,
+      description TEXT NOT NULL,
+      labour_amount INTEGER NOT NULL DEFAULT 0,
+      material_amount INTEGER NOT NULL DEFAULT 0,
+      total_amount INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'draft',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_pro_quotes_owner_created ON pro_quotes(user_id, created_at DESC)"
+  ).run();
 }
 
 async function ensureCustomerDatabaseStructureSchema(env) {
@@ -2378,6 +2395,77 @@ export default {
       }
     }
 
+
+    // 221CLOUD PRO : DEVIS EN BROUILLON, PRIVÉS PAR UTILISATEUR
+    if (path === "/api/pro/quotes") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureProSchema(env);
+
+        if (request.method === "GET") {
+          const result = await env.DB.prepare(
+            `SELECT q.id, q.client_id, c.name AS client_name, q.description,
+                    q.labour_amount, q.material_amount, q.total_amount,
+                    q.status, q.created_at, q.updated_at
+             FROM pro_quotes q
+             JOIN pro_clients c ON c.id = q.client_id AND c.user_id = q.user_id
+             WHERE q.user_id = ?
+             ORDER BY q.created_at DESC
+             LIMIT 200`
+          ).bind(user.id).all();
+          return json({ quotes: result.results || [] }, 200, { "Cache-Control": "no-store" });
+        }
+
+        if (request.method === "POST") {
+          const body = await readLimitedJsonBody(request);
+          const clientId = String(body.client_id || "").trim();
+          const description = String(body.description || "").trim();
+          const labourAmount = Number(body.labour_amount);
+          const materialAmount = Number(body.material_amount);
+
+          if (!clientId) return json({ error: "Choisissez un client." }, 400);
+          if (!description) return json({ error: "Décrivez le travail à réaliser." }, 400);
+          if (description.length > 2000) return json({ error: "La description est trop longue." }, 400);
+          if (
+            !Number.isSafeInteger(labourAmount) || labourAmount < 0 || labourAmount > 1000000000 ||
+            !Number.isSafeInteger(materialAmount) || materialAmount < 0 || materialAmount > 1000000000
+          ) {
+            return json({ error: "Vérifiez les montants en FCFA. Utilisez des nombres entiers positifs." }, 400);
+          }
+
+          const client = await env.DB.prepare(
+            "SELECT id FROM pro_clients WHERE id = ? AND user_id = ? LIMIT 1"
+          ).bind(clientId, user.id).first();
+          if (!client) return json({ error: "Ce client est introuvable dans votre liste." }, 404);
+
+          const totalAmount = labourAmount + materialAmount;
+          const id = crypto.randomUUID();
+          await env.DB.prepare(
+            `INSERT INTO pro_quotes
+             (id, user_id, client_id, description, labour_amount, material_amount, total_amount, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'draft')`
+          ).bind(id, user.id, clientId, description, labourAmount, materialAmount, totalAmount).run();
+
+          const quote = await env.DB.prepare(
+            `SELECT q.id, q.client_id, c.name AS client_name, q.description,
+                    q.labour_amount, q.material_amount, q.total_amount,
+                    q.status, q.created_at, q.updated_at
+             FROM pro_quotes q
+             JOIN pro_clients c ON c.id = q.client_id AND c.user_id = q.user_id
+             WHERE q.id = ? AND q.user_id = ?
+             LIMIT 1`
+          ).bind(id, user.id).first();
+          return json({ message: "Devis enregistré en brouillon.", quote }, 201);
+        }
+
+        return json({ error: "Méthode non autorisée." }, 405);
+      } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête est trop volumineuse." }, 413);
+        console.error("ERREUR 221CLOUD PRO DEVIS:", error);
+        return json({ error: "Impossible de traiter les devis pour le moment." }, 500);
+      }
+    }
 
     // 221CLOUD PRO : GESTION PRIVÉE DES CLIENTS
     if (path === "/api/pro/clients") {
