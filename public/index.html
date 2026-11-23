@@ -6672,7 +6672,7 @@ async function createApplicationFolder() {
 }
 
 async function saveApplicationFiles() {
-  if (!applicationEditorState || applicationEditorState.saving) return;
+  if (!applicationEditorState || applicationEditorState.saving || applicationEditorState.restoring) return;
   applicationEditorState.saving = true;
   const editor = document.getElementById("applicationCodeEditor");
   const button = document.getElementById("saveApplicationFilesButton");
@@ -6766,24 +6766,44 @@ async function loadApplicationFileVersions() {
 }
 
 async function restoreApplicationFileVersion(versionId, versionNumber) {
-  if (!applicationEditorState) return;
-  const fileName = applicationEditorState.activeFile;
+  if (!applicationEditorState || applicationEditorState.saving || applicationEditorState.restoring) return;
+  const editorState = applicationEditorState;
+  const fileName = editorState.activeFile;
   if (!confirm("Restaurer la version " + versionNumber + " de " + fileName + " ? Le contenu actuel de ce fichier dans l'éditeur sera remplacé. La version actuelle enregistrée sera conservée dans l'historique.")) return;
+
+  editorState.restoring = true;
   const status = document.getElementById("applicationSaveStatus");
+  const editor = document.getElementById("applicationCodeEditor");
+  const saveButton = document.getElementById("saveApplicationFilesButton");
+  if (editor) editor.disabled = true;
+  if (saveButton) saveButton.disabled = true;
+  document.querySelectorAll("#applicationFileTabs button, #applicationVersionHistory button").forEach(button => { button.disabled = true; });
   if (status) status.textContent = "Restauration en cours...";
+
   try {
-    const data = await api("/projects/" + encodeURIComponent(applicationEditorState.projectId) +
+    const data = await api("/projects/" + encodeURIComponent(editorState.projectId) +
       "/application-files/" + encodeURIComponent(fileName) + "/restore", {
         method: "POST",
         body: JSON.stringify({ version_id: versionId })
       });
-    applicationEditorState.files[fileName] = data.file.content || "";
-    applicationEditorState.savedFiles[fileName] = data.file.content || "";
+    if (applicationEditorState !== editorState) return;
+    editorState.files[fileName] = data.file.content || "";
+    editorState.savedFiles[fileName] = data.file.content || "";
     renderApplicationEditorFile();
     refreshApplicationPreview();
-    if (status) status.textContent = "Version " + versionNumber + " restaurée. Une nouvelle version a été créée.";
+    await loadApplicationFileVersions();
+    if (status) status.textContent = "Version " + versionNumber + " restaurée. L'historique a été actualisé et une nouvelle version a été créée.";
   } catch (error) {
     if (status) status.textContent = error.message;
+  } finally {
+    editorState.restoring = false;
+    if (applicationEditorState === editorState) {
+      const currentEditor = document.getElementById("applicationCodeEditor");
+      const currentSaveButton = document.getElementById("saveApplicationFilesButton");
+      if (currentEditor) currentEditor.disabled = false;
+      if (currentSaveButton) currentSaveButton.disabled = false;
+      document.querySelectorAll("#applicationFileTabs button, #applicationVersionHistory button").forEach(button => { button.disabled = false; });
+    }
   }
 }
 
