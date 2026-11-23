@@ -2485,12 +2485,21 @@ function renderProjectAutomationTasks() {
     const payload = task.payload && typeof task.payload === "object"
       ? JSON.stringify(task.payload, null, 2)
       : "{}";
+    const result = task.result && typeof task.result === "object"
+      ? JSON.stringify(task.result, null, 2)
+      : "";
+    const resultSummary = task.result && typeof task.result.summary === "string"
+      ? task.result.summary
+      : "";
     return '<div class="item-card">' +
       '<h4>' + escapeHTML(task.task_type || "Tâche") + '</h4>' +
       '<div class="muted">Prévue le : ' + escapeHTML(dateLabel) + '</div>' +
       '<p><span class="status">' + escapeHTML(statusLabels[task.status] || task.status || "Inconnue") + '</span></p>' +
       '<div class="muted">Tentatives : ' + Number(task.attempts || 0) + ' / ' + Number(task.max_attempts || 0) + '</div>' +
       (task.last_error ? '<p class="error-text">' + escapeHTML(task.last_error) + '</p>' : '') +
+      (result ? '<div class="notice" style="margin-top:10px;"><strong>Résultat de la vérification</strong>' +
+        (resultSummary ? '<p>' + escapeHTML(resultSummary) + '</p>' : '') +
+        '<details style="margin-top:8px;"><summary>Afficher le résultat détaillé</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere;">' + escapeHTML(result) + '</pre></details></div>' : '') +
       '<details style="margin-top:8px;"><summary>Afficher les paramètres</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere;">' + escapeHTML(payload) + '</pre></details>' +
       (task.status === "pending"
         ? '<div class="item-actions"><button class="danger" type="button" onclick="cancelProjectAutomationTask(' + escapeJSAttribute(task.id) + ')">Annuler la tâche</button></div>'
