@@ -2421,7 +2421,8 @@ export default {
 
         if (request.method === "GET") {
           const result = await env.DB.prepare(
-            `SELECT q.id, q.client_id, c.name AS client_name, q.description,
+            `SELECT q.id, q.client_id, c.name AS client_name,
+                    c.phone AS client_phone, c.address AS client_address, q.description,
                     q.labour_amount, q.material_amount, q.total_amount,
                     q.status, q.created_at, q.updated_at
              FROM pro_quotes q
