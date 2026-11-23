@@ -1781,11 +1781,20 @@ export default {
         );
         const selectSql = [quoteIdentifier("row_id"), quoteIdentifier("created_at"), ...selectColumns].join(", ");
         const physicalTable = quoteIdentifier(table.physical_name);
+
+        // Si la table possède une colonne de statut, seuls les contenus publiés
+        // sont exposés par l'API publique. Les brouillons restent privés.
+        const statusColumn = columns.find(column =>
+          ["statut", "status"].includes(String(column.name || "").trim().toLowerCase())
+        );
+        const publicFilter = statusColumn
+          ? " WHERE LOWER(TRIM(COALESCE(" + quoteIdentifier(statusColumn.physical_name) + ", ''))) IN ('publié', 'publie', 'published')"
+          : "";
         const count = await env.DB.prepare(
-          "SELECT COUNT(*) AS total FROM " + physicalTable
+          "SELECT COUNT(*) AS total FROM " + physicalTable + publicFilter
         ).first();
         const result = await env.DB.prepare(
-          "SELECT " + selectSql + " FROM " + physicalTable +
+          "SELECT " + selectSql + " FROM " + physicalTable + publicFilter +
           " ORDER BY created_at DESC, row_id DESC LIMIT ? OFFSET ?"
         ).bind(limit, offset).all();
 
