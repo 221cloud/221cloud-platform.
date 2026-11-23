@@ -640,7 +640,7 @@ function hasUnsavedApplicationChanges() {
   if (!applicationEditorState) return false;
   const editor = document.getElementById("applicationCodeEditor");
   if (editor) applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
-  return ["index.html", "style.css", "script.js"].some(fileName =>
+  return Object.keys(applicationEditorState.files).some(fileName =>
     applicationEditorState.files[fileName] !== applicationEditorState.savedFiles[fileName]
   );
 }
@@ -6076,9 +6076,11 @@ async function openApplicationEditor(projectId) {
   main.innerHTML =
     "<div class=\"section-head\"><div><h1 class=\"page-title\">" + escapeHTML(application.name) + "</h1><p class=\"page-subtitle\">Éditeur de code · Application web</p></div>" +
     "<button class=\"secondary\" type=\"button\" onclick=\"renderApplicationsPage()\">← Mes applications</button></div>" +
-    "<div class=\"card\"><div class=\"section-head\"><h2>Fichiers du projet</h2><span class=\"muted\">HTML · CSS · JavaScript</span></div>" +
-    "<div id=\"applicationFileTabs\" class=\"item-actions\"></div>" +
-    "<label for=\"applicationCodeEditor\">Code du fichier sélectionné</label>" +
+    "<div class=\"card\"><div class=\"section-head\"><h2>Explorateur du projet</h2><div class=\"item-actions\"><button class=\"secondary\" type=\"button\" onclick=\"createApplicationFile()\">＋ Nouveau fichier</button><button class=\"secondary\" type=\"button\" onclick=\"createApplicationFolder()\">＋ Nouveau dossier</button></div></div>" +
+    "<p class=\"muted\">Organisez vos fichiers dans des dossiers. Les fichiers existants sont conservés.</p>" +
+    "<div id=\"applicationFileTree\" class=\"application-file-tree\"><p class=\"muted\">Chargement de l'arborescence...</p></div></div>" +
+    "<div class=\"card\"><div class=\"section-head\"><h2 id=\"applicationActiveFileTitle\">Éditeur</h2><span class=\"muted\">Code du fichier sélectionné</span></div>" +
+    "<label for=\"applicationCodeEditor\">Contenu du fichier</label>" +
     "<textarea id=\"applicationCodeEditor\" spellcheck=\"false\" autocapitalize=\"off\" autocomplete=\"off\" style=\"width:100%;min-height:320px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.5;white-space:pre;overflow:auto\" placeholder=\"Chargement du code...\"></textarea>" +
     "<div class=\"item-actions\" style=\"margin-top:12px\"><button id=\"saveApplicationFilesButton\" type=\"button\" onclick=\"saveApplicationFiles()\">Enregistrer tous les fichiers</button>" +
     "<button class=\"secondary\" type=\"button\" onclick=\"refreshApplicationPreview()\">Actualiser l'aperçu</button><span id=\"applicationSaveStatus\" class=\"muted\" aria-live=\"polite\"></span></div>" +
@@ -6092,7 +6094,7 @@ async function openApplicationEditor(projectId) {
     "<button id=\"publishApplicationButton\" type=\"button\" onclick=\"publishApplication()\">Publier l'application</button></div>" +
     "<div class=\"section-head\"><h2>Aperçu de l'application</h2><span class=\"muted\">Exécution isolée</span></div>" +
     "<div class=\"card\" style=\"padding:8px\"><iframe id=\"applicationPreviewFrame\" title=\"Aperçu de l'application\" sandbox=\"allow-scripts\" style=\"display:block;width:100%;min-height:420px;border:1px solid var(--border-color,#d8deea);border-radius:10px;background:white\"></iframe></div>" +
-    "<div class=\"notice\">Limites : trois fichiers (index.html, style.css, script.js), 256 Ko par fichier et 1 Mo au total. L'historique conserve les 30 dernières versions de chaque fichier.</div>";
+    "<div class=\"notice\">Limites actuelles : 50 fichiers maximum, 256 Ko par fichier et 1 Mo de code au total. L'historique conserve les 30 dernières versions de chaque fichier.</div>";
 
   const status = document.getElementById("applicationSaveStatus");
   status.textContent = "Chargement des fichiers...";
@@ -6100,7 +6102,14 @@ async function openApplicationEditor(projectId) {
     const data = await api("/projects/" + encodeURIComponent(projectId) + "/application-files");
     const files = {};
     (data.files || []).forEach(file => { files[file.file_name] = file.content || ""; });
-    applicationEditorState = { projectId: projectId, files: files, savedFiles: { ...files }, activeFile: "index.html" };
+    const directories = Array.isArray(data.directories) ? data.directories.map(item => item.directory_path) : [];
+    applicationEditorState = {
+      projectId: projectId,
+      files: files,
+      savedFiles: { ...files },
+      directories: directories,
+      activeFile: files["index.html"] !== undefined ? "index.html" : Object.keys(files).sort()[0] || ""
+    };
     renderApplicationEditorFile();
     refreshApplicationPreview();
     status.textContent = "Fichiers chargés.";
@@ -6143,7 +6152,7 @@ async function publishApplication() {
   if (!applicationEditorState) return;
   const editor = document.getElementById("applicationCodeEditor");
   if (editor) applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
-  const changedFiles = ["index.html", "style.css", "script.js"].filter(fileName =>
+  const changedFiles = Object.keys(applicationEditorState.files).filter(fileName =>
     applicationEditorState.files[fileName] !== applicationEditorState.savedFiles[fileName]
   );
   if (changedFiles.length) {
@@ -6179,27 +6188,133 @@ async function publishApplication() {
   }
 }
 
+function renderApplicationFileTree() {
+  if (!applicationEditorState) return;
+  const container = document.getElementById("applicationFileTree");
+  if (!container) return;
+
+  const root = { folders: {}, files: [] };
+  const ensureFolder = (parent, name) => {
+    if (!parent.folders[name]) parent.folders[name] = { folders: {}, files: [] };
+    return parent.folders[name];
+  };
+
+  (applicationEditorState.directories || []).forEach(directoryPath => {
+    const parts = String(directoryPath).split("/").filter(Boolean);
+    let node = root;
+    parts.forEach(part => { node = ensureFolder(node, part); });
+  });
+
+  Object.keys(applicationEditorState.files || {}).sort().forEach(filePath => {
+    const parts = filePath.split("/").filter(Boolean);
+    if (!parts.length) return;
+    let node = root;
+    parts.slice(0, -1).forEach(part => { node = ensureFolder(node, part); });
+    node.files.push({ name: parts[parts.length - 1], path: filePath });
+  });
+
+  const renderNode = (node, prefix = "") => {
+    const folders = Object.keys(node.folders).sort().map(name => {
+      const path = prefix ? prefix + "/" + name : name;
+      return "<details class=\"application-tree-folder\" open><summary>📁 " + escapeHTML(name) + "</summary>" +
+        "<div class=\"application-tree-children\">" + renderNode(node.folders[name], path) + "</div></details>";
+    }).join("");
+    const files = node.files.map(file => {
+      const active = applicationEditorState.activeFile === file.path;
+      const modified = applicationEditorState.files[file.path] !== applicationEditorState.savedFiles[file.path];
+      return "<button type=\"button\" class=\"application-tree-file " + (active ? "active" : "") +
+        "\" onclick=\"selectApplicationEditorFile(" + escapeJSAttribute(file.path) + ")\">" +
+        "📄 " + escapeHTML(file.name) + (modified ? " <span aria-label=\"Modifications non enregistrées\">●</span>" : "") +
+        "</button>";
+    }).join("");
+    return folders + files;
+  };
+
+  const treeHTML = renderNode(root);
+  container.innerHTML = treeHTML || "<p class=\"muted\">Aucun fichier. Créez votre premier fichier avec « Nouveau fichier ».</p>";
+}
+
 function renderApplicationEditorFile() {
   if (!applicationEditorState) return;
-  const tabs = document.getElementById("applicationFileTabs");
   const editor = document.getElementById("applicationCodeEditor");
-  if (!tabs || !editor) return;
-  const fileNames = ["index.html", "style.css", "script.js"];
-  tabs.innerHTML = fileNames.map(name =>
-    "<button type=\"button\" class=\"" + (applicationEditorState.activeFile === name ? "primary-btn" : "secondary") +
-    "\" onclick=\"selectApplicationEditorFile(" + escapeJSAttribute(name) + ")\">" + name + "</button>"
-  ).join("");
-  editor.value = applicationEditorState.files[applicationEditorState.activeFile] || "";
+  if (!editor) return;
+  renderApplicationFileTree();
+  const title = document.getElementById("applicationActiveFileTitle");
+  if (title) title.textContent = applicationEditorState.activeFile || "Aucun fichier sélectionné";
+  editor.value = applicationEditorState.activeFile
+    ? (applicationEditorState.files[applicationEditorState.activeFile] || "")
+    : "";
+  editor.disabled = !applicationEditorState.activeFile;
   loadApplicationFileVersions();
 }
 
 function selectApplicationEditorFile(fileName) {
   if (!applicationEditorState || applicationEditorState.saving ||
-      !["index.html", "style.css", "script.js"].includes(fileName)) return;
+      !Object.prototype.hasOwnProperty.call(applicationEditorState.files, fileName)) return;
   const editor = document.getElementById("applicationCodeEditor");
-  if (editor) applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
+  if (editor && applicationEditorState.activeFile) {
+    applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
+  }
   applicationEditorState.activeFile = fileName;
   renderApplicationEditorFile();
+}
+
+async function refreshApplicationFileList(selectFile = "") {
+  if (!applicationEditorState) return;
+  const data = await api("/projects/" + encodeURIComponent(applicationEditorState.projectId) + "/application-files");
+  const files = {};
+  (data.files || []).forEach(file => { files[file.file_name] = file.content || ""; });
+  const previousFiles = applicationEditorState.files;
+  const previousSaved = applicationEditorState.savedFiles;
+  Object.keys(previousFiles).forEach(name => {
+    if (previousFiles[name] !== previousSaved[name] && files[name] !== undefined) {
+      files[name] = previousFiles[name];
+    }
+  });
+  applicationEditorState.files = files;
+  applicationEditorState.savedFiles = { ...(Object.fromEntries((data.files || []).map(file => [file.file_name, file.content || ""]))) };
+  applicationEditorState.directories = Array.isArray(data.directories) ? data.directories.map(item => item.directory_path) : [];
+  if (selectFile && files[selectFile] !== undefined) applicationEditorState.activeFile = selectFile;
+  else if (!files[applicationEditorState.activeFile]) applicationEditorState.activeFile = Object.keys(files).sort()[0] || "";
+  renderApplicationEditorFile();
+}
+
+async function createApplicationFile() {
+  if (!applicationEditorState || applicationEditorState.saving) return;
+  const filePath = prompt("Nom du fichier (ex. pages/contact.html ou assets/logo.svg) :");
+  if (filePath === null) return;
+  const cleanPath = filePath.trim();
+  if (!cleanPath) return;
+  try {
+    await api("/projects/" + encodeURIComponent(applicationEditorState.projectId) + "/application-files", {
+      method: "POST",
+      body: JSON.stringify({ file_name: cleanPath })
+    });
+    await refreshApplicationFileList(cleanPath);
+    const status = document.getElementById("applicationSaveStatus");
+    if (status) status.textContent = "Fichier créé : " + cleanPath;
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function createApplicationFolder() {
+  if (!applicationEditorState || applicationEditorState.saving) return;
+  const folderPath = prompt("Nom du dossier (ex. images ou components/ui) :");
+  if (folderPath === null) return;
+  const cleanPath = folderPath.trim().replace(/\/$/, "");
+  if (!cleanPath) return;
+  try {
+    await api("/projects/" + encodeURIComponent(applicationEditorState.projectId) + "/application-folders", {
+      method: "POST",
+      body: JSON.stringify({ directory_path: cleanPath })
+    });
+    await refreshApplicationFileList();
+    const status = document.getElementById("applicationSaveStatus");
+    if (status) status.textContent = "Dossier créé : " + cleanPath;
+  } catch (error) {
+    alert(error.message);
+  }
 }
 
 async function saveApplicationFiles() {
