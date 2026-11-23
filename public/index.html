@@ -6540,6 +6540,70 @@ function toggleProPanel(type) {
   }
 }
 
+async function renderProClientEditPage(clientId) {
+  const main = document.getElementById("mainContent");
+  if (!main) return;
+  main.innerHTML = `
+    <div style="margin-bottom:18px"><button type="button" class="secondary" onclick="openProClientDetail('${escapeHTML(clientId)}')">← Retour à la fiche</button></div>
+    <div class="card"><div class="empty">Chargement du client…</div></div>
+  `;
+  try {
+    const data = await api("/pro/clients");
+    const clients = Array.isArray(data.clients) ? data.clients : [];
+    const client = clients.find(item => item.id === clientId);
+    if (!client) throw new Error("Client introuvable.");
+    main.innerHTML = `
+      <div style="margin-bottom:18px"><button type="button" class="secondary" onclick="openProClientDetail('${escapeHTML(client.id)}')">← Retour à la fiche</button></div>
+      <div class="card">
+        <div class="section-head"><h2>✏️ Modifier le client</h2></div>
+        <p class="muted">Corrigez les informations puis enregistrez.</p>
+        <form class="form-card" onsubmit="saveProClientChanges(event, '${escapeHTML(client.id)}')">
+          <label for="proEditClientName">Nom du client *</label>
+          <input id="proEditClientName" maxlength="120" required value="${escapeHTML(client.name || "")}">
+          <label for="proEditClientPhone">Téléphone</label>
+          <input id="proEditClientPhone" maxlength="40" type="tel" value="${escapeHTML(client.phone || "")}">
+          <label for="proEditClientAddress">Adresse ou quartier</label>
+          <input id="proEditClientAddress" maxlength="240" value="${escapeHTML(client.address || "")}">
+          <label for="proEditClientNotes">Petite note</label>
+          <textarea id="proEditClientNotes" rows="3" maxlength="1000">${escapeHTML(client.notes || "")}</textarea>
+          <button id="proEditClientSave" type="submit">Enregistrer les modifications</button>
+          <div id="proEditClientMessage" class="notice" role="status" aria-live="polite"></div>
+        </form>
+      </div>
+    `;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } catch (error) {
+    main.innerHTML = `<div style="margin-bottom:18px"><button type="button" class="secondary" onclick="renderProClientsPage()">← Clients</button></div><div class="card"><div class="notice error-text">${escapeHTML(error.message || "Impossible de charger le client.")}</div></div>`;
+  }
+}
+
+async function saveProClientChanges(event, clientId) {
+  event.preventDefault();
+  const button = document.getElementById("proEditClientSave");
+  const message = document.getElementById("proEditClientMessage");
+  if (!button || !message) return;
+  const body = {
+    name: document.getElementById("proEditClientName").value,
+    phone: document.getElementById("proEditClientPhone").value,
+    address: document.getElementById("proEditClientAddress").value,
+    notes: document.getElementById("proEditClientNotes").value
+  };
+  button.disabled = true;
+  message.textContent = "Enregistrement…";
+  try {
+    await api("/pro/clients/" + encodeURIComponent(clientId), {
+      method: "PUT",
+      body: JSON.stringify(body)
+    });
+    message.textContent = "Modifications enregistrées.";
+    await openProClientDetail(clientId);
+  } catch (error) {
+    message.textContent = error.message || "Impossible d'enregistrer les modifications.";
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function openProClientDetail(clientId) {
   const main = document.getElementById("mainContent");
   if (!main) return;
@@ -6588,6 +6652,7 @@ async function openProClientDetail(clientId) {
           <div style="margin-top:8px"><strong>Note :</strong> ${client.notes ? escapeHTML(client.notes) : '<span class="muted">Aucune note</span>'}</div>
           <div class="muted" style="margin-top:8px;font-size:12px">Client ajouté le : ${escapeHTML(formatDate(client.created_at))}</div>
         </div>
+        <div class="item-actions"><button type="button" class="secondary" onclick="renderProClientEditPage('${escapeHTML(client.id)}')">✏️ Modifier les informations</button></div>
       </div>
       <div class="section-head"><h2>📄 Ses devis (${clientQuotes.length})</h2></div>
       ${quoteCards}
