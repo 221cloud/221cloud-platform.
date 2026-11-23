@@ -395,6 +395,40 @@ async function ensureCustomerDatabaseStructureSchema(env) {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_database_columns_unique_name
     ON customer_database_columns(table_id, user_id, name COLLATE NOCASE)
   `).run();
+
+  // Répare une éventuelle ancienne collision de positions avant d'imposer
+  // leur unicité. Le batch rend la migration atomique dans D1.
+  const positionIndex = await env.DB.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'index' AND name = ? LIMIT 1"
+  ).bind("idx_customer_database_columns_unique_position").first();
+  if (!positionIndex) {
+    await env.DB.batch([
+      env.DB.prepare(`
+        WITH ranked AS (
+          SELECT id,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY table_id, user_id
+                   ORDER BY position ASC, created_at ASC, id ASC
+                 ) - 1 AS next_position
+          FROM customer_database_columns
+        )
+        UPDATE customer_database_columns
+        SET position = (
+          SELECT next_position FROM ranked
+          WHERE ranked.id = customer_database_columns.id
+        )
+        WHERE id IN (
+          SELECT id FROM ranked
+          WHERE ranked.next_position != customer_database_columns.position
+        )
+      `),
+      env.DB.prepare(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_database_columns_unique_position
+        ON customer_database_columns(table_id, user_id, position)
+      `)
+    ]);
+  }
+
   // La limite est imposée dans SQLite pour résister aux ajouts simultanés.
   await env.DB.prepare(`
     CREATE TRIGGER IF NOT EXISTS trg_customer_database_columns_limit
@@ -5899,7 +5933,10 @@ hosting
 
         const columnId = crypto.randomUUID();
         const physicalColumn = "col_" + columnId.replace(/-/g, "");
-        const position = Number(columnCount?.total || 0);
+        const nextPosition = await env.DB.prepare(
+          "SELECT COALESCE(MAX(position), -1) + 1 AS next_position FROM customer_database_columns WHERE table_id = ? AND user_id = ?"
+        ).bind(tableId, user.id).first();
+        const position = Number(nextPosition?.next_position || 0);
 
         await env.DB.batch([
           env.DB.prepare(
@@ -5925,6 +5962,9 @@ hosting
         if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
         if (String(error?.message || "").includes("CUSTOMER_DATABASE_COLUMN_LIMIT")) {
           return json({ error: "Une table peut contenir au maximum 50 colonnes personnalisées." }, 400);
+        }
+        if (String(error?.message || "").includes("customer_database_columns.position")) {
+          return json({ error: "Une autre colonne vient d'être ajoutée simultanément. Actualisez la liste et réessayez." }, 409);
         }
         if (String(error?.message || "").includes("UNIQUE constraint failed")) {
           return json({ error: "Un élément portant déjà ce nom existe dans cette base ou cette table." }, 409);
