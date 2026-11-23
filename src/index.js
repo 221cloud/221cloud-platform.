@@ -4420,14 +4420,14 @@ hosting
             "SELECT id FROM application_trash_items WHERE id = ? AND project_id = ? LIMIT 1"
           ).bind(trashId, projectId).first(),
           restoredFiles.length
-            ? env.DB.prepare("SELECT file_name FROM application_files WHERE project_id = ? AND deleted_at IS NULL AND file_name IN (" + restoredFiles.map(() => "?").join(",") + ")").bind(projectId, ...restoredFiles).all()
-            : Promise.resolve({ results: [] }),
+            ? env.DB.prepare("SELECT COUNT(*) AS total FROM application_files WHERE project_id = ? AND deleted_at IS NULL AND file_name IN (SELECT value FROM json_each(?))").bind(projectId, JSON.stringify(restoredFiles)).first()
+            : Promise.resolve({ total: 0 }),
           restoredDirectories.length
-            ? env.DB.prepare("SELECT directory_path FROM application_directories WHERE project_id = ? AND deleted_at IS NULL AND directory_path IN (" + restoredDirectories.map(() => "?").join(",") + ")").bind(projectId, ...restoredDirectories).all()
-            : Promise.resolve({ results: [] }),
+            ? env.DB.prepare("SELECT COUNT(*) AS total FROM application_directories WHERE project_id = ? AND deleted_at IS NULL AND directory_path IN (SELECT value FROM json_each(?))").bind(projectId, JSON.stringify(restoredDirectories)).first()
+            : Promise.resolve({ total: 0 }),
           restoredVersionIds.length
-            ? env.DB.prepare("SELECT id FROM application_file_versions WHERE project_id = ? AND deleted_at IS NULL AND id IN (" + restoredVersionIds.map(() => "?").join(",") + ")").bind(projectId, ...restoredVersionIds).all()
-            : Promise.resolve({ results: [] })
+            ? env.DB.prepare("SELECT COUNT(*) AS total FROM application_file_versions WHERE project_id = ? AND deleted_at IS NULL AND id IN (SELECT value FROM json_each(?))").bind(projectId, JSON.stringify(restoredVersionIds)).first()
+            : Promise.resolve({ total: 0 })
         ]);
 
         const filesRestored = (activeFilesAfter.results || []).length === restoredFiles.length;
