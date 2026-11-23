@@ -5705,9 +5705,9 @@ hosting
               " (row_id, " + names.join(", ") + ") VALUES (?, " + placeholders.join(", ") + ")"
             ).bind(newRowId, ...entries.map(([, value]) => value));
           });
-          for (let start = 0; start < insertStatements.length; start += 50) {
-            await env.DB.batch(insertStatements.slice(start, start + 50));
-          }
+          // Un seul batch D1 garantit l'atomicité de tout l'import :
+          // si une insertion échoue, toutes les lignes de cet import sont annulées.
+          await env.DB.batch(insertStatements);
           return json({
             message: "Import CSV terminé.",
             imported: preparedRows.length,
