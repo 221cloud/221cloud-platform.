@@ -1709,14 +1709,24 @@ async function runAutomationScheduler(env, scheduledTime) {
 
 const OAUTH_ALLOWED_SCOPES = ["projects:read", "applications:read", "files:read", "offline_access"];
 
+let oauthSchemaPromise = null;
+
 async function ensureOAuthSchema(env) {
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS oauth_clients (client_id TEXT PRIMARY KEY, client_name TEXT NOT NULL, redirect_uris TEXT NOT NULL, grant_types TEXT NOT NULL, response_types TEXT NOT NULL, token_endpoint_auth_method TEXT NOT NULL DEFAULT 'none', created_at TEXT DEFAULT CURRENT_TIMESTAMP)").run();
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS oauth_authorization_codes (code_hash TEXT PRIMARY KEY, client_id TEXT NOT NULL, user_id TEXT NOT NULL, redirect_uri TEXT NOT NULL, code_challenge TEXT NOT NULL, scope TEXT NOT NULL, resource TEXT NOT NULL, expires_at TEXT NOT NULL, used_at TEXT)").run();
-  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_oauth_codes_expiry ON oauth_authorization_codes(expires_at)").run();
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS oauth_access_tokens (token_hash TEXT PRIMARY KEY, family_id TEXT NOT NULL, client_id TEXT NOT NULL, user_id TEXT NOT NULL, scope TEXT NOT NULL, resource TEXT NOT NULL, expires_at TEXT NOT NULL, revoked_at TEXT, last_used_at TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)").run();
-  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_oauth_access_family ON oauth_access_tokens(family_id)").run();
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS oauth_refresh_tokens (token_hash TEXT PRIMARY KEY, family_id TEXT NOT NULL, client_id TEXT NOT NULL, user_id TEXT NOT NULL, scope TEXT NOT NULL, resource TEXT NOT NULL, expires_at TEXT NOT NULL, revoked_at TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)").run();
-  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_oauth_refresh_family ON oauth_refresh_tokens(family_id)").run();
+  if (!oauthSchemaPromise) {
+    oauthSchemaPromise = (async () => {
+      await env.DB.prepare("CREATE TABLE IF NOT EXISTS oauth_clients (client_id TEXT PRIMARY KEY, client_name TEXT NOT NULL, redirect_uris TEXT NOT NULL, grant_types TEXT NOT NULL, response_types TEXT NOT NULL, token_endpoint_auth_method TEXT NOT NULL DEFAULT 'none', created_at TEXT DEFAULT CURRENT_TIMESTAMP)").run();
+      await env.DB.prepare("CREATE TABLE IF NOT EXISTS oauth_authorization_codes (code_hash TEXT PRIMARY KEY, client_id TEXT NOT NULL, user_id TEXT NOT NULL, redirect_uri TEXT NOT NULL, code_challenge TEXT NOT NULL, scope TEXT NOT NULL, resource TEXT NOT NULL, expires_at TEXT NOT NULL, used_at TEXT)").run();
+      await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_oauth_codes_expiry ON oauth_authorization_codes(expires_at)").run();
+      await env.DB.prepare("CREATE TABLE IF NOT EXISTS oauth_access_tokens (token_hash TEXT PRIMARY KEY, family_id TEXT NOT NULL, client_id TEXT NOT NULL, user_id TEXT NOT NULL, scope TEXT NOT NULL, resource TEXT NOT NULL, expires_at TEXT NOT NULL, revoked_at TEXT, last_used_at TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)").run();
+      await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_oauth_access_family ON oauth_access_tokens(family_id)").run();
+      await env.DB.prepare("CREATE TABLE IF NOT EXISTS oauth_refresh_tokens (token_hash TEXT PRIMARY KEY, family_id TEXT NOT NULL, client_id TEXT NOT NULL, user_id TEXT NOT NULL, scope TEXT NOT NULL, resource TEXT NOT NULL, expires_at TEXT NOT NULL, revoked_at TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)").run();
+      await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_oauth_refresh_family ON oauth_refresh_tokens(family_id)").run();
+    })().catch(error => {
+      oauthSchemaPromise = null;
+      throw error;
+    });
+  }
+  await oauthSchemaPromise;
 }
 
 function oauthHtmlEscape(value) {
