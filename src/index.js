@@ -4079,15 +4079,56 @@ hosting
         if (!project) return json({ error: "Application introuvable." }, 404);
         const item = await env.DB.prepare("SELECT id, item_type, original_path FROM application_trash_items WHERE id = ? AND project_id = ? LIMIT 1").bind(trashId, projectId).first();
         if (!item) return json({ error: "Élément introuvable dans la corbeille." }, 404);
-        const [activeFile, activeDirectory] = await Promise.all([
-          env.DB.prepare("SELECT id FROM application_files WHERE project_id = ? AND file_name = ? AND deleted_at IS NULL LIMIT 1").bind(projectId, item.original_path).first(),
-          env.DB.prepare("SELECT id FROM application_directories WHERE project_id = ? AND directory_path = ? AND deleted_at IS NULL LIMIT 1").bind(projectId, item.original_path).first()
+        const [restoredFilesResult, restoredDirectoriesResult, activeFilesResult, activeDirectoriesResult] = await Promise.all([
+          env.DB.prepare("SELECT file_name FROM application_files WHERE project_id = ? AND trash_id = ? AND deleted_at IS NOT NULL").bind(projectId, trashId).all(),
+          env.DB.prepare("SELECT directory_path FROM application_directories WHERE project_id = ? AND trash_id = ? AND deleted_at IS NOT NULL").bind(projectId, trashId).all(),
+          env.DB.prepare("SELECT file_name FROM application_files WHERE project_id = ? AND deleted_at IS NULL").bind(projectId).all(),
+          env.DB.prepare("SELECT directory_path FROM application_directories WHERE project_id = ? AND deleted_at IS NULL").bind(projectId).all()
         ]);
-        if (activeFile || activeDirectory) return json({ error: "Un fichier ou dossier utilise déjà ce chemin. Renommez-le avant de restaurer." }, 409);
-        const parentPath = item.original_path.includes("/") ? item.original_path.split("/").slice(0, -1).join("/") : "";
-        if (parentPath) {
-          const parentConflict = await env.DB.prepare("SELECT id FROM application_files WHERE project_id = ? AND file_name = ? AND deleted_at IS NULL LIMIT 1").bind(projectId, parentPath).first();
-          if (parentConflict) return json({ error: "Un fichier bloque le dossier parent. Renommez-le avant de restaurer." }, 409);
+        const restoredFiles = (restoredFilesResult.results || []).map(row => row.file_name);
+        const restoredDirectories = (restoredDirectoriesResult.results || []).map(row => row.directory_path);
+        const activeFiles = (activeFilesResult.results || []).map(row => row.file_name);
+        const activeDirectories = (activeDirectoriesResult.results || []).map(row => row.directory_path);
+        const isSameOrBelow = (candidate, parent) => candidate === parent || candidate.startsWith(parent + "/");
+        let pathConflict = false;
+
+        // Un fichier ne peut pas occuper le chemin d'un autre fichier/dossier,
+        // ni servir de parent à un élément qui doit être restauré.
+        for (const activePath of activeFiles) {
+          if (restoredFiles.some(restoredPath =>
+            activePath === restoredPath || isSameOrBelow(restoredPath, activePath) ||
+            isSameOrBelow(activePath, restoredPath)
+          )) {
+            pathConflict = true;
+            break;
+          }
+          if (restoredDirectories.some(restoredPath =>
+            activePath === restoredPath || isSameOrBelow(restoredPath, activePath)
+          )) {
+            pathConflict = true;
+            break;
+          }
+        }
+
+        if (!pathConflict) {
+          for (const activePath of activeDirectories) {
+            if (restoredFiles.some(restoredPath =>
+              activePath === restoredPath || isSameOrBelow(activePath, restoredPath)
+            )) {
+              pathConflict = true;
+              break;
+            }
+            if (restoredDirectories.includes(activePath)) {
+              pathConflict = true;
+              break;
+            }
+          }
+        }
+
+        if (pathConflict) {
+          return json({
+            error: "Un fichier ou dossier utilise déjà un chemin nécessaire à cette restauration. Renommez l’élément concerné avant de réessayer."
+          }, 409);
         }
         await env.DB.batch([
           env.DB.prepare("UPDATE application_files SET deleted_at = NULL, trash_id = NULL WHERE project_id = ? AND trash_id = ?").bind(projectId, trashId),
