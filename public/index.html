@@ -689,6 +689,8 @@ let dashboardNotificationsCache = [];
 let activeStorageFolderId = null;
 let storageView = "files";
 let applicationEditorState = null;
+let activeAutomationProjectId = null;
+let automationTasksCache = [];
 
 function hasUnsavedApplicationChanges() {
   if (!applicationEditorState) return false;
@@ -2321,6 +2323,40 @@ async function renderProjectsPage() {
     </div>
     <div id="projectsList"></div>
 
+    <div class="card" id="automationTasksPanel" hidden style="margin-top:18px;">
+      <div class="section-head">
+        <h2 id="automationTasksTitle">Automatisations</h2>
+        <button class="secondary" type="button" onclick="closeProjectAutomationTasks()">Fermer</button>
+      </div>
+      <div class="notice" style="margin-bottom:14px;">
+        Le moteur d’exécution est encore en préparation. Les tâches enregistrées restent en attente : aucune action automatique ne sera déclenchée pour le moment.
+      </div>
+      <div id="automationTasksMessage" aria-live="polite"></div>
+      <div class="form-card" style="padding:14px;border:1px solid var(--border);border-radius:10px;margin-bottom:16px;">
+        <h3>Enregistrer une tâche planifiée</h3>
+        <label for="automationTaskType">Identifiant technique du type</label>
+        <input id="automationTaskType" maxlength="80" placeholder="Exemple : notification.email">
+        <label for="automationTaskDate">Date et heure prévues</label>
+        <input id="automationTaskDate" type="datetime-local">
+        <label for="automationTaskPayload">Paramètres (JSON)</label>
+        <textarea id="automationTaskPayload" rows="4" maxlength="16384" spellcheck="false">{}</textarea>
+        <label for="automationTaskAttempts">Nombre maximal de tentatives</label>
+        <select id="automationTaskAttempts">
+          <option value="1">1 tentative</option>
+          <option value="2">2 tentatives</option>
+          <option value="3" selected>3 tentatives</option>
+          <option value="5">5 tentatives</option>
+          <option value="10">10 tentatives</option>
+        </select>
+        <button type="button" id="automationTaskCreateButton" onclick="createProjectAutomationTask()">Enregistrer la tâche</button>
+      </div>
+      <div class="section-head">
+        <h3>Tâches de ce projet</h3>
+        <button class="secondary" type="button" onclick="loadProjectAutomationTasks()">Actualiser</button>
+      </div>
+      <div id="automationTasksList"><div class="empty">Sélectionnez un projet.</div></div>
+    </div>
+
     <div class="section-head">
       <h2>Corbeille des projets</h2>
       <button class="secondary" type="button" onclick="loadProjectTrash()">Afficher la corbeille</button>
@@ -2366,6 +2402,7 @@ function renderProjects() {
       <div class="muted">Créé le : ${escapeHTML(formatDate(project.created_at))}</div>
       <div class="item-actions">
   <button class="secondary" onclick="editProject(${escapeJSAttribute(project.id)})">Modifier</button>
+  <button class="secondary" type="button" onclick="openProjectAutomationTasks(${escapeJSAttribute(project.id)})">Automatisations</button>
   ${project.type === "website" ? `
     <button onclick="enableProjectHosting(${escapeJSAttribute(project.id)})">Activer l'hébergement</button>
   ` : ""}
@@ -2373,6 +2410,158 @@ function renderProjects() {
 </div>
     </div>
   `).join("");
+}
+
+async function openProjectAutomationTasks(projectId) {
+  const project = projectsCache.find(item => String(item.id) === String(projectId));
+  if (!project) {
+    alert("Projet introuvable dans la liste actuelle.");
+    return;
+  }
+
+  activeAutomationProjectId = project.id;
+  automationTasksCache = [];
+  const panel = document.getElementById("automationTasksPanel");
+  const title = document.getElementById("automationTasksTitle");
+  const list = document.getElementById("automationTasksList");
+  const message = document.getElementById("automationTasksMessage");
+  if (!panel || !title || !list) return;
+
+  title.textContent = "Automatisations — " + project.name;
+  panel.hidden = false;
+  if (message) message.innerHTML = "";
+  list.innerHTML = '<div class="empty">Chargement des tâches...</div>';
+  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  await loadProjectAutomationTasks();
+}
+
+function closeProjectAutomationTasks() {
+  const panel = document.getElementById("automationTasksPanel");
+  if (panel) panel.hidden = true;
+  activeAutomationProjectId = null;
+  automationTasksCache = [];
+}
+
+async function loadProjectAutomationTasks() {
+  const projectId = activeAutomationProjectId;
+  const list = document.getElementById("automationTasksList");
+  if (!projectId || !list) return;
+
+  list.innerHTML = '<div class="empty">Chargement des tâches...</div>';
+  try {
+    const data = await api("/projects/" + encodeURIComponent(projectId) + "/automation-tasks");
+    if (String(activeAutomationProjectId) !== String(projectId)) return;
+    automationTasksCache = Array.isArray(data.tasks) ? data.tasks : [];
+    renderProjectAutomationTasks();
+  } catch (error) {
+    if (String(activeAutomationProjectId) === String(projectId)) {
+      list.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message) + '</div>';
+    }
+  }
+}
+
+function renderProjectAutomationTasks() {
+  const list = document.getElementById("automationTasksList");
+  if (!list) return;
+
+  if (!automationTasksCache.length) {
+    list.innerHTML = '<div class="empty">Aucune tâche enregistrée pour ce projet.</div>';
+    return;
+  }
+
+  const statusLabels = {
+    pending: "En attente",
+    running: "En cours",
+    completed: "Terminée",
+    failed: "Échouée",
+    cancelled: "Annulée"
+  };
+
+  list.innerHTML = automationTasksCache.map(task => {
+    const date = Number(task.scheduled_at);
+    const dateLabel = Number.isFinite(date)
+      ? new Date(date * 1000).toLocaleString()
+      : "Date inconnue";
+    const payload = task.payload && typeof task.payload === "object"
+      ? JSON.stringify(task.payload, null, 2)
+      : "{}";
+    return '<div class="item-card">' +
+      '<h4>' + escapeHTML(task.task_type || "Tâche") + '</h4>' +
+      '<div class="muted">Prévue le : ' + escapeHTML(dateLabel) + '</div>' +
+      '<p><span class="status">' + escapeHTML(statusLabels[task.status] || task.status || "Inconnue") + '</span></p>' +
+      '<div class="muted">Tentatives : ' + Number(task.attempts || 0) + ' / ' + Number(task.max_attempts || 0) + '</div>' +
+      (task.last_error ? '<p class="error-text">' + escapeHTML(task.last_error) + '</p>' : '') +
+      '<details style="margin-top:8px;"><summary>Afficher les paramètres</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere;">' + escapeHTML(payload) + '</pre></details>' +
+      (task.status === "pending"
+        ? '<div class="item-actions"><button class="danger" type="button" onclick="cancelProjectAutomationTask(' + escapeJSAttribute(task.id) + ')">Annuler la tâche</button></div>'
+        : '') +
+      '</div>';
+  }).join("");
+}
+
+async function createProjectAutomationTask() {
+  const projectId = activeAutomationProjectId;
+  const message = document.getElementById("automationTasksMessage");
+  const button = document.getElementById("automationTaskCreateButton");
+  if (!projectId || !message || !button) return;
+
+  const taskType = document.getElementById("automationTaskType").value.trim();
+  const scheduledAt = document.getElementById("automationTaskDate").value;
+  const payloadText = document.getElementById("automationTaskPayload").value;
+  const maxAttempts = Number(document.getElementById("automationTaskAttempts").value);
+
+  let payload;
+  try {
+    payload = JSON.parse(payloadText || "{}");
+  } catch (error) {
+    message.innerHTML = '<p class="error-text">Les paramètres doivent être un JSON valide.</p>';
+    return;
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    message.innerHTML = '<p class="error-text">Les paramètres JSON doivent être un objet.</p>';
+    return;
+  }
+  if (!scheduledAt || !Number.isFinite(new Date(scheduledAt).getTime())) {
+    message.innerHTML = '<p class="error-text">Choisissez une date et une heure valides.</p>';
+    return;
+  }
+
+  button.disabled = true;
+  message.innerHTML = '<p class="muted">Enregistrement en cours...</p>';
+  try {
+    const data = await api("/projects/" + encodeURIComponent(projectId) + "/automation-tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        task_type: taskType,
+        scheduled_at: new Date(scheduledAt).toISOString(),
+        payload,
+        max_attempts: maxAttempts
+      })
+    });
+    message.innerHTML = '<p class="success-text">' + escapeHTML(data.message || "Tâche enregistrée.") + '</p>';
+    document.getElementById("automationTaskType").value = "";
+    document.getElementById("automationTaskPayload").value = "{}";
+    await loadProjectAutomationTasks();
+  } catch (error) {
+    message.innerHTML = '<p class="error-text">' + escapeHTML(error.message) + '</p>';
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function cancelProjectAutomationTask(taskId) {
+  const projectId = activeAutomationProjectId;
+  if (!projectId || !confirm("Voulez-vous annuler cette tâche en attente ?")) return;
+
+  try {
+    await api("/automation-tasks/" + encodeURIComponent(taskId), { method: "DELETE" });
+    const message = document.getElementById("automationTasksMessage");
+    if (message) message.innerHTML = '<p class="success-text">Tâche annulée.</p>';
+    await loadProjectAutomationTasks();
+  } catch (error) {
+    const message = document.getElementById("automationTasksMessage");
+    if (message) message.innerHTML = '<p class="error-text">' + escapeHTML(error.message) + '</p>';
+  }
 }
 
 function projectTypeLabel(type) {
