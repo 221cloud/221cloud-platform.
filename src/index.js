@@ -4133,17 +4133,21 @@ hosting
           return json({ error: "Ce nouveau chemin n'est pas autorisé." }, 400);
         }
         const [fileRows, directoryRows] = await Promise.all([
-          env.DB.prepare("SELECT file_name FROM application_files WHERE project_id = ?").bind(projectId).all(),
-          env.DB.prepare("SELECT directory_path FROM application_directories WHERE project_id = ?").bind(projectId).all()
+          env.DB.prepare("SELECT file_name, deleted_at FROM application_files WHERE project_id = ?").bind(projectId).all(),
+          env.DB.prepare("SELECT directory_path, deleted_at FROM application_directories WHERE project_id = ?").bind(projectId).all()
         ]);
+        // Les chemins supprimés restent réservés tant que la corbeille conserve
+        // les lignes (contraintes UNIQUE), mais ne doivent jamais être renommés.
         const files = (fileRows.results || []).map(row => row.file_name);
         const dirs = (directoryRows.results || []).map(row => row.directory_path);
+        const activeFiles = (fileRows.results || []).filter(row => !row.deleted_at).map(row => row.file_name);
+        const activeDirs = (directoryRows.results || []).filter(row => !row.deleted_at).map(row => row.directory_path);
         const sourceExists = itemType === "file"
-          ? files.includes(oldPath)
-          : dirs.includes(oldPath) || dirs.some(name => name.startsWith(oldPath + "/")) || files.some(name => name.startsWith(oldPath + "/"));
+          ? activeFiles.includes(oldPath)
+          : activeDirs.includes(oldPath) || activeDirs.some(name => name.startsWith(oldPath + "/")) || activeFiles.some(name => name.startsWith(oldPath + "/"));
         if (!sourceExists) return json({ error: "Fichier ou dossier introuvable." }, 404);
-        const movingFiles = itemType === "file" ? [oldPath] : files.filter(name => name.startsWith(oldPath + "/"));
-        const movingDirs = itemType === "folder" ? dirs.filter(name => name === oldPath || name.startsWith(oldPath + "/")) : [];
+        const movingFiles = itemType === "file" ? [oldPath] : activeFiles.filter(name => name.startsWith(oldPath + "/"));
+        const movingDirs = itemType === "folder" ? activeDirs.filter(name => name === oldPath || name.startsWith(oldPath + "/")) : [];
         const mapPath = value => itemType === "file" ? newPath : newPath + value.slice(oldPath.length);
         const movingFileSet = new Set(movingFiles);
         const movingDirSet = new Set(movingDirs);
