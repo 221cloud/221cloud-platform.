@@ -6351,6 +6351,10 @@ async function openApplicationEditor(projectId) {
     "<p class=\"muted\">Reliez une base à cette application pour préparer son utilisation dans votre code. Seules vos bases libres ou déjà associées à cette application sont proposées.</p>" +
     "<label for=\"applicationDatabaseSelect\">Base de données</label><select id=\"applicationDatabaseSelect\"><option value=\"\">Chargement des bases...</option></select>" +
     "<div class=\"item-actions\"><button class=\"secondary\" type=\"button\" id=\"saveApplicationDatabaseButton\" onclick=\"saveApplicationDatabaseConnection()\">Enregistrer la liaison</button><span id=\"applicationDatabaseStatus\" class=\"muted\" aria-live=\"polite\"></span></div></div>" +
+    "<div class=\"card\"><div class=\"section-head\"><h2>Autorisations de la base</h2><span class=\"muted\">En préparation</span></div>" +
+    "<p class=\"muted\">Définissez les opérations que cette application pourra demander pour chaque table. Pour le moment, ces réglages sont enregistrés mais ne donnent pas encore accès aux données depuis l'application publiée.</p>" +
+    "<div id=\"applicationDatabasePermissionsList\"><p class=\"muted\">Chargement des autorisations...</p></div>" +
+    "<div class=\"item-actions\"><button class=\"secondary\" type=\"button\" id=\"saveApplicationDatabasePermissionsButton\" onclick=\"saveApplicationDatabasePermissions()\">Enregistrer les autorisations</button><span id=\"applicationDatabasePermissionsStatus\" class=\"muted\" aria-live=\"polite\"></span></div></div>" +
     "<div class=\"card\"><div class=\"section-head\"><h2>Explorateur du projet</h2><div class=\"item-actions\"><button class=\"secondary\" type=\"button\" onclick=\"createApplicationFile()\">＋ Nouveau fichier</button><button class=\"secondary\" type=\"button\" onclick=\"createApplicationFolder()\">＋ Nouveau dossier</button></div></div>" +
     "<p class=\"muted\">Organisez vos fichiers dans des dossiers. Les fichiers existants sont conservés.</p>" +
     "<div id=\"applicationFileTree\" class=\"application-file-tree\"><p class=\"muted\">Chargement de l'arborescence...</p></div>" +
@@ -6437,6 +6441,7 @@ async function loadApplicationDatabaseConnection() {
         ? "Choisissez une base pour la relier."
         : "Aucune base disponible. Créez-en une dans Bases de données.";
     }
+    await loadApplicationDatabasePermissions();
   } catch (error) {
     select.innerHTML = '<option value="">Indisponible</option>';
     if (status) status.textContent = error.message;
@@ -6475,6 +6480,77 @@ async function saveApplicationDatabaseConnection() {
       button.disabled = false;
       button.textContent = previousText;
     }
+  }
+}
+
+
+async function loadApplicationDatabasePermissions() {
+  if (!applicationEditorState) return;
+  const list = document.getElementById("applicationDatabasePermissionsList");
+  const status = document.getElementById("applicationDatabasePermissionsStatus");
+  const button = document.getElementById("saveApplicationDatabasePermissionsButton");
+  if (!list) return;
+  list.innerHTML = '<p class="muted">Chargement des autorisations...</p>';
+  if (button) button.disabled = true;
+  try {
+    const data = await api("/projects/" + encodeURIComponent(applicationEditorState.projectId) + "/application-database-permissions");
+    const tables = Array.isArray(data.tables) ? data.tables : [];
+    if (!tables.length) {
+      list.innerHTML = '<p class="muted">Aucune table dans la base reliée. Créez d’abord une table dans Bases de données.</p>';
+      if (status) status.textContent = "Aucune autorisation à configurer.";
+      return;
+    }
+    const labels = [
+      ["read", "Lecture"],
+      ["create", "Ajout"],
+      ["update", "Modification"],
+      ["delete", "Suppression"]
+    ];
+    list.innerHTML = tables.map(table => {
+      const permissions = table.permissions || {};
+      const controls = labels.map(([key, label]) =>
+        '<label style="display:inline-flex;align-items:center;gap:6px;margin:6px 14px 6px 0"><input type="checkbox" data-table-id="' + escapeHTML(table.id) + '" data-permission="' + key + '"' + (permissions[key] ? ' checked' : '') + '> ' + label + '</label>'
+      ).join("");
+      return '<div class="item-card" style="margin:10px 0"><strong>' + escapeHTML(table.name) + '</strong><div>' + controls + '</div></div>';
+    }).join("");
+    if (status) status.textContent = "Tous les droits sont désactivés par défaut.";
+  } catch (error) {
+    list.innerHTML = '<p class="muted">Impossible de charger les autorisations.</p>';
+    if (status) status.textContent = error.message;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function saveApplicationDatabasePermissions() {
+  if (!applicationEditorState) return;
+  const list = document.getElementById("applicationDatabasePermissionsList");
+  const button = document.getElementById("saveApplicationDatabasePermissionsButton");
+  const status = document.getElementById("applicationDatabasePermissionsStatus");
+  if (!list || !button || button.disabled) return;
+  const previousText = button.textContent;
+  button.disabled = true;
+  button.textContent = "Enregistrement...";
+  if (status) status.textContent = "Enregistrement des réglages...";
+  try {
+    const permissionsByTable = new Map();
+    list.querySelectorAll('input[type="checkbox"][data-table-id]').forEach(input => {
+      const tableId = input.getAttribute("data-table-id");
+      if (!permissionsByTable.has(tableId)) {
+        permissionsByTable.set(tableId, { table_id: tableId, read: false, create: false, update: false, delete: false });
+      }
+      permissionsByTable.get(tableId)[input.getAttribute("data-permission")] = input.checked;
+    });
+    const result = await api("/projects/" + encodeURIComponent(applicationEditorState.projectId) + "/application-database-permissions", {
+      method: "PUT",
+      body: JSON.stringify({ permissions: Array.from(permissionsByTable.values()) })
+    });
+    if (status) status.textContent = result.message || "Autorisations enregistrées.";
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = previousText;
   }
 }
 
