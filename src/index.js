@@ -2094,6 +2094,198 @@ if (path === "/api/subscription" && request.method === "GET") {
     }, 500);
   }
 }
+    // GESTION DES TÂCHES PROGRAMMÉES (aucune exécution dans ce lot)
+    const projectAutomationTasksMatch = path.match(
+      /^\/api\/projects\/([^/]+)\/automation-tasks$/
+    );
+
+    if (projectAutomationTasksMatch && ["GET", "POST"].includes(request.method)) {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+
+        const projectId = decodeURIComponent(projectAutomationTasksMatch[1]);
+        await ensureAutomationTasksSchema(env);
+
+        const project = await env.DB.prepare(
+          "SELECT id FROM projects WHERE id = ? AND user_id = ? AND deleted_at IS NULL LIMIT 1"
+        ).bind(projectId, user.id).first();
+
+        if (!project) return json({ error: "Projet introuvable." }, 404);
+
+        if (request.method === "GET") {
+          const result = await env.DB.prepare(`
+            SELECT id, project_id, task_type, payload_json, status,
+                   scheduled_at, attempts, max_attempts, last_error,
+                   created_at, updated_at, completed_at, cancelled_at
+            FROM automation_tasks
+            WHERE project_id = ? AND user_id = ?
+            ORDER BY scheduled_at ASC, created_at DESC
+            LIMIT 100
+          `).bind(projectId, user.id).all();
+
+          return json({
+            tasks: (result.results || []).map(task => ({
+              ...task,
+              payload: (() => {
+                try { return JSON.parse(task.payload_json || "{}"); }
+                catch { return {}; }
+              })()
+            }))
+          });
+        }
+
+        const body = await readLimitedJsonBody(request);
+        const taskType = String(body.task_type || "").trim();
+        if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,79}$/.test(taskType)) {
+          return json({ error: "Type de tâche invalide." }, 400);
+        }
+
+        const payload = body.payload === undefined ? {} : body.payload;
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+          return json({ error: "Les paramètres doivent être un objet JSON." }, 400);
+        }
+
+        let payloadJson;
+        try { payloadJson = JSON.stringify(payload); }
+        catch { return json({ error: "Paramètres JSON invalides." }, 400); }
+        if (new TextEncoder().encode(payloadJson).length > 16384) {
+          return json({ error: "Les paramètres dépassent 16 Ko." }, 413);
+        }
+
+        const scheduledAtDate = new Date(body.scheduled_at);
+        const scheduledAt = Math.floor(scheduledAtDate.getTime() / 1000);
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        if (
+          !Number.isFinite(scheduledAt) ||
+          scheduledAt <= nowSeconds ||
+          scheduledAt > nowSeconds + 365 * 24 * 60 * 60
+        ) {
+          return json({
+            error: "La date doit être future et ne pas dépasser un an."
+          }, 400);
+        }
+
+        const requestedMaxAttempts = body.max_attempts === undefined
+          ? 3
+          : Number(body.max_attempts);
+        if (
+          !Number.isInteger(requestedMaxAttempts) ||
+          requestedMaxAttempts < 1 ||
+          requestedMaxAttempts > 10
+        ) {
+          return json({ error: "Le nombre de tentatives doit être compris entre 1 et 10." }, 400);
+        }
+
+        const taskId = crypto.randomUUID();
+        const inserted = await env.DB.prepare(`
+          INSERT INTO automation_tasks (
+            id, user_id, project_id, task_type, payload_json, status,
+            scheduled_at, attempts, max_attempts, lock_token, locked_until,
+            last_error, created_at, updated_at, completed_at, cancelled_at
+          )
+          SELECT ?, ?, ?, ?, ?, 'pending', ?, 0, ?, NULL, NULL,
+                 NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, NULL
+          WHERE EXISTS (
+            SELECT 1 FROM projects
+            WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+          )
+          AND (
+            SELECT COUNT(*) FROM automation_tasks
+            WHERE project_id = ? AND user_id = ? AND status = 'pending'
+          ) < 50
+          AND (
+            SELECT COUNT(*) FROM automation_tasks
+            WHERE user_id = ? AND status = 'pending'
+          ) < 200
+        `).bind(
+          taskId, user.id, projectId, taskType, payloadJson,
+          scheduledAt, requestedMaxAttempts,
+          projectId, user.id, projectId, user.id, user.id
+        ).run();
+
+        if (!inserted.meta || inserted.meta.changes !== 1) {
+          const [projectStillOwned, projectPending, accountPending] = await Promise.all([
+            env.DB.prepare(
+              "SELECT id FROM projects WHERE id = ? AND user_id = ? AND deleted_at IS NULL LIMIT 1"
+            ).bind(projectId, user.id).first(),
+            env.DB.prepare(
+              "SELECT COUNT(*) AS total FROM automation_tasks WHERE project_id = ? AND user_id = ? AND status = 'pending'"
+            ).bind(projectId, user.id).first(),
+            env.DB.prepare(
+              "SELECT COUNT(*) AS total FROM automation_tasks WHERE user_id = ? AND status = 'pending'"
+            ).bind(user.id).first()
+          ]);
+          if (!projectStillOwned) return json({ error: "Projet introuvable." }, 404);
+          return json({
+            error: "Limite de tâches en attente atteinte.",
+            limits: { per_project: 50, per_account: 200 },
+            usage: {
+              project_pending: Number(projectPending?.total || 0),
+              account_pending: Number(accountPending?.total || 0)
+            }
+          }, 429);
+        }
+
+        return json({
+          message: "Tâche programmée. Son exécution n'est pas encore activée.",
+          task: {
+            id: taskId,
+            project_id: projectId,
+            task_type: taskType,
+            payload,
+            status: "pending",
+            scheduled_at: scheduledAt,
+            attempts: 0,
+            max_attempts: requestedMaxAttempts
+          }
+        }, 201);
+      } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée." }, 413);
+        console.error("ERREUR TÂCHES PROGRAMMÉES:", error);
+        return json({ error: "Impossible de gérer les tâches du projet." }, 500);
+      }
+    }
+
+    const automationTaskMatch = path.match(
+      /^\/api\/automation-tasks\/([^/]+)$/
+    );
+
+    if (automationTaskMatch && request.method === "DELETE") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+
+        const taskId = decodeURIComponent(automationTaskMatch[1]);
+        await ensureAutomationTasksSchema(env);
+
+        const cancelled = await env.DB.prepare(`
+          UPDATE automation_tasks
+          SET status = 'cancelled',
+              cancelled_at = CURRENT_TIMESTAMP,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND user_id = ? AND status = 'pending'
+        `).bind(taskId, user.id).run();
+
+        if (cancelled.meta && cancelled.meta.changes === 1) {
+          return json({ message: "Tâche annulée." });
+        }
+
+        const task = await env.DB.prepare(
+          "SELECT id, status FROM automation_tasks WHERE id = ? AND user_id = ? LIMIT 1"
+        ).bind(taskId, user.id).first();
+
+        if (!task) return json({ error: "Tâche introuvable." }, 404);
+        return json({
+          error: "Seules les tâches en attente peuvent être annulées.",
+          status: task.status
+        }, 409);
+      } catch (error) {
+        console.error("ERREUR ANNULATION TÂCHE:", error);
+        return json({ error: "Impossible d'annuler cette tâche." }, 500);
+      }
+    }
+
     // LISTE DES PROJETS
     if (path === "/api/projects" && request.method === "GET") {
       try {
