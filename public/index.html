@@ -6382,7 +6382,7 @@ async function saveApplicationFiles() {
   const button = document.getElementById("saveApplicationFilesButton");
   const status = document.getElementById("applicationSaveStatus");
   if (editor) applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
-  const changedFiles = ["index.html", "style.css", "script.js"].filter(fileName =>
+  const changedFiles = Object.keys(applicationEditorState.files).sort().filter(fileName =>
     applicationEditorState.files[fileName] !== applicationEditorState.savedFiles[fileName]
   );
   if (!changedFiles.length) {
