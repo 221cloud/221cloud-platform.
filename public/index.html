@@ -6273,6 +6273,47 @@ async function loadApplicationTrash() {
     }).join("");
   } catch (error) { container.innerHTML = "<p class=\"error-text\">" + escapeHTML(error.message) + "</p>"; }
 }
+async function renameApplicationItem(itemType, itemPath) {
+  if (!applicationEditorState || applicationEditorState.saving) return;
+  const affectedPaths = Object.keys(applicationEditorState.files).filter(name =>
+    itemType === "file" ? name === itemPath : name === itemPath || name.startsWith(itemPath + "/")
+  );
+  const unsavedPaths = affectedPaths.filter(name =>
+    applicationEditorState.files[name] !== applicationEditorState.savedFiles[name]
+  );
+  if (unsavedPaths.length) {
+    alert("Enregistrez d'abord les modifications non sauvegardées dans : " + unsavedPaths.join(", "));
+    return;
+  }
+  const newPathInput = prompt(
+    itemType === "folder" ? "Nouveau chemin du dossier :" : "Nouveau chemin du fichier :",
+    itemPath
+  );
+  if (newPathInput === null) return;
+  const newPath = newPathInput.trim();
+  if (!newPath || newPath === itemPath) return;
+  if (!confirm("Renommer « " + itemPath + " » en « " + newPath + " » ?")) return;
+
+  const activeFile = applicationEditorState.activeFile;
+  const nextActiveFile = itemType === "file"
+    ? (activeFile === itemPath ? newPath : activeFile)
+    : (activeFile === itemPath || activeFile.startsWith(itemPath + "/")
+      ? newPath + activeFile.slice(itemPath.length)
+      : activeFile);
+
+  try {
+    await api("/projects/" + encodeURIComponent(applicationEditorState.projectId) + "/application-items/rename", {
+      method: "POST",
+      body: JSON.stringify({ item_type: itemType, old_path: itemPath, new_path: newPath })
+    });
+    await refreshApplicationFileList(nextActiveFile);
+    const status = document.getElementById("applicationSaveStatus");
+    if (status) status.textContent = "Élément renommé : " + itemPath + " → " + newPath;
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
 async function moveApplicationItemToTrash(itemType, itemPath) {
   if (!applicationEditorState || applicationEditorState.saving) return;
   const unsavedPaths = Object.keys(applicationEditorState.files).filter(name =>
@@ -6337,7 +6378,8 @@ function renderApplicationFileTree() {
     const folders = Object.keys(node.folders).sort().map(name => {
       const path = prefix ? prefix + "/" + name : name;
       return "<details class=\"application-tree-folder\" open><summary>📁 " + escapeHTML(name) +
-        " <button type=\"button\" class=\"secondary\" onclick=\"event.preventDefault();event.stopPropagation();moveApplicationItemToTrash('folder'," + escapeJSAttribute(path) + ")\">Corbeille</button></summary>" +
+        " <button type=\"button\" class=\"secondary\" style=\"padding:5px 8px;font-size:11px;margin-left:5px\" onclick=\"event.preventDefault();event.stopPropagation();renameApplicationItem('folder'," + escapeJSAttribute(path) + ")\">Renommer</button>" +
+        " <button type=\"button\" class=\"secondary\" style=\"padding:5px 8px;font-size:11px\" onclick=\"event.preventDefault();event.stopPropagation();moveApplicationItemToTrash('folder'," + escapeJSAttribute(path) + ")\">Corbeille</button></summary>" +
         "<div class=\"application-tree-children\">" + renderNode(node.folders[name], path) + "</div></details>";
     }).join("");
     const files = node.files.map(file => {
@@ -6346,7 +6388,8 @@ function renderApplicationFileTree() {
       return "<button type=\"button\" class=\"application-tree-file " + (active ? "active" : "") +
         "\" onclick=\"selectApplicationEditorFile(" + escapeJSAttribute(file.path) + ")\">" +
         "📄 " + escapeHTML(file.name) + (modified ? " <span aria-label=\"Modifications non enregistrées\">●</span>" : "") +
-        "</button><button type=\"button\" class=\"secondary\" onclick=\"moveApplicationItemToTrash('file'," + escapeJSAttribute(file.path) + ")\">Corbeille</button>";
+        "</button><button type=\"button\" class=\"secondary\" style=\"padding:6px 9px;font-size:11px;margin:3px 4px 3px 0\" onclick=\"renameApplicationItem('file'," + escapeJSAttribute(file.path) + ")\">Renommer</button>" +
+        "<button type=\"button\" class=\"secondary\" style=\"padding:6px 9px;font-size:11px;margin:3px 0\" onclick=\"moveApplicationItemToTrash('file'," + escapeJSAttribute(file.path) + ")\">Corbeille</button>";
     }).join("");
     return folders + files;
   };
