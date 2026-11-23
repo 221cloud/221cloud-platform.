@@ -6511,7 +6511,7 @@ async function loadApplicationDatabasePermissions() {
       const controls = labels.map(([key, label]) =>
         '<label style="display:inline-flex;align-items:center;gap:6px;margin:6px 14px 6px 0"><input type="checkbox" data-table-id="' + escapeHTML(table.id) + '" data-permission="' + key + '"' + (permissions[key] ? ' checked' : '') + '> ' + label + '</label>'
       ).join("");
-      return '<div class="item-card" style="margin:10px 0"><strong>' + escapeHTML(table.name) + '</strong><div>' + controls + '</div></div>';
+      return '<div class="item-card" style="margin:10px 0"><strong>' + escapeHTML(table.name) + '</strong><p class="muted" style="font-size:12px;word-break:break-all;margin:6px 0">ID de la table : <code>' + escapeHTML(table.id) + '</code></p><div>' + controls + '</div></div>';
     }).join("");
     if (status) status.textContent = "Tous les droits sont désactivés par défaut.";
   } catch (error) {
