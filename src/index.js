@@ -791,11 +791,21 @@ async function releaseStorageQuotaReservation(env, reservationId) {
 
 async function ensureStorageFoldersSchema(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS storage_folders (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, parent_id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)").run();
-  const columns = await env.DB.prepare("PRAGMA table_info(cloud_files)").all();
-  const columnNames = (columns.results || []).map(column => column.name);
-  if (!columnNames.includes("folder_id")) await env.DB.prepare("ALTER TABLE cloud_files ADD COLUMN folder_id TEXT").run();
-  if (!columnNames.includes("content_sha1")) await env.DB.prepare("ALTER TABLE cloud_files ADD COLUMN content_sha1 TEXT").run();
-  if (!columnNames.includes("deleted_at")) await env.DB.prepare("ALTER TABLE cloud_files ADD COLUMN deleted_at TEXT").run();
+  const ensureStorageColumn = async columnName => {
+    const columns = await env.DB.prepare("PRAGMA table_info(cloud_files)").all();
+    if ((columns.results || []).some(column => column.name === columnName)) return;
+    try {
+      await env.DB.prepare("ALTER TABLE cloud_files ADD COLUMN " + columnName + " TEXT").run();
+    } catch (error) {
+      // Une autre instance du Worker peut avoir ajouté la colonne entre-temps.
+      const refreshed = await env.DB.prepare("PRAGMA table_info(cloud_files)").all();
+      const alreadyAdded = (refreshed.results || []).some(column => column.name === columnName);
+      if (!alreadyAdded) throw error;
+    }
+  };
+  await ensureStorageColumn("folder_id");
+  await ensureStorageColumn("content_sha1");
+  await ensureStorageColumn("deleted_at");
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS storage_activity_log (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, action TEXT NOT NULL, file_name TEXT NOT NULL, file_size INTEGER NOT NULL DEFAULT 0, details TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)").run();
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_storage_activity_user_date ON storage_activity_log(user_id, created_at DESC)").run();
 }
