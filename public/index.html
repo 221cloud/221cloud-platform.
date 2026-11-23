@@ -6239,10 +6239,31 @@ function renderProPage() {
         <textarea id="proQuoteDescription" rows="3" maxlength="2000" required placeholder="Exemple : Installer trois prises électriques dans le salon."></textarea>
         <label for="proQuoteLabour">Prix de la main-d'œuvre (FCFA)</label>
         <input id="proQuoteLabour" type="number" min="0" max="1000000000" step="1" value="0" inputmode="numeric" oninput="updateProQuoteTotal()">
-        <label for="proQuoteMaterials">Prix du matériel (FCFA)</label>
-        <input id="proQuoteMaterials" type="number" min="0" max="1000000000" step="1" value="0" inputmode="numeric" oninput="updateProQuoteTotal()">
+        <div style="margin-top:12px">
+          <h3>🔌 Matériaux et fournitures</h3>
+          <p class="muted">Ajoutez chaque matériel avec sa quantité et son prix.</p>
+          <div id="proQuoteItems">
+            <div class="pro-quote-material-row" data-pro-material-row style="border:1px solid var(--border);border-radius:12px;padding:12px;margin:10px 0">
+              <label>Nom du matériel</label>
+              <input class="pro-material-label" maxlength="160" placeholder="Exemple : Prise électrique" oninput="updateProQuoteTotal()">
+              <label>Quantité</label>
+              <input class="pro-material-quantity" type="number" min="0.01" max="1000000" step="0.01" value="1" inputmode="decimal" oninput="updateProQuoteTotal()">
+              <label>Unité</label>
+              <select class="pro-material-unit">
+                <option>Pièce</option><option>Mètre</option><option>Rouleau</option><option>Boîte</option><option>Paquet</option><option>Kg</option><option>Litre</option><option>Forfait</option><option>Autre</option>
+              </select>
+              <label>Prix unitaire (FCFA)</label>
+              <input class="pro-material-price" type="number" min="0" max="1000000000" step="1" value="0" inputmode="numeric" oninput="updateProQuoteTotal()">
+              <div class="muted" style="margin-top:8px">Total de cette ligne : <strong class="pro-material-line-total">0 FCFA</strong></div>
+              <button type="button" class="secondary" onclick="this.closest('[data-pro-material-row]').remove();updateProQuoteTotal()">Retirer ce matériel</button>
+            </div>
+          </div>
+          <button type="button" class="secondary" onclick="addProMaterialRow()">＋ Ajouter un autre matériel</button>
+        </div>
         <div class="notice" style="margin-top:12px">
-          <strong>Total du devis : <span id="proQuoteTotal">0 FCFA</span></strong>
+          <div>Total des matériaux : <strong id="proQuoteMaterialsTotal">0 FCFA</strong></div>
+          <div>Main-d'œuvre : <strong id="proQuoteLabourSummary">0 FCFA</strong></div>
+          <div style="margin-top:8px"><strong>Total du devis : <span id="proQuoteTotal">0 FCFA</span></strong></div>
         </div>
         <button id="proQuoteSave" type="submit">＋ Enregistrer le devis en brouillon</button>
         <div id="proQuoteMessage" class="notice" role="status" aria-live="polite"></div>
@@ -6326,14 +6347,76 @@ function formatProMoney(value) {
   return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(Number(value) || 0) + " FCFA";
 }
 
+function addProMaterialRow() {
+  const container = document.getElementById("proQuoteItems");
+  if (!container) return;
+  if (container.querySelectorAll("[data-pro-material-row]").length >= 100) {
+    const message = document.getElementById("proQuoteMessage");
+    if (message) message.textContent = "Un devis peut contenir au maximum 100 lignes de matériel.";
+    return;
+  }
+  const row = document.createElement("div");
+  row.className = "pro-quote-material-row";
+  row.setAttribute("data-pro-material-row", "");
+  row.style.cssText = "border:1px solid var(--border);border-radius:12px;padding:12px;margin:10px 0";
+  row.innerHTML = `
+    <label>Nom du matériel</label>
+    <input class="pro-material-label" maxlength="160" placeholder="Exemple : Câble électrique" oninput="updateProQuoteTotal()">
+    <label>Quantité</label>
+    <input class="pro-material-quantity" type="number" min="0.01" max="1000000" step="0.01" value="1" inputmode="decimal" oninput="updateProQuoteTotal()">
+    <label>Unité</label>
+    <select class="pro-material-unit">
+      <option>Pièce</option><option>Mètre</option><option>Rouleau</option><option>Boîte</option><option>Paquet</option><option>Kg</option><option>Litre</option><option>Forfait</option><option>Autre</option>
+    </select>
+    <label>Prix unitaire (FCFA)</label>
+    <input class="pro-material-price" type="number" min="0" max="1000000000" step="1" value="0" inputmode="numeric" oninput="updateProQuoteTotal()">
+    <div class="muted" style="margin-top:8px">Total de cette ligne : <strong class="pro-material-line-total">0 FCFA</strong></div>
+    <button type="button" class="secondary" onclick="this.closest('[data-pro-material-row]').remove();updateProQuoteTotal()">Retirer ce matériel</button>
+  `;
+  container.appendChild(row);
+  updateProQuoteTotal();
+}
+
+function collectProQuoteItems() {
+  const rows = Array.from(document.querySelectorAll("#proQuoteItems [data-pro-material-row]"));
+  const items = [];
+  for (const row of rows) {
+    const label = row.querySelector(".pro-material-label")?.value.trim() || "";
+    const quantity = Number(row.querySelector(".pro-material-quantity")?.value || 0);
+    const unit = row.querySelector(".pro-material-unit")?.value || "";
+    const unitPrice = Number(row.querySelector(".pro-material-price")?.value || 0);
+    if (!label) {
+      if (quantity !== 1 || unitPrice !== 0) throw new Error("Indiquez le nom de chaque matériel renseigné.");
+      continue;
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isSafeInteger(unitPrice) || unitPrice < 0) {
+      throw new Error("Vérifiez la quantité et le prix unitaire de chaque matériel.");
+    }
+    items.push({ label, quantity, unit, unit_price: unitPrice });
+  }
+  return items;
+}
+
 function updateProQuoteTotal() {
   const labour = Number(document.getElementById("proQuoteLabour")?.value || 0);
-  const materials = Number(document.getElementById("proQuoteMaterials")?.value || 0);
+  let materials = 0;
+  document.querySelectorAll("#proQuoteItems [data-pro-material-row]").forEach(row => {
+    const quantity = Number(row.querySelector(".pro-material-quantity")?.value || 0);
+    const unitPrice = Number(row.querySelector(".pro-material-price")?.value || 0);
+    const lineTotal = Number.isFinite(quantity) && quantity > 0 &&
+      Number.isSafeInteger(unitPrice) && unitPrice >= 0
+      ? Math.round(quantity * unitPrice) : 0;
+    materials += lineTotal;
+    const line = row.querySelector(".pro-material-line-total");
+    if (line) line.textContent = formatProMoney(lineTotal);
+  });
+  const safeLabour = Number.isSafeInteger(labour) && labour >= 0 ? labour : 0;
+  const materialsTotal = document.getElementById("proQuoteMaterialsTotal");
+  const labourSummary = document.getElementById("proQuoteLabourSummary");
   const total = document.getElementById("proQuoteTotal");
-  if (total) total.textContent = formatProMoney(
-    (Number.isFinite(labour) && labour >= 0 ? labour : 0) +
-    (Number.isFinite(materials) && materials >= 0 ? materials : 0)
-  );
+  if (materialsTotal) materialsTotal.textContent = formatProMoney(materials);
+  if (labourSummary) labourSummary.textContent = formatProMoney(safeLabour);
+  if (total) total.textContent = formatProMoney(safeLabour + materials);
 }
 
 async function loadProQuotes() {
@@ -6347,16 +6430,30 @@ async function loadProQuotes() {
       list.innerHTML = '<div class="empty">Aucun devis pour le moment.</div>';
       return;
     }
-    list.innerHTML = quotes.map(quote => `
-      <div class="item">
-        <strong>${escapeHTML(quote.client_name || "Client")}</strong>
-        <div>${escapeHTML(quote.description)}</div>
-        <div class="muted">Main-d'œuvre : ${escapeHTML(formatProMoney(quote.labour_amount))}</div>
-        <div class="muted">Matériel : ${escapeHTML(formatProMoney(quote.material_amount))}</div>
-        <p><strong>Total : ${escapeHTML(formatProMoney(quote.total_amount))}</strong></p>
-        <span class="status">Brouillon</span>
-      </div>
-    `).join("");
+    list.innerHTML = quotes.map(quote => {
+      const items = Array.isArray(quote.items) ? quote.items : [];
+      const itemsHtml = items.length ? `
+        <div style="margin-top:10px">
+          <strong>Matériaux détaillés</strong>
+          ${items.map(item => `
+            <div class="muted" style="padding:6px 0;border-bottom:1px solid var(--border)">
+              ${escapeHTML(item.label)} — ${escapeHTML(String(item.quantity))} ${escapeHTML(item.unit)}
+              × ${escapeHTML(formatProMoney(item.unit_price))} = <strong>${escapeHTML(formatProMoney(item.total_amount))}</strong>
+            </div>
+          `).join("")}
+        </div>` : '<div class="muted">Ancien devis : détail des matériaux non disponible.</div>';
+      return `
+        <div class="item">
+          <strong>${escapeHTML(quote.client_name || "Client")}</strong>
+          <div>${escapeHTML(quote.description)}</div>
+          ${itemsHtml}
+          <div class="muted" style="margin-top:8px">Total matériaux : ${escapeHTML(formatProMoney(quote.material_amount))}</div>
+          <div class="muted">Main-d'œuvre : ${escapeHTML(formatProMoney(quote.labour_amount))}</div>
+          <p><strong>Total : ${escapeHTML(formatProMoney(quote.total_amount))}</strong></p>
+          <span class="status">Brouillon</span>
+        </div>
+      `;
+    }).join("");
   } catch (error) {
     list.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message || "Impossible de charger les devis.") + '</div>';
   }
@@ -6369,15 +6466,21 @@ async function saveProQuote(event) {
   const message = document.getElementById("proQuoteMessage");
   if (!form || !button || !message) return;
 
+  let items;
+  try {
+    items = collectProQuoteItems();
+  } catch (error) {
+    message.textContent = error.message;
+    return;
+  }
   const body = {
     client_id: document.getElementById("proQuoteClient").value,
     description: document.getElementById("proQuoteDescription").value.trim(),
     labour_amount: Number(document.getElementById("proQuoteLabour").value || 0),
-    material_amount: Number(document.getElementById("proQuoteMaterials").value || 0)
+    items
   };
-  if (!Number.isSafeInteger(body.labour_amount) || body.labour_amount < 0 ||
-      !Number.isSafeInteger(body.material_amount) || body.material_amount < 0) {
-    message.textContent = "Vérifiez les montants : utilisez des nombres entiers en FCFA.";
+  if (!Number.isSafeInteger(body.labour_amount) || body.labour_amount < 0) {
+    message.textContent = "Vérifiez le montant de la main-d'œuvre en FCFA.";
     return;
   }
 
@@ -6386,6 +6489,11 @@ async function saveProQuote(event) {
   try {
     await api("/pro/quotes", { method: "POST", body: JSON.stringify(body) });
     form.reset();
+    const materialRows = document.getElementById("proQuoteItems");
+    if (materialRows) {
+      materialRows.innerHTML = "";
+      addProMaterialRow();
+    }
     updateProQuoteTotal();
     message.textContent = "Devis enregistré en brouillon.";
     await loadProQuotes();
