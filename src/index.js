@@ -2586,7 +2586,7 @@ export default {
               normalized.push([column, raw === true || raw === 1 || raw === "1" ? 1 : 0]);
             } else if (column.data_type === "date") {
               const date = String(raw);
-              if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date) || Number.isNaN(Date.parse(date + "T00:00:00Z"))) return { error: "Le champ « " + name + " » doit être une date au format AAAA-MM-JJ." };
+              if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date + "T00:00:00Z"))) return { error: "Le champ « " + name + " » doit être une date au format AAAA-MM-JJ." };
               normalized.push([column, date]);
             } else return { error: "Type de colonne non pris en charge." };
           }
