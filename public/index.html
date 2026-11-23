@@ -2329,13 +2329,13 @@ async function renderProjectsPage() {
         <button class="secondary" type="button" onclick="closeProjectAutomationTasks()">Fermer</button>
       </div>
       <div class="notice" style="margin-bottom:14px;">
-        Le moteur d’exécution est encore en préparation. Les tâches enregistrées restent en attente : aucune action automatique ne sera déclenchée pour le moment.
+        Le planificateur vérifie les tâches chaque minute et exécute séquentiellement jusqu’à cinq tâches arrivées à échéance par cycle. Actuellement, seul le type project_health_check est pris en charge.
       </div>
       <div id="automationTasksMessage" aria-live="polite"></div>
       <div class="form-card" style="padding:14px;border:1px solid var(--border);border-radius:10px;margin-bottom:16px;">
         <h3>Enregistrer une tâche planifiée</h3>
-        <label for="automationTaskType">Identifiant technique du type</label>
-        <input id="automationTaskType" maxlength="80" placeholder="Exemple : notification.email">
+        <label for="automationTaskType">Type de tâche pris en charge</label>
+        <input id="automationTaskType" maxlength="80" value="project_health_check" readonly>
         <label for="automationTaskDate">Date et heure prévues</label>
         <input id="automationTaskDate" type="datetime-local">
         <label for="automationTaskPayload">Paramètres (JSON)</label>
@@ -2567,7 +2567,7 @@ async function createProjectAutomationTask() {
       })
     });
     message.innerHTML = '<p class="success-text">' + escapeHTML(data.message || "Tâche enregistrée.") + '</p>';
-    document.getElementById("automationTaskType").value = "";
+    document.getElementById("automationTaskType").value = "project_health_check";
     document.getElementById("automationTaskPayload").value = "{}";
     await loadProjectAutomationTasks();
   } catch (error) {
