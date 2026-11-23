@@ -2413,13 +2413,79 @@ export default {
 
 
     // 221CLOUD PRO : DEVIS DÉTAILLÉS EN BROUILLON, PRIVÉS PAR UTILISATEUR
-    if (path === "/api/pro/quotes") {
+    const proQuoteRouteMatch = path.match(/^\/api\/pro\/quotes(?:\/([^/]+))?$/);
+    if (proQuoteRouteMatch) {
       try {
         const user = await currentUser(request, env);
         if (!user) return json({ error: "Vous devez être connecté." }, 401);
         await ensureProSchema(env);
 
-        if (request.method === "GET") {
+        if (request.method === "PATCH" && proQuoteRouteMatch[1]) {
+          const quoteId = decodeURIComponent(proQuoteRouteMatch[1]);
+          const existing = await env.DB.prepare(
+            "SELECT id, status FROM pro_quotes WHERE id = ? AND user_id = ? LIMIT 1"
+          ).bind(quoteId, user.id).first();
+          if (!existing) return json({ error: "Devis introuvable." }, 404);
+          if (existing.status !== "draft") return json({ error: "Seuls les devis en brouillon peuvent être modifiés." }, 409);
+
+          const body = await readLimitedJsonBody(request);
+          const clientId = String(body.client_id || "").trim();
+          const description = String(body.description || "").trim();
+          const labourAmount = Number(body.labour_amount);
+          const rawItems = Array.isArray(body.items) ? body.items : [];
+          if (!clientId) return json({ error: "Choisissez un client." }, 400);
+          if (!description || description.length > 2000) return json({ error: "Vérifiez la description du travail." }, 400);
+          if (!Number.isSafeInteger(labourAmount) || labourAmount < 0 || labourAmount > 1000000000) {
+            return json({ error: "Vérifiez le prix de la main-d'œuvre en FCFA." }, 400);
+          }
+          if (rawItems.length > 100) return json({ error: "Un devis peut contenir au maximum 100 lignes de matériel." }, 400);
+          const client = await env.DB.prepare(
+            "SELECT id FROM pro_clients WHERE id = ? AND user_id = ? LIMIT 1"
+          ).bind(clientId, user.id).first();
+          if (!client) return json({ error: "Ce client est introuvable dans votre liste." }, 404);
+
+          const items = [];
+          let materialAmount = 0;
+          for (const raw of rawItems) {
+            const label = String(raw?.label || "").trim();
+            if (!label) continue;
+            const quantity = Number(raw?.quantity);
+            const unit = String(raw?.unit || "").trim();
+            const unitPrice = Number(raw?.unit_price);
+            if (label.length > 160 || !Number.isFinite(quantity) || quantity <= 0 || quantity > 1000000 ||
+                !unit || unit.length > 40 || !Number.isSafeInteger(unitPrice) || unitPrice < 0 || unitPrice > 1000000000) {
+              return json({ error: "Vérifiez le nom, la quantité, l'unité et le prix de chaque matériel." }, 400);
+            }
+            const lineTotal = Math.round(quantity * unitPrice);
+            if (!Number.isSafeInteger(lineTotal) || lineTotal < 0 || materialAmount + lineTotal > 1000000000) {
+              return json({ error: "Le total du matériel dépasse la limite autorisée." }, 400);
+            }
+            materialAmount += lineTotal;
+            items.push({ label, quantity, unit, unit_price: unitPrice, total_amount: lineTotal });
+          }
+          const totalAmount = labourAmount + materialAmount;
+          if (!Number.isSafeInteger(totalAmount) || totalAmount > 1000000000) {
+            return json({ error: "Le total du devis dépasse la limite autorisée." }, 400);
+          }
+
+          const statements = [
+            env.DB.prepare(
+              "UPDATE pro_quotes SET client_id = ?, description = ?, labour_amount = ?, material_amount = ?, total_amount = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND status = 'draft'"
+            ).bind(clientId, description, labourAmount, materialAmount, totalAmount, quoteId, user.id),
+            env.DB.prepare(
+              "DELETE FROM pro_quote_items WHERE quote_id = ? AND user_id = ?"
+            ).bind(quoteId, user.id)
+          ];
+          for (const item of items) {
+            statements.push(env.DB.prepare(
+              "INSERT INTO pro_quote_items (id, quote_id, user_id, label, quantity, unit, unit_price, total_amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            ).bind(crypto.randomUUID(), quoteId, user.id, item.label, item.quantity, item.unit, item.unit_price, item.total_amount));
+          }
+          await env.DB.batch(statements);
+          return json({ message: "Devis modifié avec succès." });
+        }
+
+        if (request.method === "GET" && !proQuoteRouteMatch[1]) {
           const result = await env.DB.prepare(
             `SELECT q.id, q.client_id, c.name AS client_name,
                     c.phone AS client_phone, c.address AS client_address, q.description,
@@ -2453,7 +2519,7 @@ export default {
           }, 200, { "Cache-Control": "no-store" });
         }
 
-        if (request.method === "POST") {
+        if (request.method === "POST" && !proQuoteRouteMatch[1]) {
           const body = await readLimitedJsonBody(request);
           const clientId = String(body.client_id || "").trim();
           const description = String(body.description || "").trim();
