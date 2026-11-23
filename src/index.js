@@ -4173,7 +4173,7 @@ hosting
     }
 
     // APPLICATIONS : DÉPLACER UN FICHIER OU DOSSIER DANS LA CORBEILLE
-    const applicationTrashMoveMatch = path.match(/^\/api\/projects\/([^/]+)\/application-items\/trash$/);
+    const applicationTrashMoveMatch = path.match(/^\\/api\\/projects\\/([^/]+)\\/application-items\\/trash$/);
     if (applicationTrashMoveMatch && request.method === "POST") {
       try {
         const user = await currentUser(request, env);
@@ -4188,22 +4188,37 @@ hosting
         const itemPath = String(body.path || "");
         const validPath = itemType === "folder" ? validApplicationFilePath(itemPath + "/placeholder.txt") : itemType === "file" && validApplicationFilePath(itemPath);
         if (!validPath || !["file", "folder"].includes(itemType)) return json({ error: "Type ou chemin invalide." }, 400);
+
         const trashId = crypto.randomUUID();
+        let expectedFileIds = [];
+        let expectedVersionIds = [];
+        let expectedDirectoryIds = [];
+
         if (itemType === "file") {
-          const file = await env.DB.prepare("SELECT id FROM application_files WHERE project_id = ? AND file_name = ? AND deleted_at IS NULL LIMIT 1").bind(projectId, itemPath).first();
+          const [file, versions] = await Promise.all([
+            env.DB.prepare("SELECT id FROM application_files WHERE project_id = ? AND file_name = ? AND deleted_at IS NULL LIMIT 1").bind(projectId, itemPath).first(),
+            env.DB.prepare("SELECT id FROM application_file_versions WHERE project_id = ? AND file_name = ? AND deleted_at IS NULL").bind(projectId, itemPath).all()
+          ]);
           if (!file) return json({ error: "Fichier introuvable." }, 404);
+          expectedFileIds = [file.id];
+          expectedVersionIds = (versions.results || []).map(row => row.id);
           await env.DB.batch([
             env.DB.prepare("INSERT INTO application_trash_items (id, project_id, item_type, original_path) SELECT ?, ?, 'file', ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL) AND EXISTS (SELECT 1 FROM application_files WHERE project_id = ? AND file_name = ? AND deleted_at IS NULL)").bind(trashId, projectId, itemPath, projectId, user.id, projectId, itemPath),
             env.DB.prepare("UPDATE application_files SET deleted_at = CURRENT_TIMESTAMP, trash_id = ? WHERE project_id = ? AND file_name = ? AND deleted_at IS NULL").bind(trashId, projectId, itemPath),
             env.DB.prepare("UPDATE application_file_versions SET deleted_at = CURRENT_TIMESTAMP, trash_id = ? WHERE project_id = ? AND file_name = ? AND deleted_at IS NULL").bind(trashId, projectId, itemPath)
           ]);
         } else {
-          const [directory, childDirectory, childFile] = await Promise.all([
-            env.DB.prepare("SELECT id FROM application_directories WHERE project_id = ? AND directory_path = ? AND deleted_at IS NULL LIMIT 1").bind(projectId, itemPath).first(),
-            env.DB.prepare("SELECT id FROM application_directories WHERE project_id = ? AND deleted_at IS NULL AND substr(directory_path, 1, ?) = ? LIMIT 1").bind(projectId, itemPath.length + 1, itemPath + "/").first(),
-            env.DB.prepare("SELECT id FROM application_files WHERE project_id = ? AND deleted_at IS NULL AND substr(file_name, 1, ?) = ? LIMIT 1").bind(projectId, itemPath.length + 1, itemPath + "/").first()
+          const [directories, files, versions] = await Promise.all([
+            env.DB.prepare("SELECT id, directory_path FROM application_directories WHERE project_id = ? AND deleted_at IS NULL AND (directory_path = ? OR substr(directory_path, 1, ?) = ?)").bind(projectId, itemPath, itemPath.length + 1, itemPath + "/").all(),
+            env.DB.prepare("SELECT id, file_name FROM application_files WHERE project_id = ? AND deleted_at IS NULL AND substr(file_name, 1, ?) = ?").bind(projectId, itemPath.length + 1, itemPath + "/").all(),
+            env.DB.prepare("SELECT id, file_name FROM application_file_versions WHERE project_id = ? AND deleted_at IS NULL AND substr(file_name, 1, ?) = ?").bind(projectId, itemPath.length + 1, itemPath + "/").all()
           ]);
-          if (!directory && !childDirectory && !childFile) return json({ error: "Dossier introuvable ou déjà dans la corbeille." }, 404);
+          expectedDirectoryIds = (directories.results || []).map(row => row.id);
+          expectedFileIds = (files.results || []).map(row => row.id);
+          expectedVersionIds = (versions.results || []).map(row => row.id);
+          if (!expectedDirectoryIds.length && !expectedFileIds.length) {
+            return json({ error: "Dossier introuvable ou déjà dans la corbeille." }, 404);
+          }
           await env.DB.batch([
             env.DB.prepare("INSERT INTO application_trash_items (id, project_id, item_type, original_path) SELECT ?, ?, 'folder', ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL) AND (EXISTS (SELECT 1 FROM application_directories WHERE project_id = ? AND deleted_at IS NULL AND (directory_path = ? OR substr(directory_path, 1, ?) = ?)) OR EXISTS (SELECT 1 FROM application_files WHERE project_id = ? AND deleted_at IS NULL AND substr(file_name, 1, ?) = ?))").bind(trashId, projectId, itemPath, projectId, user.id, projectId, itemPath, itemPath.length + 1, itemPath + "/", projectId, itemPath.length + 1, itemPath + "/"),
             env.DB.prepare("UPDATE application_directories SET deleted_at = CURRENT_TIMESTAMP, trash_id = ? WHERE project_id = ? AND deleted_at IS NULL AND (directory_path = ? OR substr(directory_path, 1, ?) = ?)").bind(trashId, projectId, itemPath, itemPath.length + 1, itemPath + "/"),
@@ -4211,8 +4226,25 @@ hosting
             env.DB.prepare("UPDATE application_file_versions SET deleted_at = CURRENT_TIMESTAMP, trash_id = ? WHERE project_id = ? AND deleted_at IS NULL AND substr(file_name, 1, ?) = ?").bind(trashId, projectId, itemPath.length + 1, itemPath + "/")
           ]);
         }
-        const trashItem = await env.DB.prepare("SELECT id FROM application_trash_items WHERE id = ? AND project_id = ? LIMIT 1").bind(trashId, projectId).first();
-        if (!trashItem) return json({ error: "Cet élément a déjà été déplacé ou n'existe plus." }, 409);
+
+        // Confirmer que chaque ligne repérée avant le déplacement porte bien le même identifiant de corbeille.
+        const [trashItem, movedFiles, movedVersions, movedDirectories] = await Promise.all([
+          env.DB.prepare("SELECT id FROM application_trash_items WHERE id = ? AND project_id = ? AND item_type = ? AND original_path = ? LIMIT 1").bind(trashId, projectId, itemType, itemPath).first(),
+          env.DB.prepare("SELECT id FROM application_files WHERE project_id = ? AND trash_id = ? AND deleted_at IS NOT NULL").bind(projectId, trashId).all(),
+          env.DB.prepare("SELECT id FROM application_file_versions WHERE project_id = ? AND trash_id = ? AND deleted_at IS NOT NULL").bind(projectId, trashId).all(),
+          env.DB.prepare("SELECT id FROM application_directories WHERE project_id = ? AND trash_id = ? AND deleted_at IS NOT NULL").bind(projectId, trashId).all()
+        ]);
+        const sameIds = (expected, actual) => {
+          const actualIds = (actual.results || []).map(row => row.id);
+          return expected.length === actualIds.length && expected.every(id => actualIds.includes(id));
+        };
+        if (!trashItem || !sameIds(expectedFileIds, movedFiles) ||
+            !sameIds(expectedVersionIds, movedVersions) ||
+            !sameIds(expectedDirectoryIds, movedDirectories)) {
+          return json({
+            error: "Le déplacement n'a pas pu être entièrement confirmé. L'élément reste récupérable dans la corbeille ; actualisez la liste avant de réessayer."
+          }, 409);
+        }
         return json({ message: "Élément déplacé dans la corbeille.", trash_id: trashId });
       } catch (error) {
         if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
