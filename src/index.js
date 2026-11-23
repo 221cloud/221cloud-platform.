@@ -6874,7 +6874,7 @@ hosting
           const selectColumns = columns.map(column =>
             quoteIdentifier(column.physical_name) + " AS " + quoteIdentifier(column.name)
           );
-          const selectSql = ["row_id", "created_at", ...selectColumns].map(quoteIdentifier).join(", ");
+          const selectSql = [quoteIdentifier("row_id"), quoteIdentifier("created_at"), ...selectColumns].join(", ");
           const result = await env.DB.prepare(
             "SELECT " + selectSql + " FROM " + quoteIdentifier(table.physical_name) + whereSql +
             " ORDER BY " + orderExpression + " " + sortDirection + ", created_at DESC, row_id DESC LIMIT ? OFFSET ?"
