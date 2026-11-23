@@ -1418,8 +1418,9 @@ async function executeProjectHealthCheck(env, task) {
 
 async function runAutomationScheduler(env, scheduledTime) {
   await ensureAutomationTasksSchema(env);
-  const attemptStartedAt = Date.now();
-  const now = Math.floor(attemptStartedAt / 1000);
+
+  const maxTasksPerRun = 5;
+  const expiredCheckTime = Math.floor(Date.now() / 1000);
 
   await env.DB.prepare(`
     UPDATE automation_tasks
@@ -1432,94 +1433,111 @@ async function runAutomationScheduler(env, scheduledTime) {
     WHERE status = 'running'
       AND locked_until <= ?
       AND attempts >= max_attempts
-  `).bind(now).run();
+  `).bind(expiredCheckTime).run();
 
-  const lockToken = crypto.randomUUID();
-  const lockUntil = now + 120;
-  const claimed = await env.DB.prepare(`
-    UPDATE automation_tasks
-    SET status = 'running',
-        lock_token = ?,
-        locked_until = ?,
-        attempts = attempts + 1,
-        started_at = ?,
-        duration_ms = NULL,
-        updated_at = CURRENT_TIMESTAMP
-    WHERE id = (
-      SELECT id
-      FROM automation_tasks
-      WHERE scheduled_at <= ?
+  for (let processed = 0; processed < maxTasksPerRun; processed++) {
+    const attemptStartedAt = Date.now();
+    const now = Math.floor(attemptStartedAt / 1000);
+    const lockToken = crypto.randomUUID();
+    const lockUntil = now + 120;
+
+    const claimed = await env.DB.prepare(`
+      UPDATE automation_tasks
+      SET status = 'running',
+          lock_token = ?,
+          locked_until = ?,
+          attempts = attempts + 1,
+          started_at = ?,
+          duration_ms = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = (
+        SELECT id
+        FROM automation_tasks
+        WHERE scheduled_at <= ?
+          AND attempts < max_attempts
+          AND (
+            status = 'pending'
+            OR (status = 'running' AND locked_until <= ?)
+          )
+        ORDER BY scheduled_at ASC, created_at ASC
+        LIMIT 1
+      )
         AND attempts < max_attempts
         AND (
           status = 'pending'
           OR (status = 'running' AND locked_until <= ?)
         )
-      ORDER BY scheduled_at ASC, created_at ASC
-      LIMIT 1
-    )
-      AND attempts < max_attempts
-      AND (
-        status = 'pending'
-        OR (status = 'running' AND locked_until <= ?)
-      )
-  `).bind(lockToken, lockUntil, new Date(attemptStartedAt).toISOString(), now, now, now).run();
-
-  if (!claimed.meta || Number(claimed.meta.changes || 0) !== 1) return;
-
-  const task = await env.DB.prepare(
-    "SELECT id, user_id, project_id, task_type, attempts, max_attempts FROM automation_tasks WHERE lock_token = ? AND status = 'running' LIMIT 1"
-  ).bind(lockToken).first();
-
-  if (!task) return;
-
-  try {
-    if (task.task_type !== "project_health_check") {
-      throw new Error("Type de tâche non autorisé par le moteur.");
-    }
-
-    const result = await executeProjectHealthCheck(env, task);
-    await env.DB.prepare(`
-      UPDATE automation_tasks
-      SET status = 'completed',
-          result_json = ?,
-          duration_ms = ?,
-          last_error = NULL,
-          lock_token = NULL,
-          locked_until = NULL,
-          completed_at = CURRENT_TIMESTAMP,
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = ? AND status = 'running' AND lock_token = ?
-    `).bind(JSON.stringify(result), Math.max(0, Date.now() - attemptStartedAt), task.id, lockToken).run();
-  } catch (error) {
-    const message = String(error?.message || "Erreur d'exécution").slice(0, 1000);
-    const canRetry = Number(task.attempts) < Number(task.max_attempts);
-    await env.DB.prepare(`
-      UPDATE automation_tasks
-      SET status = ?,
-          scheduled_at = CASE WHEN ? = 1 THEN ? ELSE scheduled_at END,
-          last_error = ?,
-          duration_ms = ?,
-          completed_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END,
-          lock_token = NULL,
-          locked_until = NULL,
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = ? AND status = 'running' AND lock_token = ?
     `).bind(
-      canRetry ? "pending" : "failed",
-      canRetry ? 1 : 0,
-      now + 60,
-      message,
-      Math.max(0, Date.now() - attemptStartedAt),
-      canRetry ? 0 : 1,
-      task.id,
-      lockToken
+      lockToken,
+      lockUntil,
+      new Date(attemptStartedAt).toISOString(),
+      now,
+      now,
+      now
     ).run();
-    console.error("ERREUR EXÉCUTION AUTOMATISATION:", {
-      taskId: task.id,
-      attempt: task.attempts,
-      retry: canRetry,
-      error: message
-    });
+
+    if (!claimed.meta || Number(claimed.meta.changes || 0) !== 1) break;
+
+    const task = await env.DB.prepare(
+      "SELECT id, user_id, project_id, task_type, attempts, max_attempts FROM automation_tasks WHERE lock_token = ? AND status = 'running' LIMIT 1"
+    ).bind(lockToken).first();
+
+    if (!task) break;
+
+    try {
+      if (task.task_type !== "project_health_check") {
+        throw new Error("Type de tâche non autorisé par le moteur.");
+      }
+
+      const result = await executeProjectHealthCheck(env, task);
+      await env.DB.prepare(`
+        UPDATE automation_tasks
+        SET status = 'completed',
+            result_json = ?,
+            duration_ms = ?,
+            last_error = NULL,
+            lock_token = NULL,
+            locked_until = NULL,
+            completed_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND status = 'running' AND lock_token = ?
+      `).bind(
+        JSON.stringify(result),
+        Math.max(0, Date.now() - attemptStartedAt),
+        task.id,
+        lockToken
+      ).run();
+    } catch (error) {
+      const message = String(error?.message || "Erreur d'exécution").slice(0, 1000);
+      const canRetry = Number(task.attempts) < Number(task.max_attempts);
+      await env.DB.prepare(`
+        UPDATE automation_tasks
+        SET status = ?,
+            scheduled_at = CASE WHEN ? = 1 THEN ? ELSE scheduled_at END,
+            last_error = ?,
+            duration_ms = ?,
+            completed_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END,
+            lock_token = NULL,
+            locked_until = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND status = 'running' AND lock_token = ?
+      `).bind(
+        canRetry ? "pending" : "failed",
+        canRetry ? 1 : 0,
+        now + 60,
+        message,
+        Math.max(0, Date.now() - attemptStartedAt),
+        canRetry ? 0 : 1,
+        task.id,
+        lockToken
+      ).run();
+      console.error("ERREUR EXÉCUTION AUTOMATISATION:", {
+        taskId: task.id,
+        attempt: task.attempts,
+        retry: canRetry,
+        error: message
+      });
+    }
   }
 }
 
