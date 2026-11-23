@@ -3637,7 +3637,7 @@ hosting
     }
 
     // APPLICATIONS : CRÉER UN DOSSIER
-    const applicationFoldersMatch = path.match(/^\/api\/projects\/([^/]+)\/application-folders$/);
+    const applicationFoldersMatch = path.match(/^\\/api\\/projects\\/([^/]+)\\/application-folders$/);
     if (applicationFoldersMatch && request.method === "POST") {
       try {
         const user = await currentUser(request, env);
@@ -3658,17 +3658,47 @@ hosting
         if (conflictingFilePath) {
           return json({ error: "Un fichier existe déjà sur ce chemin ou sur l'un de ses niveaux parents : " + conflictingFilePath }, 409);
         }
+
         const segments = directoryPath.split("/");
         const paths = segments.map((_, index) => segments.slice(0, index + 1).join("/"));
-        const existing = await env.DB.prepare(
+        const [directoryRows, fileRows] = await Promise.all([
+          env.DB.prepare("SELECT directory_path, deleted_at FROM application_directories WHERE project_id = ?")
+            .bind(projectId).all(),
+          env.DB.prepare("SELECT file_name, deleted_at FROM application_files WHERE project_id = ?")
+            .bind(projectId).all()
+        ]);
+        const directories = directoryRows.results || [];
+        const files = fileRows.results || [];
+
+        // Les chemins supprimés restent réservés par les contraintes UNIQUE.
+        // Ne pas créer à l'identique d'un dossier supprimé ni sous un parent
+        // supprimé ou un fichier placé dans la corbeille.
+        for (const candidate of paths) {
+          const trashedDirectory = directories.find(row =>
+            row.deleted_at && (candidate === row.directory_path || candidate.startsWith(row.directory_path + "/"))
+          );
+          if (trashedDirectory) {
+            return json({ error: "Un dossier situé dans la corbeille réserve ce chemin : " + trashedDirectory.directory_path + ". Restaurez-le ou videz-le avant de continuer." }, 409);
+          }
+          const trashedFile = files.find(row =>
+            row.deleted_at && (candidate === row.file_name || candidate.startsWith(row.file_name + "/"))
+          );
+          if (trashedFile) {
+            return json({ error: "Un fichier situé dans la corbeille bloque ce chemin : " + trashedFile.file_name + "." }, 409);
+          }
+        }
+
+        const statements = paths.map(directory => env.DB.prepare(
+          "INSERT OR IGNORE INTO application_directories (id, project_id, directory_path) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)"
+        ).bind(crypto.randomUUID(), projectId, directory, projectId, user.id));
+        await env.DB.batch(statements);
+
+        const savedDirectories = await env.DB.prepare(
           "SELECT directory_path FROM application_directories WHERE project_id = ? AND deleted_at IS NULL"
         ).bind(projectId).all();
-        const known = new Set((existing.results || []).map(item => item.directory_path));
-        for (const directory of paths) {
-          if (known.has(directory)) continue;
-          await env.DB.prepare(
-            "INSERT OR IGNORE INTO application_directories (id, project_id, directory_path) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)"
-          ).bind(crypto.randomUUID(), projectId, directory, projectId, user.id).run();
+        const savedPaths = new Set((savedDirectories.results || []).map(item => item.directory_path));
+        if (paths.some(directory => !savedPaths.has(directory))) {
+          return json({ error: "Le dossier n'a pas pu être créé intégralement. Aucun succès n'a été confirmé." }, 409);
         }
         return json({ message: "Dossier créé.", directory_path: directoryPath }, 201);
       } catch (error) {
