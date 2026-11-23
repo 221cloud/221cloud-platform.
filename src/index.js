@@ -3950,6 +3950,97 @@ hosting
       }
     }
 
+
+    // APPLICATIONS : RENOMMER UN FICHIER OU UN DOSSIER
+    const applicationRenameMatch = path.match(/^\/api\/projects\/([^/]+)\/application-items\/rename$/);
+    if (applicationRenameMatch && request.method === "POST") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureApplicationFilesSchema(env);
+        await ensureApplicationDirectoriesSchema(env);
+        const projectId = decodeURIComponent(applicationRenameMatch[1]);
+        const project = await env.DB.prepare(
+          "SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1"
+        ).bind(projectId, user.id).first();
+        if (!project) return json({ error: "Application introuvable." }, 404);
+        const body = await readLimitedJsonBody(request);
+        const itemType = String(body.item_type || "");
+        const oldPath = String(body.old_path || "");
+        const newPath = String(body.new_path || "");
+        const validOld = itemType === "folder"
+          ? validApplicationFilePath(oldPath + "/placeholder.txt")
+          : validApplicationFilePath(oldPath);
+        const validNew = itemType === "folder"
+          ? validApplicationFilePath(newPath + "/placeholder.txt")
+          : validApplicationFilePath(newPath);
+        if (!["file", "folder"].includes(itemType) || !validOld || !validNew) {
+          return json({ error: "Type ou chemin invalide." }, 400);
+        }
+        if (oldPath === newPath || (itemType === "folder" && newPath.startsWith(oldPath + "/"))) {
+          return json({ error: "Ce nouveau chemin n'est pas autorisé." }, 400);
+        }
+        const [fileRows, directoryRows] = await Promise.all([
+          env.DB.prepare("SELECT file_name FROM application_files WHERE project_id = ?").bind(projectId).all(),
+          env.DB.prepare("SELECT directory_path FROM application_directories WHERE project_id = ?").bind(projectId).all()
+        ]);
+        const files = (fileRows.results || []).map(row => row.file_name);
+        const dirs = (directoryRows.results || []).map(row => row.directory_path);
+        const sourceExists = itemType === "file"
+          ? files.includes(oldPath)
+          : dirs.includes(oldPath) || dirs.some(name => name.startsWith(oldPath + "/")) || files.some(name => name.startsWith(oldPath + "/"));
+        if (!sourceExists) return json({ error: "Fichier ou dossier introuvable." }, 404);
+        const movingFiles = itemType === "file" ? [oldPath] : files.filter(name => name.startsWith(oldPath + "/"));
+        const movingDirs = itemType === "folder" ? dirs.filter(name => name === oldPath || name.startsWith(oldPath + "/")) : [];
+        const mapPath = value => itemType === "file" ? newPath : newPath + value.slice(oldPath.length);
+        const movingFileSet = new Set(movingFiles);
+        const movingDirSet = new Set(movingDirs);
+        const targetsFiles = movingFiles.map(mapPath);
+        const targetsDirs = movingDirs.map(mapPath);
+        const collision =
+          targetsFiles.some(name => (files.includes(name) && !movingFileSet.has(name)) || (dirs.includes(name) && !movingDirSet.has(name))) ||
+          targetsDirs.some(name => (dirs.includes(name) && !movingDirSet.has(name)) || (files.includes(name) && !movingFileSet.has(name)));
+        if (collision) return json({ error: "Un fichier ou dossier existe déjà sur le nouveau chemin." }, 409);
+        const parent = newPath.includes("/") ? newPath.split("/").slice(0, -1).join("/") : "";
+        if (parent && files.includes(parent) && !movingFileSet.has(parent)) {
+          return json({ error: "Un fichier bloque le dossier parent du nouveau chemin." }, 409);
+        }
+        if (itemType === "file") {
+          await env.DB.batch([
+            env.DB.prepare("UPDATE application_files SET file_name = ?, mime_type = ?, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND file_name = ?")
+              .bind(newPath, applicationFileMimeType(newPath), projectId, oldPath),
+            env.DB.prepare("UPDATE application_file_versions SET file_name = ?, mime_type = ? WHERE project_id = ? AND file_name = ?")
+              .bind(newPath, applicationFileMimeType(newPath), projectId, oldPath)
+          ]);
+        } else {
+          await env.DB.batch([
+            env.DB.prepare("UPDATE application_directories SET directory_path = ? WHERE project_id = ? AND directory_path = ?")
+              .bind(newPath, projectId, oldPath),
+            env.DB.prepare("UPDATE application_directories SET directory_path = ? || substr(directory_path, ?) WHERE project_id = ? AND substr(directory_path, 1, ?) = ?")
+              .bind(newPath, oldPath.length + 1, projectId, oldPath.length + 1, oldPath + "/"),
+            env.DB.prepare("UPDATE application_files SET file_name = ? || substr(file_name, ?), updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND substr(file_name, 1, ?) = ?")
+              .bind(newPath, oldPath.length + 1, projectId, oldPath.length + 1, oldPath + "/"),
+            env.DB.prepare("UPDATE application_file_versions SET file_name = ? || substr(file_name, ?) WHERE project_id = ? AND substr(file_name, 1, ?) = ?")
+              .bind(newPath, oldPath.length + 1, projectId, oldPath.length + 1, oldPath + "/")
+          ]);
+        }
+        if (parent) {
+          const parts = parent.split("/");
+          for (let i = 0; i < parts.length; i++) {
+            const parentPath = parts.slice(0, i + 1).join("/");
+            await env.DB.prepare(
+              "INSERT OR IGNORE INTO application_directories (id, project_id, directory_path) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)"
+            ).bind(crypto.randomUUID(), projectId, parentPath, projectId, user.id).run();
+          }
+        }
+        return json({ message: "Élément renommé.", old_path: oldPath, new_path: newPath });
+      } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
+        console.error("ERREUR RENOMMAGE ÉLÉMENT APPLICATION:", error);
+        return json({ error: "Impossible de renommer cet élément." }, 500);
+      }
+    }
+
     // MODIFICATION ET SUPPRESSION D'UN PROJET
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)$/);
 
