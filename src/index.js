@@ -4534,36 +4534,78 @@ hosting
           targetsDirs.some(name => (dirs.includes(name) && !movingDirSet.has(name)) || (files.includes(name) && !movingFileSet.has(name)));
         if (collision) return json({ error: "Un fichier ou dossier existe déjà sur le nouveau chemin." }, 409);
         const parent = newPath.includes("/") ? newPath.split("/").slice(0, -1).join("/") : "";
+        const parentParts = parent ? parent.split("/") : [];
+        const parentPaths = parentParts.map((_, index) => parentParts.slice(0, index + 1).join("/"));
         if (parent && files.includes(parent) && !movingFileSet.has(parent)) {
           return json({ error: "Un fichier bloque le dossier parent du nouveau chemin." }, 409);
         }
+        const trashedParent = (directoryRows.results || []).find(row =>
+          row.deleted_at && parentPaths.includes(row.directory_path)
+        );
+        if (trashedParent) {
+          return json({
+            error: "Un dossier parent de destination est dans la corbeille : " +
+              trashedParent.directory_path + ". Restaurez-le avant de renommer cet élément."
+          }, 409);
+        }
+
+        const versionRows = await env.DB.prepare(
+          "SELECT id FROM application_file_versions WHERE project_id = ? AND deleted_at IS NULL AND file_name IN (SELECT value FROM json_each(?))"
+        ).bind(projectId, JSON.stringify(movingFiles)).all();
+        const expectedVersionCount = (versionRows.results || []).length;
+        const parentGuardSql =
+          "AND NOT EXISTS (SELECT 1 FROM application_directories pd WHERE pd.project_id = ? AND pd.deleted_at IS NOT NULL AND pd.directory_path IN (SELECT value FROM json_each(?)))";
+        const parentGuardBindings = () => [projectId, JSON.stringify(parentPaths)];
+
         if (itemType === "file") {
           await env.DB.batch([
-            env.DB.prepare("UPDATE application_files SET file_name = ?, mime_type = ?, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND file_name = ? AND deleted_at IS NULL")
-              .bind(newPath, applicationFileMimeType(newPath), projectId, oldPath),
-            env.DB.prepare("UPDATE application_file_versions SET file_name = ?, mime_type = ? WHERE project_id = ? AND file_name = ? AND deleted_at IS NULL")
-              .bind(newPath, applicationFileMimeType(newPath), projectId, oldPath)
+            env.DB.prepare("UPDATE application_files SET file_name = ?, mime_type = ?, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND file_name = ? AND deleted_at IS NULL " + parentGuardSql)
+              .bind(newPath, applicationFileMimeType(newPath), projectId, oldPath, ...parentGuardBindings()),
+            env.DB.prepare("UPDATE application_file_versions SET file_name = ?, mime_type = ? WHERE project_id = ? AND file_name = ? AND deleted_at IS NULL " + parentGuardSql)
+              .bind(newPath, applicationFileMimeType(newPath), projectId, oldPath, ...parentGuardBindings())
           ]);
         } else {
           await env.DB.batch([
-            env.DB.prepare("UPDATE application_directories SET directory_path = ? WHERE project_id = ? AND directory_path = ? AND deleted_at IS NULL")
-              .bind(newPath, projectId, oldPath),
-            env.DB.prepare("UPDATE application_directories SET directory_path = ? || substr(directory_path, ?) WHERE project_id = ? AND deleted_at IS NULL AND substr(directory_path, 1, ?) = ?")
-              .bind(newPath, oldPath.length + 1, projectId, oldPath.length + 1, oldPath + "/"),
-            env.DB.prepare("UPDATE application_files SET file_name = ? || substr(file_name, ?), updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND deleted_at IS NULL AND substr(file_name, 1, ?) = ?")
-              .bind(newPath, oldPath.length + 1, projectId, oldPath.length + 1, oldPath + "/"),
-            env.DB.prepare("UPDATE application_file_versions SET file_name = ? || substr(file_name, ?) WHERE project_id = ? AND deleted_at IS NULL AND substr(file_name, 1, ?) = ?")
-              .bind(newPath, oldPath.length + 1, projectId, oldPath.length + 1, oldPath + "/")
+            env.DB.prepare("UPDATE application_directories SET directory_path = ? WHERE project_id = ? AND directory_path = ? AND deleted_at IS NULL " + parentGuardSql)
+              .bind(newPath, projectId, oldPath, ...parentGuardBindings()),
+            env.DB.prepare("UPDATE application_directories SET directory_path = ? || substr(directory_path, ?) WHERE project_id = ? AND deleted_at IS NULL AND substr(directory_path, 1, ?) = ? " + parentGuardSql)
+              .bind(newPath, oldPath.length + 1, projectId, oldPath.length + 1, oldPath + "/", ...parentGuardBindings()),
+            env.DB.prepare("UPDATE application_files SET file_name = ? || substr(file_name, ?), updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND deleted_at IS NULL AND substr(file_name, 1, ?) = ? " + parentGuardSql)
+              .bind(newPath, oldPath.length + 1, projectId, oldPath.length + 1, oldPath + "/", ...parentGuardBindings()),
+            env.DB.prepare("UPDATE application_file_versions SET file_name = ? || substr(file_name, ?) WHERE project_id = ? AND deleted_at IS NULL AND substr(file_name, 1, ?) = ? " + parentGuardSql)
+              .bind(newPath, oldPath.length + 1, projectId, oldPath.length + 1, oldPath + "/", ...parentGuardBindings())
           ]);
         }
         if (parent) {
-          const parts = parent.split("/");
-          for (let i = 0; i < parts.length; i++) {
-            const parentPath = parts.slice(0, i + 1).join("/");
+          for (const parentPath of parentPaths) {
             await env.DB.prepare(
-              "INSERT OR IGNORE INTO application_directories (id, project_id, directory_path) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)"
-            ).bind(crypto.randomUUID(), projectId, parentPath, projectId, user.id).run();
+              "INSERT OR IGNORE INTO application_directories (id, project_id, directory_path) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL) AND NOT EXISTS (SELECT 1 FROM application_directories WHERE project_id = ? AND directory_path = ? AND deleted_at IS NOT NULL)"
+            ).bind(crypto.randomUUID(), projectId, parentPath, projectId, user.id, projectId, parentPath).run();
           }
+        }
+
+        const [renamedFiles, renamedDirectories, renamedVersions] = await Promise.all([
+          targetsFiles.length
+            ? env.DB.prepare("SELECT COUNT(*) AS total FROM application_files WHERE project_id = ? AND deleted_at IS NULL AND file_name IN (SELECT value FROM json_each(?))")
+                .bind(projectId, JSON.stringify(targetsFiles)).first()
+            : Promise.resolve({ total: 0 }),
+          targetsDirs.length
+            ? env.DB.prepare("SELECT COUNT(*) AS total FROM application_directories WHERE project_id = ? AND deleted_at IS NULL AND directory_path IN (SELECT value FROM json_each(?))")
+                .bind(projectId, JSON.stringify(targetsDirs)).first()
+            : Promise.resolve({ total: 0 }),
+          targetsFiles.length
+            ? env.DB.prepare("SELECT COUNT(*) AS total FROM application_file_versions WHERE project_id = ? AND deleted_at IS NULL AND file_name IN (SELECT value FROM json_each(?))")
+                .bind(projectId, JSON.stringify(targetsFiles)).first()
+            : Promise.resolve({ total: 0 })
+        ]);
+        const renameConfirmed =
+          Number(renamedFiles?.total || 0) === targetsFiles.length &&
+          Number(renamedDirectories?.total || 0) === targetsDirs.length &&
+          Number(renamedVersions?.total || 0) === expectedVersionCount;
+        if (!renameConfirmed) {
+          return json({
+            error: "Le renommage n'a pas pu être confirmé complètement. Actualisez l'explorateur avant de réessayer."
+          }, 409);
         }
         return json({ message: "Élément renommé.", old_path: oldPath, new_path: newPath });
       } catch (error) {
