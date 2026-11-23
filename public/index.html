@@ -6424,6 +6424,22 @@ function updateProQuoteTotal() {
   if (total) total.textContent = formatProMoney(safeLabour + materials);
 }
 
+function printProQuote(quoteId) {
+  const quote = proQuotesCache.find(item => item.id === quoteId);
+  if (!quote) { alert('Devis introuvable. Actualisez la page puis réessayez.'); return; }
+  const popup = window.open('', '_blank');
+  if (!popup) { alert('Autorisez les fenêtres pop-up pour exporter le devis.'); return; }
+  const items = Array.isArray(quote.items) ? quote.items : [];
+  const rows = items.length ? items.map((item, index) => '<tr><td>' + (index + 1) + '</td><td>' + escapeHTML(item.label) + '</td><td>' + escapeHTML(String(item.quantity)) + ' ' + escapeHTML(item.unit) + '</td><td>' + escapeHTML(formatProMoney(item.unit_price)) + '</td><td>' + escapeHTML(formatProMoney(item.total_amount)) + '</td></tr>').join('') : '<tr><td colspan="5">Aucun détail de matériel</td></tr>';
+  const html = '<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Devis 221Cloud Pro</title><style>body{font-family:Arial,sans-serif;color:#172033;padding:24px;line-height:1.5}h1,h2{color:#123b34}.brand{font-size:22px;font-weight:bold;color:#123b34;border-bottom:3px solid #123b34;padding-bottom:12px}.muted{color:#64748b}.panel{background:#f4f7f6;padding:12px;border:1px solid #dce5e1;border-radius:8px}table{width:100%;border-collapse:collapse;margin-top:10px}th{background:#123b34;color:white;text-align:left}td,th{padding:9px;border-bottom:1px solid #ddd}.totals{margin:20px 0 0 auto;max-width:350px}.totals p{display:flex;justify-content:space-between}.grand{font-size:18px;font-weight:bold;border-top:2px solid #123b34;padding-top:10px}.sign{display:flex;justify-content:space-between;margin-top:55px}.sign span{border-top:1px solid #999;padding-top:8px;width:42%}@page{size:A4;margin:16mm}@media print{body{padding:0}}</style></head><body>' +
+    '<div class="brand">221CLOUD PRO <span class="muted">· DEVIS</span></div><p class="muted">Date : ' + escapeHTML(formatDate(quote.created_at)) + ' · Référence : ' + escapeHTML(String(quote.id).slice(-8).toUpperCase()) + '</p>' +
+    '<h1>Devis de travaux</h1><section class="panel"><h2>Client</h2><strong>' + escapeHTML(quote.client_name || 'Client') + '</strong><div>' + (quote.client_phone ? 'Téléphone : ' + escapeHTML(quote.client_phone) : 'Téléphone non renseigné') + '</div><div>' + (quote.client_address ? 'Adresse : ' + escapeHTML(quote.client_address) : 'Adresse non renseignée') + '</div></section>' +
+    '<h2>Travaux à réaliser</h2><div class="panel">' + escapeHTML(quote.description || '') + '</div><h2>Matériaux et fournitures</h2><table><thead><tr><th>#</th><th>Désignation</th><th>Quantité</th><th>Prix unitaire</th><th>Total</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+    '<section class="totals"><p><span>Total matériaux</span><strong>' + escapeHTML(formatProMoney(quote.material_amount)) + '</strong></p><p><span>Main-d’œuvre</span><strong>' + escapeHTML(formatProMoney(quote.labour_amount)) + '</strong></p><p class="grand"><span>TOTAL DU DEVIS</span><strong>' + escapeHTML(formatProMoney(quote.total_amount)) + '</strong></p></section>' +
+    '<div class="sign"><span>Signature de l’artisan</span><span>Accord et signature du client</span></div><p class="muted" style="text-align:center;margin-top:35px">Document préparé avec 221Cloud Pro · Montants en FCFA</p></body></html>';
+  popup.document.open(); popup.document.write(html); popup.document.close();
+  popup.onload = () => popup.print();
+}
 async function deleteProQuote(quoteId) {
   const quote = proQuotesCache.find(item => item.id === quoteId);
   if (!quote || quote.status !== "draft") {
@@ -6489,6 +6505,7 @@ async function loadProQuotes() {
             <button type="button" class="secondary" onclick="editProQuote('${escapeHTML(quote.id)}')">✏️ Modifier ce devis</button>
             <button type="button" class="danger" onclick="deleteProQuote('${escapeHTML(quote.id)}')">🗑️ Supprimer ce devis</button>
           </div>` : ""}
+          <div class="item-actions"><button type="button" class="secondary" onclick="printProQuote(&quot;${escapeHTML(quote.id)}&quot;)">📄 Exporter en PDF</button></div>
           <p style="font-size:19px;margin:14px 0 8px"><strong>${escapeHTML(formatProMoney(quote.total_amount))}</strong></p>
           <details style="margin-top:12px">
             <summary style="cursor:pointer;color:#8eb6ff;font-weight:700;padding:8px 0">📄 Consulter le devis complet</summary>
