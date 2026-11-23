@@ -4047,7 +4047,7 @@ hosting
           const file = await env.DB.prepare("SELECT id FROM application_files WHERE project_id = ? AND file_name = ? AND deleted_at IS NULL LIMIT 1").bind(projectId, itemPath).first();
           if (!file) return json({ error: "Fichier introuvable." }, 404);
           await env.DB.batch([
-            env.DB.prepare("INSERT INTO application_trash_items (id, project_id, item_type, original_path) SELECT ?, ?, 'file', ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)").bind(trashId, projectId, itemPath, projectId, user.id),
+            env.DB.prepare("INSERT INTO application_trash_items (id, project_id, item_type, original_path) SELECT ?, ?, 'file', ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL) AND EXISTS (SELECT 1 FROM application_files WHERE project_id = ? AND file_name = ? AND deleted_at IS NULL)").bind(trashId, projectId, itemPath, projectId, user.id, projectId, itemPath),
             env.DB.prepare("UPDATE application_files SET deleted_at = CURRENT_TIMESTAMP, trash_id = ? WHERE project_id = ? AND file_name = ? AND deleted_at IS NULL").bind(trashId, projectId, itemPath),
             env.DB.prepare("UPDATE application_file_versions SET deleted_at = CURRENT_TIMESTAMP, trash_id = ? WHERE project_id = ? AND file_name = ? AND deleted_at IS NULL").bind(trashId, projectId, itemPath)
           ]);
@@ -4059,12 +4059,14 @@ hosting
           ]);
           if (!directory && !childDirectory && !childFile) return json({ error: "Dossier introuvable ou déjà dans la corbeille." }, 404);
           await env.DB.batch([
-            env.DB.prepare("INSERT INTO application_trash_items (id, project_id, item_type, original_path) SELECT ?, ?, 'folder', ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL)").bind(trashId, projectId, itemPath, projectId, user.id),
+            env.DB.prepare("INSERT INTO application_trash_items (id, project_id, item_type, original_path) SELECT ?, ?, 'folder', ? WHERE EXISTS (SELECT 1 FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL) AND (EXISTS (SELECT 1 FROM application_directories WHERE project_id = ? AND deleted_at IS NULL AND (directory_path = ? OR substr(directory_path, 1, ?) = ?)) OR EXISTS (SELECT 1 FROM application_files WHERE project_id = ? AND deleted_at IS NULL AND substr(file_name, 1, ?) = ?))").bind(trashId, projectId, itemPath, projectId, user.id, projectId, itemPath, itemPath.length + 1, itemPath + "/", projectId, itemPath.length + 1, itemPath + "/"),
             env.DB.prepare("UPDATE application_directories SET deleted_at = CURRENT_TIMESTAMP, trash_id = ? WHERE project_id = ? AND deleted_at IS NULL AND (directory_path = ? OR substr(directory_path, 1, ?) = ?)").bind(trashId, projectId, itemPath, itemPath.length + 1, itemPath + "/"),
             env.DB.prepare("UPDATE application_files SET deleted_at = CURRENT_TIMESTAMP, trash_id = ? WHERE project_id = ? AND deleted_at IS NULL AND substr(file_name, 1, ?) = ?").bind(trashId, projectId, itemPath.length + 1, itemPath + "/"),
             env.DB.prepare("UPDATE application_file_versions SET deleted_at = CURRENT_TIMESTAMP, trash_id = ? WHERE project_id = ? AND deleted_at IS NULL AND substr(file_name, 1, ?) = ?").bind(trashId, projectId, itemPath.length + 1, itemPath + "/")
           ]);
         }
+        const trashItem = await env.DB.prepare("SELECT id FROM application_trash_items WHERE id = ? AND project_id = ? LIMIT 1").bind(trashId, projectId).first();
+        if (!trashItem) return json({ error: "Cet élément a déjà été déplacé ou n'existe plus." }, 409);
         return json({ message: "Élément déplacé dans la corbeille.", trash_id: trashId });
       } catch (error) {
         if (error?.status === 413) return json({ error: "La requête JSON dépasse la limite autorisée de 4 Mo." }, 413);
