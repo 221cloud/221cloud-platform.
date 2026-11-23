@@ -2300,6 +2300,43 @@ export default {
       }
     }
 
+
+    // GESTION DES APPLICATIONS MCP AUTORISÉES PAR L’UTILISATEUR
+    if (path === "/api/assistant-access/oauth-connections" && request.method === "GET") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureOAuthSchema(env);
+        const result = await env.DB.prepare(
+          "SELECT c.client_id, c.client_name, MAX(r.created_at) AS last_authorized_at FROM oauth_refresh_tokens r JOIN oauth_clients c ON c.client_id = r.client_id WHERE r.user_id = ? AND r.revoked_at IS NULL AND datetime(r.expires_at) > CURRENT_TIMESTAMP GROUP BY c.client_id, c.client_name ORDER BY last_authorized_at DESC"
+        ).bind(user.id).all();
+        return json({ connections: result.results || [] });
+      } catch (error) {
+        console.error("ERREUR LISTE CONNEXIONS OAUTH:", error);
+        return json({ error: "Impossible de charger les applications connectées." }, 500);
+      }
+    }
+
+    const oauthConnectionRevokeMatch = path.match(/^\/api\/assistant-access\/oauth-connections\/(221client_[a-f0-9]{64})\/revoke$/i);
+    if (oauthConnectionRevokeMatch && request.method === "POST") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureOAuthSchema(env);
+        const clientId = oauthConnectionRevokeMatch[1];
+        const [refreshResult, accessResult] = await env.DB.batch([
+          env.DB.prepare("UPDATE oauth_refresh_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND client_id = ? AND revoked_at IS NULL").bind(user.id, clientId),
+          env.DB.prepare("UPDATE oauth_access_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND client_id = ? AND revoked_at IS NULL").bind(user.id, clientId)
+        ]);
+        const changes = Number(refreshResult?.meta?.changes || 0) + Number(accessResult?.meta?.changes || 0);
+        if (!changes) return json({ error: "Cette application n’a aucun accès actif à révoquer." }, 404);
+        return json({ message: "Accès de cette application révoqué." });
+      } catch (error) {
+        console.error("ERREUR RÉVOCATION CONNEXION OAUTH:", error);
+        return json({ error: "Impossible de révoquer cette application." }, 500);
+      }
+    }
+
     // GESTION DES ACCÈS DÉVELOPPEUR : CRÉATION ET RÉVOCATION DES CLÉS
     if (path === "/api/assistant-access/tokens") {
       if (!["GET", "POST"].includes(request.method)) {
