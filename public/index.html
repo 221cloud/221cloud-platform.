@@ -664,6 +664,7 @@ footer {
       <button class="nav-btn" data-page="storage" onclick="showPage('storage')">▧ Stockage cloud</button>
       <button class="nav-btn" data-page="hosting" onclick="showPage('hosting')">◎ Hébergement</button>
       <button class="nav-btn" data-page="applications" onclick="showPage('applications')">▦ Applications</button>
+      <button class="nav-btn" data-page="pro" onclick="showPage('pro')">⚡ 221Cloud Pro</button>
       <button class="nav-btn admin-nav hidden" data-page="admin" onclick="showPage('admin')">🛡 Administration</button>
       <button class="nav-btn" data-page="account" onclick="showPage('account')">⚙ Mon compte</button>
       <button class="nav-btn" data-page="assistant-access" onclick="showPage('assistant-access')">🔑 Accès assistant</button>
@@ -1104,6 +1105,7 @@ function showPage(page) {
     else if (page === "subscription") renderSubscriptionPage();
   else if (page === "hosting") renderHostingPage();
   else if (page === "applications") renderApplicationsPage();
+  else if (page === "pro") renderProPage();
   else if (page === "admin") renderAdmin();
   else if (page === "account") renderAccount();
   else if (page === "assistant-access") renderAssistantAccessPage();
@@ -6178,6 +6180,41 @@ ${
     `;
   }
 }
+
+/* 221CLOUD PRO — PREMIER ESPACE ARTISAN */
+function renderProPage() {
+  const main = document.getElementById("mainContent");
+  main.innerHTML = `
+    <div class="dashboard-hero" style="background:radial-gradient(circle at 85% 20%,rgba(36,214,160,.22),transparent 35%),linear-gradient(120deg,#123b34,#14294d 75%,#182044)">
+      <div class="dashboard-kicker" style="color:#8de7c7">221CLOUD PRO · ESPACE ARTISAN</div>
+      <h1>Gérez votre activité simplement 👋</h1>
+      <p>Préparez vos devis, vos factures et suivez votre argent depuis votre téléphone.</p>
+      <div style="margin-top:18px"><span class="status online">Pensé pour les artisans du Sénégal</span></div>
+    </div>
+
+    <div class="card" style="border-color:rgba(36,214,160,.35);background:linear-gradient(145deg,#123b34,#101729)">
+      <div style="font-size:12px;letter-spacing:1px;color:#8de7c7;font-weight:700">LE PLUS SIMPLE</div>
+      <h2 style="margin:10px 0">🎙️ Créer un devis en parlant</h2>
+      <p class="muted" style="line-height:1.7">Décrivez le travail en français, en wolof ou en mélangeant les deux. 221Cloud Pro préparera les informations à vérifier.</p>
+      <button type="button" class="secondary" disabled aria-disabled="true">La création vocale arrive dans une prochaine étape</button>
+    </div>
+
+    <div class="section-head"><h2>Que souhaitez-vous faire ?</h2></div>
+    <div class="grid">
+      <div class="card"><div class="shortcut"><div class="shortcut-icon">📄</div><div><h3>Faire un devis</h3><p>Préparer le prix d'un travail pour un client.</p><span class="status">En préparation</span></div></div></div>
+      <div class="card"><div class="shortcut"><div class="shortcut-icon">🧾</div><div><h3>Faire une facture</h3><p>Créer un document après un travail.</p><span class="status">En préparation</span></div></div></div>
+      <div class="card"><div class="shortcut"><div class="shortcut-icon">👥</div><div><h3>Mes clients</h3><p>Retrouver les noms et coordonnées de vos clients.</p><span class="status">En préparation</span></div></div></div>
+      <div class="card"><div class="shortcut"><div class="shortcut-icon">💰</div><div><h3>Mon argent</h3><p>Suivre les paiements, les avances et les sommes restantes.</p><span class="status">En préparation</span></div></div></div>
+      <div class="card"><div class="shortcut"><div class="shortcut-icon">🔌</div><div><h3>Mon matériel</h3><p>Retrouver vos prises, câbles, disjoncteurs et fournitures.</p><span class="status">En préparation</span></div></div></div>
+    </div>
+
+    <div class="notice">
+      <strong>Conçu pour commencer avec les électriciens.</strong><br>
+      Les prix seront toujours vérifiés par l'artisan. Aucun devis ni facture ne sera envoyé sans sa confirmation. Les fonctions seront activées progressivement.
+    </div>
+  `;
+}
+
 /* AUTRES PAGES */
 
 /* APPLICATIONS */
