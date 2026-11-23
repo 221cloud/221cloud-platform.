@@ -4010,15 +4010,18 @@ hosting
         const projectId = decodeURIComponent(applicationTrashListMatch[1]);
         const project = await env.DB.prepare("SELECT id FROM projects WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL LIMIT 1").bind(projectId, user.id).first();
         if (!project) return json({ error: "Application introuvable." }, 404);
-        const items = await env.DB.prepare("SELECT id, item_type, original_path, deleted_at FROM application_trash_items WHERE project_id = ? ORDER BY deleted_at DESC").bind(projectId).all();
-        const result = [];
-        for (const item of (items.results || [])) {
-          const [files, directories] = await Promise.all([
-            env.DB.prepare("SELECT COUNT(*) AS total FROM application_files WHERE project_id = ? AND trash_id = ?").bind(projectId, item.id).first(),
-            env.DB.prepare("SELECT COUNT(*) AS total FROM application_directories WHERE project_id = ? AND trash_id = ?").bind(projectId, item.id).first()
-          ]);
-          result.push({ ...item, file_count: Number(files?.total || 0), directory_count: Number(directories?.total || 0) });
-        }
+        const [items, fileCounts, directoryCounts] = await Promise.all([
+          env.DB.prepare("SELECT id, item_type, original_path, deleted_at FROM application_trash_items WHERE project_id = ? ORDER BY deleted_at DESC").bind(projectId).all(),
+          env.DB.prepare("SELECT trash_id, COUNT(*) AS total FROM application_files WHERE project_id = ? AND trash_id IS NOT NULL GROUP BY trash_id").bind(projectId).all(),
+          env.DB.prepare("SELECT trash_id, COUNT(*) AS total FROM application_directories WHERE project_id = ? AND trash_id IS NOT NULL GROUP BY trash_id").bind(projectId).all()
+        ]);
+        const fileCountByTrashId = new Map((fileCounts.results || []).map(row => [row.trash_id, Number(row.total || 0)]));
+        const directoryCountByTrashId = new Map((directoryCounts.results || []).map(row => [row.trash_id, Number(row.total || 0)]));
+        const result = (items.results || []).map(item => ({
+          ...item,
+          file_count: fileCountByTrashId.get(item.id) || 0,
+          directory_count: directoryCountByTrashId.get(item.id) || 0
+        }));
         return json({ items: result });
       } catch (error) {
         console.error("ERREUR CORBEILLE APPLICATION:", error);
