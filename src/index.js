@@ -387,6 +387,22 @@ async function ensureProSchema(env) {
   await env.DB.prepare(
     "CREATE INDEX IF NOT EXISTS idx_pro_quotes_owner_created ON pro_quotes(user_id, created_at DESC)"
   ).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS pro_quote_items (
+      id TEXT PRIMARY KEY,
+      quote_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      label TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      unit TEXT NOT NULL,
+      unit_price INTEGER NOT NULL,
+      total_amount INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_pro_quote_items_owner_quote ON pro_quote_items(user_id, quote_id)"
+  ).run();
 }
 
 async function ensureCustomerDatabaseStructureSchema(env) {
@@ -2396,7 +2412,7 @@ export default {
     }
 
 
-    // 221CLOUD PRO : DEVIS EN BROUILLON, PRIVÉS PAR UTILISATEUR
+    // 221CLOUD PRO : DEVIS DÉTAILLÉS EN BROUILLON, PRIVÉS PAR UTILISATEUR
     if (path === "/api/pro/quotes") {
       try {
         const user = await currentUser(request, env);
@@ -2414,7 +2430,26 @@ export default {
              ORDER BY q.created_at DESC
              LIMIT 200`
           ).bind(user.id).all();
-          return json({ quotes: result.results || [] }, 200, { "Cache-Control": "no-store" });
+          const quotes = result.results || [];
+          const itemResult = await env.DB.prepare(
+            `SELECT i.id, i.quote_id, i.label, i.quantity, i.unit,
+                    i.unit_price, i.total_amount
+             FROM pro_quote_items i
+             JOIN pro_quotes q ON q.id = i.quote_id AND q.user_id = i.user_id
+             WHERE i.user_id = ?
+             ORDER BY i.created_at ASC`
+          ).bind(user.id).all();
+          const itemsByQuote = new Map();
+          for (const item of (itemResult.results || [])) {
+            if (!itemsByQuote.has(item.quote_id)) itemsByQuote.set(item.quote_id, []);
+            itemsByQuote.get(item.quote_id).push(item);
+          }
+          return json({
+            quotes: quotes.map(quote => ({
+              ...quote,
+              items: itemsByQuote.get(quote.id) || []
+            }))
+          }, 200, { "Cache-Control": "no-store" });
         }
 
         if (request.method === "POST") {
@@ -2422,16 +2457,37 @@ export default {
           const clientId = String(body.client_id || "").trim();
           const description = String(body.description || "").trim();
           const labourAmount = Number(body.labour_amount);
-          const materialAmount = Number(body.material_amount);
+          const rawItems = Array.isArray(body.items) ? body.items : [];
 
           if (!clientId) return json({ error: "Choisissez un client." }, 400);
           if (!description) return json({ error: "Décrivez le travail à réaliser." }, 400);
           if (description.length > 2000) return json({ error: "La description est trop longue." }, 400);
-          if (
-            !Number.isSafeInteger(labourAmount) || labourAmount < 0 || labourAmount > 1000000000 ||
-            !Number.isSafeInteger(materialAmount) || materialAmount < 0 || materialAmount > 1000000000
-          ) {
-            return json({ error: "Vérifiez les montants en FCFA. Utilisez des nombres entiers positifs." }, 400);
+          if (!Number.isSafeInteger(labourAmount) || labourAmount < 0 || labourAmount > 1000000000) {
+            return json({ error: "Vérifiez le prix de la main-d'œuvre en FCFA." }, 400);
+          }
+          if (rawItems.length > 100) return json({ error: "Un devis peut contenir au maximum 100 lignes de matériel." }, 400);
+
+          const items = [];
+          let materialAmount = 0;
+          for (const raw of rawItems) {
+            const label = String(raw?.label || "").trim();
+            if (!label) continue;
+            const quantity = Number(raw?.quantity);
+            const unit = String(raw?.unit || "").trim();
+            const unitPrice = Number(raw?.unit_price);
+            if (
+              label.length > 160 || !Number.isFinite(quantity) || quantity <= 0 || quantity > 1000000 ||
+              !unit || unit.length > 40 ||
+              !Number.isSafeInteger(unitPrice) || unitPrice < 0 || unitPrice > 1000000000
+            ) {
+              return json({ error: "Vérifiez le nom, la quantité, l'unité et le prix de chaque matériel." }, 400);
+            }
+            const lineTotal = Math.round(quantity * unitPrice);
+            if (!Number.isSafeInteger(lineTotal) || lineTotal < 0 || materialAmount + lineTotal > 1000000000) {
+              return json({ error: "Le total du matériel dépasse la limite autorisée." }, 400);
+            }
+            materialAmount += lineTotal;
+            items.push({ label, quantity, unit, unit_price: unitPrice, total_amount: lineTotal });
           }
 
           const client = await env.DB.prepare(
@@ -2440,12 +2496,23 @@ export default {
           if (!client) return json({ error: "Ce client est introuvable dans votre liste." }, 404);
 
           const totalAmount = labourAmount + materialAmount;
+          if (!Number.isSafeInteger(totalAmount) || totalAmount > 1000000000) {
+            return json({ error: "Le total du devis dépasse la limite autorisée." }, 400);
+          }
           const id = crypto.randomUUID();
           await env.DB.prepare(
             `INSERT INTO pro_quotes
              (id, user_id, client_id, description, labour_amount, material_amount, total_amount, status)
              VALUES (?, ?, ?, ?, ?, ?, ?, 'draft')`
           ).bind(id, user.id, clientId, description, labourAmount, materialAmount, totalAmount).run();
+
+          if (items.length) {
+            await env.DB.batch(items.map(item => env.DB.prepare(
+              `INSERT INTO pro_quote_items
+               (id, quote_id, user_id, label, quantity, unit, unit_price, total_amount)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+            ).bind(crypto.randomUUID(), id, user.id, item.label, item.quantity, item.unit, item.unit_price, item.total_amount)));
+          }
 
           const quote = await env.DB.prepare(
             `SELECT q.id, q.client_id, c.name AS client_name, q.description,
@@ -2456,7 +2523,10 @@ export default {
              WHERE q.id = ? AND q.user_id = ?
              LIMIT 1`
           ).bind(id, user.id).first();
-          return json({ message: "Devis enregistré en brouillon.", quote }, 201);
+          return json({
+            message: "Devis enregistré en brouillon.",
+            quote: { ...quote, items }
+          }, 201);
         }
 
         return json({ error: "Méthode non autorisée." }, 405);
