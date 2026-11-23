@@ -1516,7 +1516,7 @@ async function ensureApplicationTeamSchema(env) {
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
-      role TEXT NOT NULL CHECK (role IN ('admin', 'editor', 'writer')),
+      role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'editor', 'writer')),
       status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
       invited_by TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -1559,7 +1559,7 @@ async function ensureApplicationOwnerMembership(env, projectId, ownerId) {
   await env.DB.prepare(`
     INSERT OR IGNORE INTO application_memberships
       (id, project_id, user_id, role, status, invited_by)
-    SELECT ?, ?, ?, 'admin', 'active', ?
+    SELECT ?, ?, ?, 'owner', 'active', ?
     WHERE EXISTS (
       SELECT 1 FROM projects
       WHERE id = ? AND user_id = ? AND type = 'application' AND deleted_at IS NULL
