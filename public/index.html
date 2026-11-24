@@ -6917,13 +6917,18 @@ async function renderProFinancialPage() {
   if (!main) return;
   main.innerHTML = '<div style="display:flex;align-items:center;gap:12px;margin:0 0 18px"><button type="button" class="secondary" onclick="returnToProHome()" style="min-width:104px">← Retour</button><div><div class="dashboard-kicker" style="color:#8de7c7">221CLOUD PRO</div><strong style="font-size:18px">Mon argent</strong></div></div>' +
     '<div class="dashboard-hero" style="background:linear-gradient(120deg,#123b34,#14294d 75%,#182044)"><div class="dashboard-kicker" style="color:#8de7c7">SITUATION FINANCIÈRE</div><h1 id="proFinancialReceived">Chargement…</h1><p>Argent déjà reçu sur vos factures</p></div>' +
-    '<div class="grid"><div class="card"><div class="muted">🧾 Total facturé</div><div class="stat" id="proFinancialTotal">—</div></div><div class="card"><div class="muted">💰 Déjà encaissé</div><div class="stat success-text" id="proFinancialPaid">—</div></div><div class="card"><div class="muted">⏳ Reste à recevoir</div><div class="stat" id="proFinancialRemaining">—</div></div></div>' +
+    '<div class="grid"><div class="card"><div class="muted">🧾 Total facturé</div><div class="stat" id="proFinancialTotal">—</div></div><div class="card"><div class="muted">💰 Déjà encaissé</div><div class="stat success-text" id="proFinancialPaid">—</div></div><div class="card"><div class="muted">⏳ Reste à recevoir</div><div class="stat" id="proFinancialRemaining">—</div></div><div class="card"><div class="muted">🛒 Dépenses enregistrées</div><div class="stat" id="proFinancialExpenses">—</div></div><div class="card"><div class="muted">💵 Reste après dépenses</div><div class="stat" id="proFinancialAfterExpenses">—</div></div></div>' +
     '<div class="card"><div class="section-head"><h2>📊 État des paiements</h2></div><div style="display:flex;justify-content:space-between;gap:10px"><span class="muted">Argent encaissé</span><strong id="proFinancialPercent">—</strong></div><div class="progress"><div class="progress-bar" id="proFinancialProgress"></div></div><div class="grid"><div><div class="muted">✅ Factures payées</div><strong class="stat" id="proFinancialPaidCount">0</strong></div><div><div class="muted">🟠 Paiement partiel</div><strong class="stat" id="proFinancialPartialCount">0</strong></div><div><div class="muted">🔴 Factures à payer</div><strong class="stat" id="proFinancialUnpaidCount">0</strong></div></div><p class="muted" id="proFinancialInvoiceCount" style="margin-bottom:0">0 facture</p></div>' +
-    '<div class="item-actions"><button type="button" onclick="renderProInvoicesPage()">🧾 Voir mes factures</button></div>';
-  await loadProInvoices();
-  const invoices = Array.isArray(proInvoicesCache) ? proInvoicesCache : [];
+    '<div class="notice">Le « reste après dépenses » correspond à l’argent encaissé moins les dépenses enregistrées ici. Ce n’est pas encore un bénéfice comptable complet.</div>' +
+    '<div class="item-actions"><button type="button" onclick="renderProExpensesPage()">🛒 Gérer mes dépenses</button><button type="button" class="secondary" onclick="renderProInvoicesPage()">🧾 Voir mes factures</button></div>';
+  const [invoiceResult, expenseResult] = await Promise.all([
+    api("/pro/invoices"),
+    api("/pro/expenses")
+  ]);
+  proInvoicesCache = Array.isArray(invoiceResult.invoices) ? invoiceResult.invoices : [];
+  const expenses = Array.isArray(expenseResult.expenses) ? expenseResult.expenses : [];
   let total = 0, paid = 0, paidCount = 0, partialCount = 0, unpaidCount = 0;
-  for (const invoice of invoices) {
+  for (const invoice of proInvoicesCache) {
     const invoiceTotal = Math.max(0, Number(invoice.total_amount) || 0);
     const invoicePaid = Math.min(invoiceTotal, Math.max(0, Number(invoice.amount_paid) || 0));
     total += invoiceTotal;
@@ -6932,18 +6937,129 @@ async function renderProFinancialPage() {
     else if (invoicePaid > 0) partialCount++;
     else unpaidCount++;
   }
+  const totalExpenses = expenses.reduce((sum, expense) => sum + Math.max(0, Number(expense.amount) || 0), 0);
   const remaining = Math.max(0, total - paid);
+  const afterExpenses = paid - totalExpenses;
   const percent = total > 0 ? Math.round((paid / total) * 100) : 0;
   document.getElementById("proFinancialReceived").textContent = formatProMoney(paid);
   document.getElementById("proFinancialTotal").textContent = formatProMoney(total);
   document.getElementById("proFinancialPaid").textContent = formatProMoney(paid);
   document.getElementById("proFinancialRemaining").textContent = formatProMoney(remaining);
+  document.getElementById("proFinancialExpenses").textContent = formatProMoney(totalExpenses);
+  document.getElementById("proFinancialAfterExpenses").textContent = formatProMoney(afterExpenses);
   document.getElementById("proFinancialPercent").textContent = percent + " %";
   document.getElementById("proFinancialProgress").style.width = percent + "%";
   document.getElementById("proFinancialPaidCount").textContent = paidCount;
   document.getElementById("proFinancialPartialCount").textContent = partialCount;
   document.getElementById("proFinancialUnpaidCount").textContent = unpaidCount;
-  document.getElementById("proFinancialInvoiceCount").textContent = invoices.length + (invoices.length > 1 ? " factures enregistrées" : " facture enregistrée");
+  document.getElementById("proFinancialInvoiceCount").textContent = proInvoicesCache.length + (proInvoicesCache.length > 1 ? " factures enregistrées" : " facture enregistrée");
+}
+
+async function renderProExpensesPage() {
+  const main = document.getElementById("mainContent");
+  if (!main) return;
+  main.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin:0 0 18px">
+      <button type="button" class="secondary" onclick="renderProFinancialPage()" style="min-width:104px">← Retour</button>
+      <div><div class="dashboard-kicker" style="color:#8de7c7">221CLOUD PRO</div><strong style="font-size:18px">Mes dépenses</strong></div>
+    </div>
+    <div class="card">
+      <div class="section-head"><h2>＋ Ajouter une dépense</h2></div>
+      <p class="muted">Notez ce que vous avez payé pour un travail : matériel, transport ou autre frais.</p>
+      <form id="proExpenseForm" class="form-card" onsubmit="saveProExpense(event)">
+        <label for="proExpenseCategory">Type de dépense</label>
+        <select id="proExpenseCategory" required>
+          <option value="Matériel">🧰 Matériel</option>
+          <option value="Transport">🛵 Transport</option>
+          <option value="Main-d’œuvre">👷 Main-d’œuvre</option>
+          <option value="Autre">📦 Autre</option>
+        </select>
+        <label for="proExpenseDescription">Qu'avez-vous payé ?</label>
+        <input id="proExpenseDescription" maxlength="200" required placeholder="Ex. : Achat de câbles électriques">
+        <label for="proExpenseAmount">Montant payé (FCFA)</label>
+        <input id="proExpenseAmount" type="number" min="1" max="1000000000" step="1" inputmode="numeric" required placeholder="Ex. : 15000">
+        <label for="proExpenseDate">Date de la dépense</label>
+        <input id="proExpenseDate" type="date" required>
+        <button id="proExpenseSave" type="submit">＋ Enregistrer la dépense</button>
+        <div id="proExpenseMessage" class="notice" role="status" aria-live="polite"></div>
+      </form>
+    </div>
+    <div class="card">
+      <div class="section-head"><h2>📋 Dépenses enregistrées</h2><span class="muted" id="proExpenseCount">Chargement…</span></div>
+      <div id="proExpensesList"><div class="empty">Chargement des dépenses…</div></div>
+    </div>
+  `;
+  const dateInput = document.getElementById("proExpenseDate");
+  const now = new Date();
+  dateInput.value = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
+  await loadProExpenses();
+}
+
+async function loadProExpenses() {
+  const list = document.getElementById("proExpensesList");
+  const count = document.getElementById("proExpenseCount");
+  if (!list) return;
+  try {
+    const data = await api("/pro/expenses");
+    const expenses = Array.isArray(data.expenses) ? data.expenses : [];
+    if (count) count.textContent = expenses.length + (expenses.length > 1 ? " dépenses" : " dépense");
+    if (!expenses.length) {
+      list.innerHTML = '<div class="empty">Aucune dépense enregistrée pour le moment.</div>';
+      return;
+    }
+    const total = expenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+    list.innerHTML = '<div class="notice">Total enregistré : <strong>' + escapeHTML(formatProMoney(total)) + '</strong></div>' +
+      expenses.map(expense => `
+        <div class="item-card">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap">
+            <strong>${escapeHTML(expense.description)}</strong>
+            <strong class="success-text">${escapeHTML(formatProMoney(expense.amount))}</strong>
+          </div>
+          <div class="muted" style="margin-top:7px">${escapeHTML(expense.category)} · ${escapeHTML(formatDate(expense.expense_date))}</div>
+        </div>
+      `).join("");
+  } catch (error) {
+    list.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message || "Impossible de charger les dépenses.") + '</div>';
+    if (count) count.textContent = "Indisponible";
+  }
+}
+
+async function saveProExpense(event) {
+  event.preventDefault();
+  const form = document.getElementById("proExpenseForm");
+  const button = document.getElementById("proExpenseSave");
+  const message = document.getElementById("proExpenseMessage");
+  if (!form || !button || !message) return;
+  const body = {
+    category: document.getElementById("proExpenseCategory").value,
+    description: document.getElementById("proExpenseDescription").value.trim(),
+    amount: Number(document.getElementById("proExpenseAmount").value),
+    expense_date: document.getElementById("proExpenseDate").value
+  };
+  if (!body.description || !Number.isSafeInteger(body.amount) || body.amount <= 0 || !body.expense_date) {
+    message.textContent = "Vérifiez la description, le montant et la date.";
+    return;
+  }
+  if (!window.confirm(
+    "Confirmer cette dépense ?\\n" + body.description +
+    "\\nType : " + body.category +
+    "\\nMontant : " + formatProMoney(body.amount) +
+    "\\nDate : " + body.expense_date
+  )) return;
+  button.disabled = true;
+  message.textContent = "Enregistrement…";
+  try {
+    await api("/pro/expenses", { method: "POST", body: JSON.stringify(body) });
+    form.reset();
+    const now = new Date();
+    document.getElementById("proExpenseDate").value = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
+    message.textContent = "Dépense enregistrée avec succès.";
+    await loadProExpenses();
+  } catch (error) {
+    message.textContent = error.message || "Impossible d'enregistrer cette dépense.";
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function renderProInvoicesPage() {
