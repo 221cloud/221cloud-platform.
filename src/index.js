@@ -530,6 +530,25 @@ async function ensureProSchema(env) {
   await env.DB.prepare(
     "CREATE INDEX IF NOT EXISTS idx_pro_stock_purchases_owner_date ON pro_stock_purchases(user_id, purchase_date DESC, created_at DESC)"
   ).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS pro_suppliers (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      phone TEXT NOT NULL DEFAULT '',
+      address TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_pro_suppliers_owner_name ON pro_suppliers(user_id, name COLLATE NOCASE)"
+  ).run();
+  const purchaseColumns = await env.DB.prepare("PRAGMA table_info(pro_stock_purchases)").all();
+  if (!(purchaseColumns.results || []).some(column => column.name === "supplier_id")) {
+    await env.DB.prepare("ALTER TABLE pro_stock_purchases ADD COLUMN supplier_id TEXT").run();
+  }
 }
 
 async function ensureCustomerDatabaseStructureSchema(env) {
@@ -2784,6 +2803,54 @@ export default {
       }
     }
 
+    // 221CLOUD PRO : FOURNISSEURS
+    if (path === "/api/pro/suppliers") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureProSchema(env);
+
+        if (request.method === "GET") {
+          const result = await env.DB.prepare(
+            `SELECT s.id, s.name, s.phone, s.address, s.notes, s.created_at,
+                    COUNT(p.id) AS purchase_count,
+                    COALESCE(SUM(p.total_amount), 0) AS total_purchases
+             FROM pro_suppliers s
+             LEFT JOIN pro_stock_purchases p ON p.supplier_id = s.id AND p.user_id = s.user_id
+             WHERE s.user_id = ?
+             GROUP BY s.id
+             ORDER BY s.name COLLATE NOCASE ASC LIMIT 500`
+          ).bind(user.id).all();
+          return json({ suppliers: result.results || [] }, 200, { "Cache-Control": "no-store" });
+        }
+
+        if (request.method === "POST") {
+          const body = await readLimitedJsonBody(request);
+          const name = String(body.name || "").trim();
+          const phone = String(body.phone || "").trim();
+          const address = String(body.address || "").trim();
+          const notes = String(body.notes || "").trim();
+          if (!name || name.length > 120) return json({ error: "Le nom du fournisseur est obligatoire (120 caractères maximum)." }, 400);
+          if (phone.length > 40 || address.length > 200 || notes.length > 300) return json({ error: "Vérifiez les coordonnées du fournisseur." }, 400);
+          const duplicate = await env.DB.prepare(
+            "SELECT id FROM pro_suppliers WHERE user_id = ? AND name = ? COLLATE NOCASE LIMIT 1"
+          ).bind(user.id, name).first();
+          if (duplicate) return json({ error: "Ce fournisseur existe déjà dans votre liste." }, 409);
+          const id = crypto.randomUUID();
+          await env.DB.prepare(
+            "INSERT INTO pro_suppliers (id, user_id, name, phone, address, notes) VALUES (?, ?, ?, ?, ?, ?)"
+          ).bind(id, user.id, name, phone, address, notes).run();
+          return json({ message: "Fournisseur enregistré.", supplier: { id, name, phone, address, notes, purchase_count: 0, total_purchases: 0 } }, 201, { "Cache-Control": "no-store" });
+        }
+
+        return json({ error: "Méthode non autorisée." }, 405);
+      } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête est trop volumineuse." }, 413);
+        console.error("ERREUR 221CLOUD PRO FOURNISSEURS:", error);
+        return json({ error: "Impossible de traiter les fournisseurs pour le moment." }, 500);
+      }
+    }
+
     // 221CLOUD PRO : ACHATS DE MATÉRIEL
     if (path === "/api/pro/stock/purchases") {
       try {
@@ -2793,7 +2860,7 @@ export default {
 
         if (request.method === "GET") {
           const result = await env.DB.prepare(
-            "SELECT id, item_id, item_name, supplier, quantity, unit, unit_price, total_amount, purchase_date, created_at FROM pro_stock_purchases WHERE user_id = ? ORDER BY purchase_date DESC, created_at DESC LIMIT 500"
+            "SELECT id, item_id, item_name, supplier, supplier_id, quantity, unit, unit_price, total_amount, purchase_date, created_at FROM pro_stock_purchases WHERE user_id = ? ORDER BY purchase_date DESC, created_at DESC LIMIT 500"
           ).bind(user.id).all();
           return json({ purchases: result.results || [] }, 200, { "Cache-Control": "no-store" });
         }
@@ -2801,12 +2868,20 @@ export default {
         if (request.method === "POST") {
           const body = await readLimitedJsonBody(request);
           const itemId = String(body.item_id || "").trim();
-          const supplier = String(body.supplier || "").trim();
+          let supplier = String(body.supplier || "").trim();
+          const supplierId = String(body.supplier_id || "").trim();
           const quantity = Number(body.quantity);
           const unitPrice = Number(body.unit_price);
           const purchaseDate = String(body.purchase_date || "").trim();
           if (!itemId) return json({ error: "Choisissez un article du stock." }, 400);
           if (supplier.length > 120) return json({ error: "Le nom du fournisseur est trop long." }, 400);
+          if (supplierId) {
+            const savedSupplier = await env.DB.prepare(
+              "SELECT id, name FROM pro_suppliers WHERE id = ? AND user_id = ? LIMIT 1"
+            ).bind(supplierId, user.id).first();
+            if (!savedSupplier) return json({ error: "Fournisseur introuvable." }, 404);
+            supplier = savedSupplier.name;
+          }
           if (!Number.isFinite(quantity) || quantity <= 0 || quantity > 1000000) return json({ error: "La quantité doit être supérieure à zéro." }, 400);
           if (!Number.isSafeInteger(unitPrice) || unitPrice < 0 || unitPrice > 1000000000) return json({ error: "Le prix unitaire doit être un montant valide en FCFA." }, 400);
           const totalAmount = Math.round(quantity * unitPrice);
@@ -2828,8 +2903,8 @@ export default {
               "UPDATE pro_stock_items SET quantity = quantity + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?"
             ).bind(quantity, itemId, user.id),
             env.DB.prepare(
-              "INSERT INTO pro_stock_purchases (id, user_id, item_id, item_name, supplier, quantity, unit, unit_price, total_amount, purchase_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            ).bind(purchaseId, user.id, itemId, item.name, supplier, quantity, item.unit, unitPrice, totalAmount, purchaseDate),
+              "INSERT INTO pro_stock_purchases (id, user_id, item_id, item_name, supplier, quantity, unit, unit_price, total_amount, purchase_date, supplier_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            ).bind(purchaseId, user.id, itemId, item.name, supplier, quantity, item.unit, unitPrice, totalAmount, purchaseDate, supplierId || null),
             env.DB.prepare(
               "INSERT INTO pro_stock_movements (id, user_id, item_id, direction, quantity, description, movement_date) VALUES (?, ?, ?, 'entree', ?, ?, ?)"
             ).bind(crypto.randomUUID(), user.id, itemId, quantity, description, purchaseDate),
