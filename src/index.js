@@ -4064,7 +4064,8 @@ export default {
 
         const permissionKey = request.method === "GET" ? "can_read"
           : request.method === "POST" ? "can_create"
-          : request.method === "PATCH" ? "can_update" : null;
+          : request.method === "PATCH" ? "can_update"
+          : request.method === "DELETE" ? "can_delete" : null;
         if (!permissionKey || Number(access[permissionKey]) !== 1) {
           return json({ error: "Cette opération n’est pas autorisée pour cette table." }, 403);
         }
@@ -4149,6 +4150,14 @@ export default {
           ).bind(...checked.entries.map(([, value]) => value), rowId).run();
           if (!Number(result.meta?.changes || 0)) return json({ error: "Actualité introuvable." }, 404);
           return json({ message: "Actualité modifiée." });
+        }
+
+        if (request.method === "DELETE" && rowId) {
+          const result = await env.DB.prepare(
+            "DELETE FROM " + physicalTable + " WHERE row_id = ?"
+          ).bind(rowId).run();
+          if (!Number(result.meta?.changes || 0)) return json({ error: "Actualité introuvable." }, 404);
+          return json({ message: "Actualité supprimée." });
         }
 
         return json({ error: "Méthode non autorisée." }, 405);
@@ -4340,7 +4349,7 @@ function buildForm(){fields.replaceChildren();for(const column of columns){const
 if(column.name==="contenu"){input=el("textarea")}else if(column.name==="statut"){input=el("select");for(const value of ["brouillon","publié"]){const option=el("option","",value);option.value=value;input.append(option)}}else{input=el("input");input.type=column.name==="date_publication"?"date":"text";if(column.name==="image_url")input.placeholder="https://…"}
 input.id="field_"+column.name;input.name=column.name;wrap.append(input);fields.append(wrap)}}
 function resetForm(){editingId=null;document.getElementById("newsForm").reset();document.getElementById("formTitle").textContent="Nouvelle actualité";document.getElementById("saveButton").textContent="Enregistrer l’actualité"}
-function renderList(){list.replaceChildren();if(!rows.length){list.textContent="Aucune actualité enregistrée.";return}for(const row of rows){const item=el("div","item");const title=el("strong","",row.titre||"Sans titre");const status=el("span","status",row.statut||"sans statut");title.append(status);item.append(title);item.append(el("div","muted",(row.categorie||"Sans catégorie")+" · "+(row.date_publication||"Date non précisée")));const excerpt=String(row.contenu||"");item.append(el("p","muted",excerpt.length>180?excerpt.slice(0,180)+"…":excerpt));const edit=el("button","secondary","Modifier");edit.type="button";edit.addEventListener("click",()=>{editingId=row.row_id;document.getElementById("formTitle").textContent="Modifier l’actualité";document.getElementById("saveButton").textContent="Enregistrer les modifications";for(const column of columns){const input=document.getElementById("field_"+column.name);if(input)input.value=row[column.name]??""}window.scrollTo({top:0,behavior:"smooth"})});item.append(edit);list.append(item)}}
+function renderList(){list.replaceChildren();if(!rows.length){list.textContent="Aucune actualité enregistrée.";return}for(const row of rows){const item=el("div","item");const title=el("strong","",row.titre||"Sans titre");const status=el("span","status",row.statut||"sans statut");title.append(status);item.append(title);item.append(el("div","muted",(row.categorie||"Sans catégorie")+" · "+(row.date_publication||"Date non précisée")));const excerpt=String(row.contenu||"");item.append(el("p","muted",excerpt.length>180?excerpt.slice(0,180)+"…":excerpt));const actions=el("div","actions");const edit=el("button","secondary","Modifier");edit.type="button";edit.addEventListener("click",()=>{editingId=row.row_id;document.getElementById("formTitle").textContent="Modifier l’actualité";document.getElementById("saveButton").textContent="Enregistrer les modifications";for(const column of columns){const input=document.getElementById("field_"+column.name);if(input)input.value=row[column.name]??""}window.scrollTo({top:0,behavior:"smooth"})});actions.append(edit);const remove=el("button","secondary","Supprimer");remove.type="button";remove.addEventListener("click",async()=>{const label=String(row.titre||"cette actualité");if(!window.confirm("Supprimer définitivement « "+label+" » ? Cette action est irréversible."))return;remove.disabled=true;message.textContent="Suppression…";try{const result=await request(apiUrl+"/"+encodeURIComponent(row.row_id),{method:"DELETE"});message.textContent=result.message||"Actualité supprimée.";if(editingId===row.row_id)resetForm();await load()}catch(error){message.textContent=error.message;remove.disabled=false}});actions.append(remove);item.append(actions);list.append(item)}}
 async function loadTeam(){try{const data=await request("/api/private/applications/"+encodeURIComponent(slug)+"/team");teamList.replaceChildren();const members=data.members||[],invitations=data.invitations||[];if(!members.length&&!invitations.length){teamList.textContent="Aucun membre enregistré.";return}for(const member of members){const item=el("div","item");item.append(el("strong","",member.full_name||member.email||"Compte 221Cloud"));item.append(el("div","muted",(member.email||"")+" · "+member.role+" · "+member.status));teamList.append(item)}for(const invitation of invitations){const item=el("div","item");item.append(el("strong","","Invitation : "+invitation.email));item.append(el("div","muted",invitation.role+" · "+invitation.status+" · expiration : "+invitation.expires_at));teamList.append(item)}}catch(error){teamList.textContent=error.message}}
 async function load(){try{const data=await request(apiUrl);columns=data.columns||[];rows=data.rows||[];buildForm();renderList()}catch(error){list.textContent=error.message}}
 document.getElementById("newsForm").addEventListener("submit",async event=>{event.preventDefault();const button=document.getElementById("saveButton");button.disabled=true;message.textContent="Enregistrement…";const values={};for(const column of columns){const input=document.getElementById("field_"+column.name);if(input)values[column.name]=input.value.trim()}try{const url=editingId?apiUrl+"/"+encodeURIComponent(editingId):apiUrl;const result=await request(url,{method:editingId?"PATCH":"POST",body:JSON.stringify({values})});message.textContent=result.message||"Enregistré.";resetForm();await load()}catch(error){message.textContent=error.message}finally{button.disabled=false}});
