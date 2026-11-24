@@ -580,6 +580,23 @@ async function ensureProSchema(env) {
   await env.DB.prepare(
     "CREATE INDEX IF NOT EXISTS idx_pro_calendar_owner_date ON pro_calendar_events(user_id, event_date, event_time)"
   ).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS pro_interventions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      client_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      address TEXT NOT NULL DEFAULT '',
+      description TEXT NOT NULL DEFAULT '',
+      priority TEXT NOT NULL DEFAULT 'medium',
+      status TEXT NOT NULL DEFAULT 'new',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_pro_interventions_owner_status ON pro_interventions(user_id, status, priority, created_at DESC)"
+  ).run();
   const purchaseColumns = await env.DB.prepare("PRAGMA table_info(pro_stock_purchases)").all();
   if (!(purchaseColumns.results || []).some(column => column.name === "supplier_id")) {
     await env.DB.prepare("ALTER TABLE pro_stock_purchases ADD COLUMN supplier_id TEXT").run();
@@ -3149,6 +3166,85 @@ export default {
         if (error?.status === 413) return json({ error: "La requête est trop volumineuse." }, 413);
         console.error("ERREUR 221CLOUD PRO CHANTIERS:", error);
         return json({ error: "Impossible de traiter les chantiers pour le moment." }, 500);
+      }
+    }
+
+    // 221CLOUD PRO : INTERVENTIONS ET URGENCES
+    const proInterventionRouteMatch = path.match(/^\/api\/pro\/interventions(?:\/([^/]+))?$/);
+    if (proInterventionRouteMatch) {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureProSchema(env);
+        const priorities = new Set(["low", "medium", "urgent"]);
+        const statuses = new Set(["new", "in_progress", "done"]);
+
+        if (request.method === "GET" && !proInterventionRouteMatch[1]) {
+          const result = await env.DB.prepare(
+            `SELECT i.id, i.client_id, c.name AS client_name, c.phone AS client_phone,
+                    i.title, i.address, i.description, i.priority, i.status,
+                    i.created_at, i.updated_at
+             FROM pro_interventions i
+             JOIN pro_clients c ON c.id = i.client_id AND c.user_id = i.user_id
+             WHERE i.user_id = ?
+             ORDER BY CASE i.status WHEN 'new' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,
+                      CASE i.priority WHEN 'urgent' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
+                      i.created_at DESC LIMIT 300`
+          ).bind(user.id).all();
+          return json({ interventions: result.results || [] }, 200, { "Cache-Control": "no-store" });
+        }
+
+        if (request.method === "POST" && !proInterventionRouteMatch[1]) {
+          const body = await readLimitedJsonBody(request);
+          const clientId = String(body.client_id || "").trim();
+          const title = String(body.title || "").trim();
+          const address = String(body.address || "").trim();
+          const description = String(body.description || "").trim();
+          const priority = String(body.priority || "medium").trim();
+          if (!clientId) return json({ error: "Choisissez un client." }, 400);
+          if (!title || title.length > 160) return json({ error: "Indiquez le problème ou la panne (160 caractères maximum)." }, 400);
+          if (address.length > 240 || description.length > 2000) return json({ error: "Vérifiez l’adresse et la description." }, 400);
+          if (!priorities.has(priority)) return json({ error: "Choisissez un niveau d’urgence valide." }, 400);
+          const client = await env.DB.prepare(
+            "SELECT id FROM pro_clients WHERE id = ? AND user_id = ? AND deleted_at IS NULL LIMIT 1"
+          ).bind(clientId, user.id).first();
+          if (!client) return json({ error: "Ce client est introuvable dans votre liste." }, 404);
+          const id = crypto.randomUUID();
+          await env.DB.prepare(
+            "INSERT INTO pro_interventions (id, user_id, client_id, title, address, description, priority) VALUES (?, ?, ?, ?, ?, ?, ?)"
+          ).bind(id, user.id, clientId, title, address, description, priority).run();
+          return json({ message: "Intervention enregistrée.", intervention: { id, client_id: clientId, title, address, description, priority, status: "new" } }, 201, { "Cache-Control": "no-store" });
+        }
+
+        if (proInterventionRouteMatch[1] && request.method === "PATCH") {
+          const interventionId = decodeURIComponent(proInterventionRouteMatch[1]);
+          const body = await readLimitedJsonBody(request);
+          const status = String(body.status || "").trim();
+          const priority = String(body.priority || "").trim();
+          if (!statuses.has(status) || !priorities.has(priority)) {
+            return json({ error: "Choisissez un état et une urgence valides." }, 400);
+          }
+          const result = await env.DB.prepare(
+            "UPDATE pro_interventions SET status = ?, priority = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?"
+          ).bind(status, priority, interventionId, user.id).run();
+          if (!Number(result?.meta?.changes || 0)) return json({ error: "Intervention introuvable." }, 404);
+          return json({ message: "Intervention mise à jour." }, 200, { "Cache-Control": "no-store" });
+        }
+
+        if (proInterventionRouteMatch[1] && request.method === "DELETE") {
+          const interventionId = decodeURIComponent(proInterventionRouteMatch[1]);
+          const result = await env.DB.prepare(
+            "DELETE FROM pro_interventions WHERE id = ? AND user_id = ?"
+          ).bind(interventionId, user.id).run();
+          if (!Number(result?.meta?.changes || 0)) return json({ error: "Intervention introuvable." }, 404);
+          return json({ message: "Intervention supprimée." }, 200, { "Cache-Control": "no-store" });
+        }
+
+        return json({ error: "Méthode non autorisée." }, 405);
+      } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête est trop volumineuse." }, 413);
+        console.error("ERREUR 221CLOUD PRO INTERVENTIONS:", error);
+        return json({ error: "Impossible de traiter les interventions pour le moment." }, 500);
       }
     }
 
