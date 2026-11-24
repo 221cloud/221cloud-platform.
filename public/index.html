@@ -6412,6 +6412,7 @@ function renderProPage() {
       <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir la gestion du stock de matériel" onclick="renderProStockPage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">🔌</div><div><h3>Stock</h3><p>Matériel disponible et mouvements</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
       <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir les chantiers et travaux" onclick="renderProJobsPage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">🏗️</div><div><h3>Chantiers</h3><p>Travaux à faire, en cours et terminés</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
       <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir le calendrier et les rendez-vous" onclick="renderProCalendarPage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">📅</div><div><h3>Calendrier</h3><p>Rendez-vous et travaux prévus</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
+      <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir les interventions et urgences" onclick="renderProInterventionsPage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">🚨</div><div><h3>Interventions</h3><p>Pannes, dépannages et urgences</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
 
     </div>
 
@@ -6517,6 +6518,144 @@ function returnToProHome() {
   saveProClientPageDraft();
   renderProPage();
   window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function renderProInterventionsPage() {
+  const main = document.getElementById("mainContent");
+  if (!main) return;
+  main.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin:0 0 18px">
+      <button type="button" class="secondary" onclick="returnToProHome()" style="min-width:104px">← Retour</button>
+      <div><div class="dashboard-kicker" style="color:#8de7c7">221CLOUD PRO</div><strong style="font-size:18px">Interventions et urgences</strong></div>
+    </div>
+    <div class="card">
+      <div class="section-head"><h2>＋ Nouvelle intervention</h2></div>
+      <p class="muted">Enregistrez une panne ou une demande de dépannage.</p>
+      <form id="proInterventionForm" class="form-card" onsubmit="saveProIntervention(event)">
+        <label for="proInterventionTitle">Quel est le problème ? *</label>
+        <input id="proInterventionTitle" maxlength="160" required placeholder="Ex. : Panne de courant dans une maison">
+        <label for="proInterventionClient">Client *</label>
+        <select id="proInterventionClient" required><option value="">Chargement des clients…</option></select>
+        <label for="proInterventionAddress">Adresse de l’intervention</label>
+        <input id="proInterventionAddress" maxlength="240" placeholder="Ex. : Mbour, quartier…">
+        <label for="proInterventionDescription">Détails du problème</label>
+        <textarea id="proInterventionDescription" rows="3" maxlength="2000" placeholder="Expliquez ce qui s’est passé…"></textarea>
+        <label for="proInterventionPriority">Niveau d’urgence</label>
+        <select id="proInterventionPriority"><option value="low">Faible</option><option value="medium" selected>Moyen</option><option value="urgent">Urgent</option></select>
+        <button id="proInterventionSave" type="submit">＋ Enregistrer l’intervention</button>
+        <div id="proInterventionMessage" class="notice" role="status" aria-live="polite"></div>
+      </form>
+    </div>
+    <div class="card">
+      <div class="section-head"><h2>🧰 Mes interventions</h2><span class="muted" id="proInterventionCount">Chargement…</span></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <button type="button" class="secondary" onclick="filterProInterventions('active')">À traiter</button>
+        <button type="button" class="secondary" onclick="filterProInterventions('all')">Toutes</button>
+        <button type="button" class="secondary" onclick="filterProInterventions('urgent')">Urgentes</button>
+      </div>
+      <div id="proInterventionsList"><div class="empty">Chargement des interventions…</div></div>
+    </div>
+  `;
+  const data = await api("/pro/clients");
+  const clients = Array.isArray(data.clients) ? data.clients : [];
+  const select = document.getElementById("proInterventionClient");
+  select.innerHTML = '<option value="">Choisir un client</option>' + clients.map(client =>
+    '<option value="' + escapeHTML(client.id) + '">' + escapeHTML(client.name) + '</option>'
+  ).join("");
+  if (!clients.length) select.innerHTML = '<option value="">Ajoutez d’abord un client</option>';
+  await loadProInterventions();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+let proInterventionsCache = [];
+let proInterventionsFilter = "active";
+
+function filterProInterventions(filter) {
+  proInterventionsFilter = filter;
+  const list = document.getElementById("proInterventionsList");
+  if (!list) return;
+  let items = proInterventionsCache.slice();
+  if (filter === "active") items = items.filter(item => item.status !== "done");
+  if (filter === "urgent") items = items.filter(item => item.priority === "urgent" && item.status !== "done");
+  const count = document.getElementById("proInterventionCount");
+  if (count) count.textContent = items.length + (items.length > 1 ? " interventions" : " intervention");
+  list.innerHTML = items.length ? items.map(item => {
+    const priorityLabel = item.priority === "urgent" ? "URGENT" : item.priority === "low" ? "Faible" : "Moyen";
+    const statusLabel = item.status === "in_progress" ? "En cours" : item.status === "done" ? "Terminée" : "Nouvelle";
+    return '<div class="item-card"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><strong>' + escapeHTML(item.title) + '</strong><strong>' + escapeHTML(priorityLabel) + '</strong></div><div class="muted" style="margin-top:6px">👤 ' + escapeHTML(item.client_name) + (item.client_phone ? ' · ☎️ ' + escapeHTML(item.client_phone) : '') + (item.address ? ' · 📍 ' + escapeHTML(item.address) : '') + '</div>' + (item.description ? '<p style="margin:8px 0 0">' + escapeHTML(item.description) + '</p>' : '') + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><label style="flex:1;min-width:130px">Urgence<select id="proInterventionPriority-' + escapeHTML(item.id) + '" onchange="updateProIntervention(\'' + escapeHTML(item.id) + '\')"><option value="low"' + (item.priority === "low" ? " selected" : "") + '>Faible</option><option value="medium"' + (item.priority === "medium" ? " selected" : "") + '>Moyen</option><option value="urgent"' + (item.priority === "urgent" ? " selected" : "") + '>Urgent</option></select></label><label style="flex:1;min-width:130px">État<select id="proInterventionStatus-' + escapeHTML(item.id) + '" onchange="updateProIntervention(\'' + escapeHTML(item.id) + '\')"><option value="new"' + (item.status === "new" ? " selected" : "") + '>Nouvelle</option><option value="in_progress"' + (item.status === "in_progress" ? " selected" : "") + '>En cours</option><option value="done"' + (item.status === "done" ? " selected" : "") + '>Terminée</option></select></label></div><button type="button" class="secondary" style="margin-top:10px" onclick="deleteProIntervention(\'' + escapeHTML(item.id) + '\')">Supprimer</button></div>';
+  }).join("") : '<div class="empty">Aucune intervention dans cette liste.</div>';
+}
+
+async function loadProInterventions() {
+  const list = document.getElementById("proInterventionsList");
+  if (!list) return;
+  try {
+    const data = await api("/pro/interventions");
+    proInterventionsCache = Array.isArray(data.interventions) ? data.interventions : [];
+    filterProInterventions(proInterventionsFilter);
+  } catch (error) {
+    list.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message || "Impossible de charger les interventions.") + '</div>';
+  }
+}
+
+async function saveProIntervention(event) {
+  event.preventDefault();
+  const form = document.getElementById("proInterventionForm");
+  const button = document.getElementById("proInterventionSave");
+  const message = document.getElementById("proInterventionMessage");
+  if (!form || !button || !message) return;
+  const body = {
+    title: document.getElementById("proInterventionTitle").value.trim(),
+    client_id: document.getElementById("proInterventionClient").value,
+    address: document.getElementById("proInterventionAddress").value.trim(),
+    description: document.getElementById("proInterventionDescription").value.trim(),
+    priority: document.getElementById("proInterventionPriority").value
+  };
+  if (!body.title || !body.client_id) {
+    message.textContent = "Indiquez le problème et choisissez un client.";
+    return;
+  }
+  if (!window.confirm("Enregistrer cette intervention ?\n" + body.title)) return;
+  button.disabled = true;
+  message.textContent = "Enregistrement…";
+  try {
+    await api("/pro/interventions", { method: "POST", body: JSON.stringify(body) });
+    form.reset();
+    message.textContent = "Intervention enregistrée.";
+    await loadProInterventions();
+  } catch (error) {
+    message.textContent = error.message || "Impossible d’enregistrer l’intervention.";
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function updateProIntervention(interventionId) {
+  const status = document.getElementById("proInterventionStatus-" + interventionId)?.value;
+  const priority = document.getElementById("proInterventionPriority-" + interventionId)?.value;
+  if (!status || !priority) return;
+  try {
+    await api("/pro/interventions/" + encodeURIComponent(interventionId), {
+      method: "PATCH",
+      body: JSON.stringify({ status, priority })
+    });
+    const currentFilter = proInterventionsFilter;
+    await loadProInterventions();
+    proInterventionsFilter = currentFilter;
+  } catch (error) {
+    alert(error.message || "Impossible de modifier l’intervention.");
+    await loadProInterventions();
+  }
+}
+
+async function deleteProIntervention(interventionId) {
+  if (!window.confirm("Supprimer définitivement cette intervention ?")) return;
+  try {
+    await api("/pro/interventions/" + encodeURIComponent(interventionId), { method: "DELETE" });
+    await loadProInterventions();
+  } catch (error) {
+    alert(error.message || "Impossible de supprimer l’intervention.");
+  }
 }
 
 async function renderProJobsPage() {
