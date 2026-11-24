@@ -370,6 +370,13 @@ async function ensureProSchema(env) {
   await env.DB.prepare(
     "CREATE INDEX IF NOT EXISTS idx_pro_clients_owner_created ON pro_clients(user_id, created_at DESC)"
   ).run();
+  const clientColumns = await env.DB.prepare("PRAGMA table_info(pro_clients)").all();
+  if (!(clientColumns.results || []).some(column => column.name === "deleted_at")) {
+    await env.DB.prepare("ALTER TABLE pro_clients ADD COLUMN deleted_at TEXT").run();
+  }
+  await env.DB.prepare(
+    "DELETE FROM pro_clients WHERE deleted_at IS NOT NULL AND deleted_at <= datetime('now', '-30 days')"
+  ).run();
   await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS pro_quotes (
       id TEXT PRIMARY KEY,
@@ -2464,7 +2471,7 @@ export default {
           }
           if (rawItems.length > 100) return json({ error: "Un devis peut contenir au maximum 100 lignes de matériel." }, 400);
           const client = await env.DB.prepare(
-            "SELECT id FROM pro_clients WHERE id = ? AND user_id = ? LIMIT 1"
+            "SELECT id FROM pro_clients WHERE id = ? AND user_id = ? AND deleted_at IS NULL LIMIT 1"
           ).bind(clientId, user.id).first();
           if (!client) return json({ error: "Ce client est introuvable dans votre liste." }, 404);
 
@@ -2628,6 +2635,39 @@ export default {
       }
     }
 
+    // 221CLOUD PRO : CORBEILLE DES CLIENTS
+    const proClientTrashRouteMatch = path.match(/^\/api\/pro\/clients-trash(?:\/([^/]+)\/restore)?$/);
+    if (proClientTrashRouteMatch) {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureProSchema(env);
+
+        if (request.method === "GET" && !proClientTrashRouteMatch[1]) {
+          const result = await env.DB.prepare(
+            "SELECT id, name, phone, address, notes, created_at, deleted_at FROM pro_clients WHERE user_id = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC LIMIT 200"
+          ).bind(user.id).all();
+          return json({ clients: result.results || [] }, 200, { "Cache-Control": "no-store" });
+        }
+
+        if (request.method === "POST" && proClientTrashRouteMatch[1]) {
+          const clientId = decodeURIComponent(proClientTrashRouteMatch[1]);
+          const result = await env.DB.prepare(
+            "UPDATE pro_clients SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL AND deleted_at > datetime('now', '-30 days')"
+          ).bind(clientId, user.id).run();
+          if (!result.meta?.changes) {
+            return json({ error: "Ce client n’est plus dans la corbeille ou le délai de 30 jours est dépassé." }, 404);
+          }
+          return json({ message: "Client restauré." });
+        }
+
+        return json({ error: "Méthode non autorisée." }, 405);
+      } catch (error) {
+        console.error("221CLOUD PRO CLIENT TRASH ERROR:", error);
+        return json({ error: "Impossible d’accéder à la corbeille pour le moment." }, 500);
+      }
+    }
+
     // 221CLOUD PRO : GESTION PRIVÉE DES CLIENTS
     const proClientRouteMatch = path.match(/^\/api\/pro\/clients(?:\/([^/]+))?$/);
     if (proClientRouteMatch) {
@@ -2638,7 +2678,7 @@ export default {
 
         if (request.method === "GET") {
           const result = await env.DB.prepare(
-            "SELECT id, name, phone, address, notes, created_at, updated_at FROM pro_clients WHERE user_id = ? ORDER BY created_at DESC LIMIT 200"
+            "SELECT id, name, phone, address, notes, created_at, updated_at FROM pro_clients WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 200"
           ).bind(user.id).all();
           return json({ clients: result.results || [] }, 200, { "Cache-Control": "no-store" });
         }
@@ -2664,7 +2704,7 @@ export default {
           ).bind(id, user.id, name, phone || null, address || null, notes || null).run();
 
           const client = await env.DB.prepare(
-            "SELECT id, name, phone, address, notes, created_at, updated_at FROM pro_clients WHERE id = ? AND user_id = ? LIMIT 1"
+            "SELECT id, name, phone, address, notes, created_at, updated_at FROM pro_clients WHERE id = ? AND user_id = ? AND deleted_at IS NULL LIMIT 1"
           ).bind(id, user.id).first();
           return json({ message: "Client enregistré.", client }, 201);
         }
@@ -2686,9 +2726,9 @@ export default {
           }
 
           await env.DB.prepare(
-            "DELETE FROM pro_clients WHERE id = ? AND user_id = ?"
+            "UPDATE pro_clients SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND deleted_at IS NULL"
           ).bind(clientId, user.id).run();
-          return json({ message: "Client supprimé." });
+          return json({ message: "Client déplacé dans la corbeille. Il pourra être restauré pendant 30 jours." });
         }
 
         if (request.method === "PUT" && proClientRouteMatch[1]) {
@@ -2706,7 +2746,7 @@ export default {
           if (rawNotes.length > 1000) return json({ error: "La note est trop longue." }, 400);
 
           const result = await env.DB.prepare(
-            "UPDATE pro_clients SET name = ?, phone = ?, address = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?"
+            "UPDATE pro_clients SET name = ?, phone = ?, address = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND deleted_at IS NULL"
           ).bind(rawName, rawPhone || null, rawAddress || null, rawNotes || null, clientId, user.id).run();
           if (!result.meta?.changes) return json({ error: "Client introuvable." }, 404);
 
