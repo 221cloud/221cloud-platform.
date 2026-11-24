@@ -2833,7 +2833,7 @@ export default {
           if (!itemId || !["entree", "sortie"].includes(direction)) return json({ error: "Choisissez un article et un type de mouvement." }, 400);
           if (!Number.isFinite(quantity) || quantity <= 0 || quantity > 1000000) return json({ error: "La quantité doit être supérieure à zéro." }, 400);
           if (description.length > 200) return json({ error: "La description est trop longue (200 caractères maximum)." }, 400);
-          if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(movementDate) ||
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(movementDate) ||
               Number.isNaN(Date.parse(movementDate + "T00:00:00Z")) ||
               new Date(movementDate + "T00:00:00Z").toISOString().slice(0, 10) !== movementDate) {
             return json({ error: "La date du mouvement est invalide." }, 400);
