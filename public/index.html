@@ -6917,16 +6917,18 @@ async function renderProFinancialPage() {
   if (!main) return;
   main.innerHTML = '<div style="display:flex;align-items:center;gap:12px;margin:0 0 18px"><button type="button" class="secondary" onclick="returnToProHome()" style="min-width:104px">← Retour</button><div><div class="dashboard-kicker" style="color:#8de7c7">221CLOUD PRO</div><strong style="font-size:18px">Mon argent</strong></div></div>' +
     '<div class="dashboard-hero" style="background:linear-gradient(120deg,#123b34,#14294d 75%,#182044)"><div class="dashboard-kicker" style="color:#8de7c7">SITUATION FINANCIÈRE</div><h1 id="proFinancialReceived">Chargement…</h1><p>Argent déjà reçu sur vos factures</p></div>' +
-    '<div class="grid"><div class="card"><div class="muted">🧾 Total facturé</div><div class="stat" id="proFinancialTotal">—</div></div><div class="card"><div class="muted">💰 Déjà encaissé</div><div class="stat success-text" id="proFinancialPaid">—</div></div><div class="card"><div class="muted">⏳ Reste à recevoir</div><div class="stat" id="proFinancialRemaining">—</div></div><div class="card"><div class="muted">🛒 Dépenses enregistrées</div><div class="stat" id="proFinancialExpenses">—</div></div><div class="card"><div class="muted">💵 Reste après dépenses</div><div class="stat" id="proFinancialAfterExpenses">—</div></div></div>' +
-    '<div class="card"><div class="section-head"><h2>📊 État des paiements</h2></div><div style="display:flex;justify-content:space-between;gap:10px"><span class="muted">Argent encaissé</span><strong id="proFinancialPercent">—</strong></div><div class="progress"><div class="progress-bar" id="proFinancialProgress"></div></div><div class="grid"><div><div class="muted">✅ Factures payées</div><strong class="stat" id="proFinancialPaidCount">0</strong></div><div><div class="muted">🟠 Paiement partiel</div><strong class="stat" id="proFinancialPartialCount">0</strong></div><div><div class="muted">🔴 Factures à payer</div><strong class="stat" id="proFinancialUnpaidCount">0</strong></div></div><p class="muted" id="proFinancialInvoiceCount" style="margin-bottom:0">0 facture</p></div>' +
-    '<div class="notice">Le « reste après dépenses » correspond à l’argent encaissé moins les dépenses enregistrées ici. Ce n’est pas encore un bénéfice comptable complet.</div>' +
-    '<div class="item-actions"><button type="button" onclick="renderProExpensesPage()">🛒 Gérer mes dépenses</button><button type="button" class="secondary" onclick="renderProInvoicesPage()">🧾 Voir mes factures</button></div>';
-  const [invoiceResult, expenseResult] = await Promise.all([
+    '<div class="grid"><div class="card"><div class="muted">🧾 Total facturé</div><div class="stat" id="proFinancialTotal">—</div></div><div class="card"><div class="muted">💰 Déjà encaissé</div><div class="stat success-text" id="proFinancialPaid">—</div></div><div class="card"><div class="muted">⏳ Reste à recevoir</div><div class="stat" id="proFinancialRemaining">—</div></div><div class="card"><div class="muted">🛒 Dépenses enregistrées</div><div class="stat" id="proFinancialExpenses">—</div></div><div class="card"><div class="muted">📥 Autres entrées caisse</div><div class="stat success-text" id="proFinancialCashIn">—</div></div><div class="card"><div class="muted">📤 Sorties de caisse</div><div class="stat" id="proFinancialCashOut">—</div></div><div class="card"><div class="muted">💵 Solde après mouvements</div><div class="stat" id="proFinancialAfterExpenses">—</div></div></div>' +
+    '<div class="card"><div class="section-head"><h2>📊 État des paiements</h2></div><div style="display:flex;justify-content:space-between;gap:10px"><span class="muted">Argent encaissé sur les factures</span><strong id="proFinancialPercent">—</strong></div><div class="progress"><div class="progress-bar" id="proFinancialProgress"></div></div><div class="grid"><div><div class="muted">✅ Factures payées</div><strong class="stat" id="proFinancialPaidCount">0</strong></div><div><div class="muted">🟠 Paiement partiel</div><strong class="stat" id="proFinancialPartialCount">0</strong></div><div><div class="muted">🔴 Factures à payer</div><strong class="stat" id="proFinancialUnpaidCount">0</strong></div></div><p class="muted" id="proFinancialInvoiceCount" style="margin-bottom:0">0 facture</p></div>' +
+    '<div class="notice">Le solde estimé additionne les paiements des factures et les autres entrées de caisse, puis retire les dépenses et les sorties de caisse. Ne saisissez pas deux fois un paiement de facture ou une dépense déjà enregistrée.</div>' +
+    '<div class="item-actions"><button type="button" onclick="renderProCashPage()">💼 Gérer la caisse</button><button type="button" class="secondary" onclick="renderProExpensesPage()">🛒 Gérer mes dépenses</button><button type="button" class="secondary" onclick="renderProInvoicesPage()">🧾 Voir mes factures</button></div>';
+  const [invoiceResult, expenseResult, cashResult] = await Promise.all([
     api("/pro/invoices"),
-    api("/pro/expenses")
+    api("/pro/expenses"),
+    api("/pro/cash")
   ]);
   proInvoicesCache = Array.isArray(invoiceResult.invoices) ? invoiceResult.invoices : [];
   const expenses = Array.isArray(expenseResult.expenses) ? expenseResult.expenses : [];
+  const movements = Array.isArray(cashResult.movements) ? cashResult.movements : [];
   let total = 0, paid = 0, paidCount = 0, partialCount = 0, unpaidCount = 0;
   for (const invoice of proInvoicesCache) {
     const invoiceTotal = Math.max(0, Number(invoice.total_amount) || 0);
@@ -6938,14 +6940,18 @@ async function renderProFinancialPage() {
     else unpaidCount++;
   }
   const totalExpenses = expenses.reduce((sum, expense) => sum + Math.max(0, Number(expense.amount) || 0), 0);
+  const cashIn = movements.filter(item => item.direction === "entree").reduce((sum, item) => sum + Math.max(0, Number(item.amount) || 0), 0);
+  const cashOut = movements.filter(item => item.direction === "sortie").reduce((sum, item) => sum + Math.max(0, Number(item.amount) || 0), 0);
   const remaining = Math.max(0, total - paid);
-  const afterExpenses = paid - totalExpenses;
+  const afterExpenses = paid + cashIn - totalExpenses - cashOut;
   const percent = total > 0 ? Math.round((paid / total) * 100) : 0;
   document.getElementById("proFinancialReceived").textContent = formatProMoney(paid);
   document.getElementById("proFinancialTotal").textContent = formatProMoney(total);
   document.getElementById("proFinancialPaid").textContent = formatProMoney(paid);
   document.getElementById("proFinancialRemaining").textContent = formatProMoney(remaining);
   document.getElementById("proFinancialExpenses").textContent = formatProMoney(totalExpenses);
+  document.getElementById("proFinancialCashIn").textContent = formatProMoney(cashIn);
+  document.getElementById("proFinancialCashOut").textContent = formatProMoney(cashOut);
   document.getElementById("proFinancialAfterExpenses").textContent = formatProMoney(afterExpenses);
   document.getElementById("proFinancialPercent").textContent = percent + " %";
   document.getElementById("proFinancialProgress").style.width = percent + "%";
@@ -6953,6 +6959,99 @@ async function renderProFinancialPage() {
   document.getElementById("proFinancialPartialCount").textContent = partialCount;
   document.getElementById("proFinancialUnpaidCount").textContent = unpaidCount;
   document.getElementById("proFinancialInvoiceCount").textContent = proInvoicesCache.length + (proInvoicesCache.length > 1 ? " factures enregistrées" : " facture enregistrée");
+}
+
+function updateProCashCategories() {
+  const direction = document.getElementById("proCashDirection");
+  const category = document.getElementById("proCashCategory");
+  if (!direction || !category) return;
+  const options = direction.value === "entree"
+    ? [["Autre recette", "Autre recette"], ["Remboursement reçu", "Remboursement reçu"], ["Apport personnel", "Apport personnel"]]
+    : [["Retrait", "Retrait"], ["Remboursement effectué", "Remboursement effectué"], ["Autre sortie", "Autre sortie"]];
+  category.innerHTML = options.map(item => '<option value="' + escapeHTML(item[0]) + '">' + escapeHTML(item[1]) + '</option>').join("");
+}
+
+async function renderProCashPage() {
+  const main = document.getElementById("mainContent");
+  if (!main) return;
+  main.innerHTML = '<div style="display:flex;align-items:center;gap:12px;margin:0 0 18px"><button type="button" class="secondary" onclick="renderProFinancialPage()" style="min-width:104px">← Retour</button><div><div class="dashboard-kicker" style="color:#8de7c7">221CLOUD PRO</div><strong style="font-size:18px">Ma caisse</strong></div></div>' +
+    '<div class="card"><div class="section-head"><h2>＋ Enregistrer un mouvement</h2></div>' +
+    '<p class="muted">Notez une entrée ou une sortie d’argent qui n’est pas déjà dans une facture ou dans les dépenses.</p>' +
+    '<div class="notice">Important : ne saisissez pas ici un paiement déjà enregistré sur une facture, ni un achat déjà noté dans « Mes dépenses ».</div>' +
+    '<form id="proCashForm" class="form-card" onsubmit="saveProCashMovement(event)">' +
+    '<label for="proCashDirection">Que voulez-vous enregistrer ?</label><select id="proCashDirection" onchange="updateProCashCategories()" required><option value="entree">📥 Entrée d’argent</option><option value="sortie">📤 Sortie d’argent</option></select>' +
+    '<label for="proCashCategory">Motif</label><select id="proCashCategory" required></select>' +
+    '<label for="proCashDescription">Petite description</label><input id="proCashDescription" maxlength="200" required placeholder="Ex. : Remboursement reçu">' +
+    '<label for="proCashAmount">Montant (FCFA)</label><input id="proCashAmount" type="number" min="1" max="1000000000" step="1" inputmode="numeric" required placeholder="Ex. : 10000">' +
+    '<label for="proCashDate">Date</label><input id="proCashDate" type="date" required>' +
+    '<button id="proCashSave" type="submit">＋ Enregistrer dans la caisse</button><div id="proCashMessage" class="notice" role="status" aria-live="polite"></div></form></div>' +
+    '<div class="card"><div class="section-head"><h2>📋 Mouvements enregistrés</h2><span class="muted" id="proCashCount">Chargement…</span></div><div id="proCashList"><div class="empty">Chargement de la caisse…</div></div></div>';
+  updateProCashCategories();
+  const dateInput = document.getElementById("proCashDate");
+  const now = new Date();
+  dateInput.value = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
+  await loadProCashMovements();
+}
+
+async function loadProCashMovements() {
+  const list = document.getElementById("proCashList");
+  const count = document.getElementById("proCashCount");
+  if (!list) return;
+  try {
+    const data = await api("/pro/cash");
+    const movements = Array.isArray(data.movements) ? data.movements : [];
+    if (count) count.textContent = movements.length + (movements.length > 1 ? " mouvements" : " mouvement");
+    if (!movements.length) {
+      list.innerHTML = '<div class="empty">Aucun mouvement enregistré pour le moment.</div>';
+      return;
+    }
+    const totalIn = movements.filter(item => item.direction === "entree").reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const totalOut = movements.filter(item => item.direction === "sortie").reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    list.innerHTML = '<div class="notice">Entrées : <strong class="success-text">' + escapeHTML(formatProMoney(totalIn)) + '</strong><br>Sorties : <strong>' + escapeHTML(formatProMoney(totalOut)) + '</strong></div>' +
+      movements.map(item => {
+        const isIn = item.direction === "entree";
+        return '<div class="item-card"><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap"><strong>' + escapeHTML(item.description) + '</strong><strong class="' + (isIn ? 'success-text' : '') + '">' + (isIn ? '+' : '−') + escapeHTML(formatProMoney(item.amount)) + '</strong></div><div class="muted" style="margin-top:7px">' + escapeHTML(isIn ? 'Entrée' : 'Sortie') + ' · ' + escapeHTML(item.category) + ' · ' + escapeHTML(formatDate(item.movement_date)) + '</div></div>';
+      }).join("");
+  } catch (error) {
+    list.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message || "Impossible de charger la caisse.") + '</div>';
+    if (count) count.textContent = "Indisponible";
+  }
+}
+
+async function saveProCashMovement(event) {
+  event.preventDefault();
+  const form = document.getElementById("proCashForm");
+  const button = document.getElementById("proCashSave");
+  const message = document.getElementById("proCashMessage");
+  if (!form || !button || !message) return;
+  const body = {
+    direction: document.getElementById("proCashDirection").value,
+    category: document.getElementById("proCashCategory").value,
+    description: document.getElementById("proCashDescription").value.trim(),
+    amount: Number(document.getElementById("proCashAmount").value),
+    movement_date: document.getElementById("proCashDate").value
+  };
+  if (!body.description || !Number.isSafeInteger(body.amount) || body.amount <= 0 || !body.movement_date) {
+    message.textContent = "Vérifiez la description, le montant et la date.";
+    return;
+  }
+  const directionLabel = body.direction === "entree" ? "Entrée d’argent" : "Sortie d’argent";
+  if (!window.confirm("Confirmer ce mouvement ?\n" + directionLabel + " : " + body.description + "\n" + formatProMoney(body.amount))) return;
+  button.disabled = true;
+  message.textContent = "Enregistrement…";
+  try {
+    await api("/pro/cash", { method: "POST", body: JSON.stringify(body) });
+    form.reset();
+    updateProCashCategories();
+    const now = new Date();
+    document.getElementById("proCashDate").value = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
+    message.textContent = "Mouvement enregistré avec succès.";
+    await loadProCashMovements();
+  } catch (error) {
+    message.textContent = error.message || "Impossible d’enregistrer ce mouvement.";
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function renderProExpensesPage() {
