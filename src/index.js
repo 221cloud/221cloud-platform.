@@ -159,7 +159,7 @@ async function hashPassword(password) {
 
   const result = await derivePasswordBits(password, salt, ITERATIONS);
 
-  return `pbkdf2${ITERATIONS}${base64(salt)}${base64(result)}`;
+  return "pbkdf2$" + ITERATIONS + "$" + base64(salt) + "$" + base64(result);
 }
 
 async function verifyPassword(password, stored) {
