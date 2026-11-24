@@ -7041,10 +7041,10 @@ async function saveProExpense(event) {
     return;
   }
   if (!window.confirm(
-    "Confirmer cette dépense ?\\n" + body.description +
-    "\\nType : " + body.category +
-    "\\nMontant : " + formatProMoney(body.amount) +
-    "\\nDate : " + body.expense_date
+    "Confirmer cette dépense ?\n" + body.description +
+    "\nType : " + body.category +
+    "\nMontant : " + formatProMoney(body.amount) +
+    "\nDate : " + body.expense_date
   )) return;
   button.disabled = true;
   message.textContent = "Enregistrement…";
