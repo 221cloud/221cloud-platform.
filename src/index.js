@@ -1,5 +1,5 @@
 
-const ITERATIONS = 100000;
+const ITERATIONS = 600000;
 const SESSION_DAYS = 7;
 const SESSION_IDLE_MINUTES = 60;
 const DATABASE_NAME_MAX = 80;
@@ -1111,9 +1111,13 @@ async function ensureStorageFoldersSchema(env) {
 }
 
 
-async function loginProtectionKeys(request) {
+async function loginProtectionKeys(request, email) {
   const ip = request.headers.get("CF-Connecting-IP") || "unknown";
-  return ["ip:" + await hashToken(ip)];
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  return [
+    { key: "ip:" + await hashToken(ip), threshold: 20 },
+    { key: "email:" + await hashToken(normalizedEmail), threshold: 30 }
+  ];
 }
 
 async function ensureLoginProtectionSchema(env) {
@@ -1151,58 +1155,63 @@ async function ensureEmailVerificationSchema(env) {
 
 async function getLoginBlock(env, keys) {
   const now = Math.floor(Date.now() / 1000);
-  const row = await env.DB.prepare(
-    "SELECT blocked_until FROM login_attempt_limits WHERE scope_key = ? LIMIT 1"
-  ).bind(keys[0]).first();
-  return Number(row?.blocked_until || 0) > now;
+  for (const item of keys) {
+    const row = await env.DB.prepare(
+      "SELECT blocked_until FROM login_attempt_limits WHERE scope_key = ? LIMIT 1"
+    ).bind(item.key).first();
+    if (Number(row?.blocked_until || 0) > now) return true;
+  }
+  return false;
 }
 
 async function recordLoginFailure(env, keys) {
   const now = Math.floor(Date.now() / 1000);
   const windowSeconds = 15 * 60;
   const blockSeconds = 15 * 60;
-  const threshold = 20;
 
-  await env.DB.prepare(
-    `INSERT INTO login_attempt_limits
-      (scope_key, attempts, window_started_at, blocked_until)
-     VALUES (?, 1, ?, 0)
-     ON CONFLICT(scope_key) DO UPDATE SET
-       attempts = CASE
-         WHEN login_attempt_limits.window_started_at <= ? THEN 1
-         ELSE login_attempt_limits.attempts + 1
-       END,
-       window_started_at = CASE
-         WHEN login_attempt_limits.window_started_at <= ? THEN ?
-         ELSE login_attempt_limits.window_started_at
-       END,
-       blocked_until = CASE
-         WHEN (CASE
+  for (const item of keys) {
+    await env.DB.prepare(
+      `INSERT INTO login_attempt_limits
+        (scope_key, attempts, window_started_at, blocked_until)
+       VALUES (?, 1, ?, 0)
+       ON CONFLICT(scope_key) DO UPDATE SET
+         attempts = CASE
            WHEN login_attempt_limits.window_started_at <= ? THEN 1
            ELSE login_attempt_limits.attempts + 1
-         END) >= ? THEN ?
-         ELSE login_attempt_limits.blocked_until
-       END`
-  ).bind(
-    keys[0],
-    now,
-    now - windowSeconds,
-    now - windowSeconds,
-    now,
-    now - windowSeconds,
-    threshold,
-    now + blockSeconds
-  ).run();
+         END,
+         window_started_at = CASE
+           WHEN login_attempt_limits.window_started_at <= ? THEN ?
+           ELSE login_attempt_limits.window_started_at
+         END,
+         blocked_until = CASE
+           WHEN (CASE
+             WHEN login_attempt_limits.window_started_at <= ? THEN 1
+             ELSE login_attempt_limits.attempts + 1
+           END) >= ? THEN ?
+           ELSE login_attempt_limits.blocked_until
+         END`
+    ).bind(
+      item.key,
+      now,
+      now - windowSeconds,
+      now - windowSeconds,
+      now,
+      now - windowSeconds,
+      item.threshold,
+      now + blockSeconds
+    ).run();
+  }
 
   await env.DB.prepare(
     "DELETE FROM login_attempt_limits WHERE window_started_at < ? AND blocked_until < ?"
   ).bind(now - 86400, now).run();
 }
-
 async function clearLoginFailures(env, keys) {
-  await env.DB.prepare(
-    "DELETE FROM login_attempt_limits WHERE scope_key = ?"
-  ).bind(keys[0]).run();
+  for (const item of keys) {
+    await env.DB.prepare(
+      "DELETE FROM login_attempt_limits WHERE scope_key = ?"
+    ).bind(item.key).run();
+  }
 }
 
 let apiRateLimitSchemaPromise = null;
@@ -4817,6 +4826,14 @@ if (
           return json({
             error: "E-mail ou mot de passe incorrect."
           }, 401);
+        }
+
+        const storedIterations = Number(String(user.password_hash).split("$")[1] || 0);
+        if (storedIterations < ITERATIONS) {
+          const upgradedPasswordHash = await hashPassword(password);
+          await env.DB.prepare(
+            "UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?"
+          ).bind(upgradedPasswordHash, user.id, user.password_hash).run();
         }
 
         await clearLoginFailures(env, protectionKeys);
