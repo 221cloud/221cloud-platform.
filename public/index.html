@@ -6417,12 +6417,71 @@ function renderProPage() {
 
 
 
+    <div class="card" id="proRemindersCard" style="border-color:rgba(36,214,160,.35)">
+      <div class="section-head"><h2>🔔 Rappels et alertes</h2><span class="muted" id="proRemindersCount">Chargement…</span></div>
+      <div id="proRemindersList"><div class="empty">Vérification des rendez-vous, chantiers et paiements…</div></div>
+    </div>
+
     <div class="notice">
       <strong>Conçu pour commencer avec les électriciens.</strong><br>
       Les prix seront toujours vérifiés par l'artisan. Aucun devis ni facture ne sera envoyé sans sa confirmation. Les fonctions seront activées progressivement.
     </div>
   `;
   loadProQuotes();
+  loadProReminders();
+}
+
+
+async function loadProReminders() {
+  const list = document.getElementById("proRemindersList");
+  if (!list) return;
+  const count = document.getElementById("proRemindersCount");
+  try {
+    const [calendarData, jobsData, invoiceData] = await Promise.all([
+      api("/pro/calendar"),
+      api("/pro/jobs"),
+      api("/pro/invoices")
+    ]);
+    const now = new Date();
+    const today = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") + "-" + String(now.getDate()).padStart(2, "0");
+    const tomorrowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const tomorrow = tomorrowDate.getFullYear() + "-" + String(tomorrowDate.getMonth() + 1).padStart(2, "0") + "-" + String(tomorrowDate.getDate()).padStart(2, "0");
+    const endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7);
+    const end = endDate.getFullYear() + "-" + String(endDate.getMonth() + 1).padStart(2, "0") + "-" + String(endDate.getDate()).padStart(2, "0");
+    const events = (calendarData.events || []).filter(item => item.status === "planned" && item.event_date >= today && item.event_date <= end);
+    const jobs = (jobsData.jobs || []).filter(item => item.status !== "done" && item.start_date && item.start_date >= today && item.start_date <= end);
+    const invoices = (invoiceData.invoices || []).filter(item => Number(item.total_amount || 0) > Number(item.amount_paid || 0));
+    const reminders = [];
+    for (const item of events) {
+      const when = item.event_date === today ? "Aujourd’hui" : item.event_date === tomorrow ? "Demain" : formatDate(item.event_date);
+      reminders.push({
+        priority: item.event_date === today ? 0 : item.event_date === tomorrow ? 1 : 2,
+        html: '<div class="item-card"><strong>📅 Rendez-vous · ' + escapeHTML(when) + (item.event_time ? ' à ' + escapeHTML(item.event_time) : '') + '</strong><div style="margin-top:5px">' + escapeHTML(item.title) + '</div><div class="muted" style="margin-top:4px">Client : ' + escapeHTML(item.client_name) + '</div></div>'
+      });
+    }
+    for (const item of jobs) {
+      const when = item.start_date === today ? "Aujourd’hui" : item.start_date === tomorrow ? "Demain" : formatDate(item.start_date);
+      reminders.push({
+        priority: item.start_date === today ? 0 : item.start_date === tomorrow ? 1 : 2,
+        html: '<div class="item-card"><strong>🏗️ Chantier · ' + escapeHTML(when) + '</strong><div style="margin-top:5px">' + escapeHTML(item.title) + '</div><div class="muted" style="margin-top:4px">Client : ' + escapeHTML(item.client_name) + '</div></div>'
+      });
+    }
+    if (invoices.length) {
+      const totalRemaining = invoices.reduce((sum, item) => sum + Math.max(0, Number(item.total_amount || 0) - Number(item.amount_paid || 0)), 0);
+      reminders.push({
+        priority: 3,
+        html: '<div class="item-card"><strong>💰 Paiements à recevoir</strong><div style="margin-top:5px">' + invoices.length + ' facture' + (invoices.length > 1 ? 's' : '') + ' avec un reste à payer</div><div class="muted" style="margin-top:4px">' + escapeHTML(totalRemaining.toLocaleString("fr-FR")) + ' FCFA à recevoir au total</div><button type="button" class="secondary" style="margin-top:9px" onclick="renderProInvoicesPage()">Voir les factures</button></div>'
+      });
+    }
+    reminders.sort((a, b) => a.priority - b.priority);
+    if (count) count.textContent = reminders.length + (reminders.length > 1 ? " rappels" : " rappel");
+    list.innerHTML = reminders.length
+      ? reminders.slice(0, 8).map(item => item.html).join("") + (reminders.length > 8 ? '<p class="muted">Et ' + (reminders.length - 8) + ' autre(s) rappel(s)…</p>' : '')
+      : '<div class="empty">Aucun rappel pour le moment. Tout est à jour ! 😊</div>';
+  } catch (error) {
+    if (count) count.textContent = "Indisponible";
+    list.innerHTML = '<div class="muted">Les rappels ne peuvent pas être chargés pour le moment. Réessayez en actualisant la page.</div>';
+  }
 }
 
 
