@@ -545,6 +545,23 @@ async function ensureProSchema(env) {
   await env.DB.prepare(
     "CREATE INDEX IF NOT EXISTS idx_pro_suppliers_owner_name ON pro_suppliers(user_id, name COLLATE NOCASE)"
   ).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS pro_jobs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      client_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      address TEXT NOT NULL DEFAULT '',
+      description TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'todo',
+      start_date TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_pro_jobs_owner_status ON pro_jobs(user_id, status, created_at DESC)"
+  ).run();
   const purchaseColumns = await env.DB.prepare("PRAGMA table_info(pro_stock_purchases)").all();
   if (!(purchaseColumns.results || []).some(column => column.name === "supplier_id")) {
     await env.DB.prepare("ALTER TABLE pro_stock_purchases ADD COLUMN supplier_id TEXT").run();
@@ -3020,6 +3037,100 @@ export default {
         if (error?.status === 413) return json({ error: "La requête est trop volumineuse." }, 413);
         console.error("ERREUR 221CLOUD PRO STOCK:", error);
         return json({ error: "Impossible de traiter le stock pour le moment." }, 500);
+      }
+    }
+
+    // 221CLOUD PRO : CHANTIERS ET TRAVAUX
+    const proJobRouteMatch = path.match(/^\/api\/pro\/jobs(?:\/([^/]+))?$/);
+    if (proJobRouteMatch) {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureProSchema(env);
+        const allowedStatuses = new Set(["todo", "in_progress", "done"]);
+
+        if (request.method === "GET" && !proJobRouteMatch[1]) {
+          const [jobResult, quoteResult, invoiceResult] = await Promise.all([
+            env.DB.prepare(
+              `SELECT j.id, j.client_id, c.name AS client_name, j.title, j.address,
+                      j.description, j.status, j.start_date, j.created_at, j.updated_at
+               FROM pro_jobs j
+               JOIN pro_clients c ON c.id = j.client_id AND c.user_id = j.user_id
+               WHERE j.user_id = ?
+               ORDER BY CASE j.status WHEN 'in_progress' THEN 0 WHEN 'todo' THEN 1 ELSE 2 END,
+                        j.created_at DESC LIMIT 300`
+            ).bind(user.id).all(),
+            env.DB.prepare(
+              "SELECT id, client_id, description, total_amount, status, created_at FROM pro_quotes WHERE user_id = ? ORDER BY created_at DESC LIMIT 500"
+            ).bind(user.id).all(),
+            env.DB.prepare(
+              "SELECT id, client_id, quote_id, invoice_number, description, total_amount, amount_paid, payment_status, created_at FROM pro_invoices WHERE user_id = ? ORDER BY created_at DESC LIMIT 500"
+            ).bind(user.id).all()
+          ]);
+          const quotesByClient = new Map();
+          for (const quote of (quoteResult.results || [])) {
+            if (!quotesByClient.has(quote.client_id)) quotesByClient.set(quote.client_id, []);
+            quotesByClient.get(quote.client_id).push(quote);
+          }
+          const invoicesByClient = new Map();
+          for (const invoice of (invoiceResult.results || [])) {
+            if (!invoicesByClient.has(invoice.client_id)) invoicesByClient.set(invoice.client_id, []);
+            invoicesByClient.get(invoice.client_id).push(invoice);
+          }
+          return json({
+            jobs: (jobResult.results || []).map(job => ({
+              ...job,
+              quotes: quotesByClient.get(job.client_id) || [],
+              invoices: invoicesByClient.get(job.client_id) || []
+            }))
+          }, 200, { "Cache-Control": "no-store" });
+        }
+
+        if (request.method === "POST" && !proJobRouteMatch[1]) {
+          const body = await readLimitedJsonBody(request);
+          const clientId = String(body.client_id || "").trim();
+          const title = String(body.title || "").trim();
+          const address = String(body.address || "").trim();
+          const description = String(body.description || "").trim();
+          const status = String(body.status || "todo").trim();
+          const startDate = String(body.start_date || "").trim();
+          if (!clientId) return json({ error: "Choisissez un client." }, 400);
+          if (!title || title.length > 160) return json({ error: "Le nom du chantier est obligatoire (160 caractères maximum)." }, 400);
+          if (address.length > 240 || description.length > 2000) return json({ error: "Vérifiez l’adresse et la description du chantier." }, 400);
+          if (!allowedStatuses.has(status)) return json({ error: "Choisissez un état valide." }, 400);
+          if (startDate && (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) ||
+              Number.isNaN(Date.parse(startDate + "T00:00:00Z")) ||
+              new Date(startDate + "T00:00:00Z").toISOString().slice(0, 10) !== startDate)) {
+            return json({ error: "La date du chantier est invalide." }, 400);
+          }
+          const client = await env.DB.prepare(
+            "SELECT id FROM pro_clients WHERE id = ? AND user_id = ? AND deleted_at IS NULL LIMIT 1"
+          ).bind(clientId, user.id).first();
+          if (!client) return json({ error: "Ce client est introuvable dans votre liste." }, 404);
+          const id = crypto.randomUUID();
+          await env.DB.prepare(
+            "INSERT INTO pro_jobs (id, user_id, client_id, title, address, description, status, start_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+          ).bind(id, user.id, clientId, title, address, description, status, startDate || null).run();
+          return json({ message: "Chantier enregistré.", job: { id, client_id: clientId, title, address, description, status, start_date: startDate || null } }, 201, { "Cache-Control": "no-store" });
+        }
+
+        if (request.method === "PATCH" && proJobRouteMatch[1]) {
+          const jobId = decodeURIComponent(proJobRouteMatch[1]);
+          const body = await readLimitedJsonBody(request);
+          const status = String(body.status || "").trim();
+          if (!allowedStatuses.has(status)) return json({ error: "Choisissez un état valide." }, 400);
+          const result = await env.DB.prepare(
+            "UPDATE pro_jobs SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?"
+          ).bind(status, jobId, user.id).run();
+          if (!Number(result?.meta?.changes || 0)) return json({ error: "Chantier introuvable." }, 404);
+          return json({ message: "État du chantier mis à jour." }, 200, { "Cache-Control": "no-store" });
+        }
+
+        return json({ error: "Méthode non autorisée." }, 405);
+      } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête est trop volumineuse." }, 413);
+        console.error("ERREUR 221CLOUD PRO CHANTIERS:", error);
+        return json({ error: "Impossible de traiter les chantiers pour le moment." }, 500);
       }
     }
 
