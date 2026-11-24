@@ -1,5 +1,15 @@
+import { pbkdf2 } from "node:crypto";
 
-const ITERATIONS = 100000; // Limite maximale prise en charge par Web Crypto sur Cloudflare Workers.
+const ITERATIONS = 600000;
+
+function derivePasswordBits(password, salt, iterations) {
+  return new Promise((resolve, reject) => {
+    pbkdf2(password, salt, iterations, 32, "sha256", (error, derivedKey) => {
+      if (error) reject(error);
+      else resolve(derivedKey);
+    });
+  });
+}
 const SESSION_DAYS = 7;
 const SESSION_IDLE_MINUTES = 60;
 const DATABASE_NAME_MAX = 80;
@@ -147,53 +157,24 @@ async function hashToken(token) {
 async function hashPassword(password) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
 
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(password),
-    "PBKDF2",
-    false,
-    ["deriveBits"]
-  );
+  const result = await derivePasswordBits(password, salt, ITERATIONS);
 
-  const result = await crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      salt,
-      iterations: ITERATIONS,
-      hash: "SHA-256"
-    },
-    key,
-    256
-  );
-
-  return `pbkdf2$${ITERATIONS}$${base64(salt)}$${base64(result)}`;
+  return `pbkdf2${ITERATIONS}${base64(salt)}${base64(result)}`;
 }
 
 async function verifyPassword(password, stored) {
   try {
     const [algorithm, iterations, salt, expected] = stored.split("$");
+    const iterationCount = Number(iterations);
 
-    if (algorithm !== "pbkdf2") return false;
+    if (
+      algorithm !== "pbkdf2" ||
+      !Number.isSafeInteger(iterationCount) ||
+      iterationCount < 1 ||
+      iterationCount > ITERATIONS
+    ) return false;
 
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(password),
-      "PBKDF2",
-      false,
-      ["deriveBits"]
-    );
-
-    const result = await crypto.subtle.deriveBits(
-      {
-        name: "PBKDF2",
-        salt: fromBase64(salt),
-        iterations: Number(iterations),
-        hash: "SHA-256"
-      },
-      key,
-      256
-    );
-
+    const result = await derivePasswordBits(password, fromBase64(salt), iterationCount);
     const actual = new Uint8Array(result);
     const expectedBytes = fromBase64(expected);
 
