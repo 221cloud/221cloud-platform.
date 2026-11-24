@@ -102,9 +102,24 @@ async function readLimitedMultipartForm(request) {
   }).formData();
 }
 
+function applySecurityHeaders(response) {
+  const headers = new Headers(response.headers);
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  headers.set("Strict-Transport-Security", "max-age=31536000");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+}
+
 function json(data, status = 200, extraHeaders = {}) {
   const headers = new Headers(extraHeaders);
   headers.set("Content-Type", "application/json; charset=utf-8");
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  headers.set("Strict-Transport-Security", "max-age=31536000");
   return new Response(JSON.stringify(data), { status, headers });
 }
 
@@ -2062,7 +2077,8 @@ function oauthHtmlResponse(html, status = 200) {
       "Cache-Control": "no-store",
       "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
       "X-Content-Type-Options": "nosniff",
-      "Referrer-Policy": "no-referrer"
+      "Referrer-Policy": "no-referrer",
+      "Strict-Transport-Security": "max-age=31536000"
     }
   });
 }
@@ -10068,9 +10084,11 @@ headers.set(
       const proUrl = new URL(request.url);
       proUrl.pathname = "/";
       proUrl.search = "";
-      return env.ASSETS.fetch(new Request(proUrl.toString(), request));
+      const assetResponse = await env.ASSETS.fetch(new Request(proUrl.toString(), request));
+      return applySecurityHeaders(assetResponse);
     }
 
-    return env.ASSETS.fetch(request);
+    const assetResponse = await env.ASSETS.fetch(request);
+    return applySecurityHeaders(assetResponse);
   }
 };
