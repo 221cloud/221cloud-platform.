@@ -6540,6 +6540,9 @@ async function renderProInterventionsPage() {
         <input id="proInterventionAddress" maxlength="240" placeholder="Ex. : Mbour, quartier…">
         <label for="proInterventionDescription">Détails du problème</label>
         <textarea id="proInterventionDescription" rows="3" maxlength="2000" placeholder="Expliquez ce qui s’est passé…"></textarea>
+        <button type="button" id="proInterventionVoiceButton" class="secondary" style="margin-top:8px" onclick="toggleProInterventionVoice()">🎙️ Décrire en parlant</button>
+        <div id="proInterventionVoiceStatus" class="muted" role="status" aria-live="polite" style="margin:6px 0 12px">Parlez en wolof ou en français. Vous pourrez corriger le texte avant de l’enregistrer.</div>
+        <p class="muted" style="font-size:12px">L’audio est envoyé à Cloudflare pour transcription et n’est pas conservé par le service de transcription.</p>
         <label for="proInterventionPriority">Niveau d’urgence</label>
         <select id="proInterventionPriority"><option value="low">Faible</option><option value="medium" selected>Moyen</option><option value="urgent">Urgent</option></select>
         <button id="proInterventionSave" type="submit">＋ Enregistrer l’intervention</button>
@@ -6598,6 +6601,97 @@ async function loadProInterventions() {
     filterProInterventions(proInterventionsFilter);
   } catch (error) {
     list.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message || "Impossible de charger les interventions.") + '</div>';
+  }
+}
+
+let proInterventionRecorder = null;
+let proInterventionStream = null;
+let proInterventionChunks = [];
+let proInterventionRecordTimeout = null;
+
+async function toggleProInterventionVoice() {
+  const button = document.getElementById("proInterventionVoiceButton");
+  const status = document.getElementById("proInterventionVoiceStatus");
+  if (!button || !status) return;
+
+  if (proInterventionRecorder && proInterventionRecorder.state === "recording") {
+    proInterventionRecorder.stop();
+    button.disabled = true;
+    button.textContent = "⏳ Traitement…";
+    status.textContent = "Envoi de votre voix pour préparer le texte…";
+    return;
+  }
+
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+    status.textContent = "L’enregistrement vocal n’est pas disponible sur ce navigateur. Vous pouvez écrire le problème.";
+    return;
+  }
+
+  try {
+    proInterventionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    proInterventionChunks = [];
+    const options = {};
+    if (MediaRecorder.isTypeSupported("audio/mp4")) options.mimeType = "audio/mp4";
+    else if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) options.mimeType = "audio/webm;codecs=opus";
+    else if (MediaRecorder.isTypeSupported("audio/webm")) options.mimeType = "audio/webm";
+    proInterventionRecorder = new MediaRecorder(proInterventionStream, options);
+    proInterventionRecorder.ondataavailable = event => {
+      if (event.data && event.data.size) proInterventionChunks.push(event.data);
+    };
+    proInterventionRecorder.onerror = () => {
+      proInterventionStream?.getTracks().forEach(track => track.stop());
+      proInterventionStream = null;
+      button.disabled = false;
+      button.textContent = "🎙️ Réessayer";
+      status.textContent = "Problème avec le microphone. Réessayez.";
+    };
+    proInterventionRecorder.onstop = async () => {
+      clearTimeout(proInterventionRecordTimeout);
+      proInterventionStream?.getTracks().forEach(track => track.stop());
+      proInterventionStream = null;
+      const mimeType = proInterventionRecorder?.mimeType || "audio/mp4";
+      const blob = new Blob(proInterventionChunks, { type: mimeType });
+      proInterventionChunks = [];
+      proInterventionRecorder = null;
+      button.disabled = true;
+      button.textContent = "⏳ Transcription…";
+      status.textContent = "221Cloud prépare le texte…";
+      try {
+        if (!blob.size) throw new Error("Aucun son enregistré. Réessayez.");
+        const extension = mimeType.includes("webm") ? "webm" : mimeType.includes("ogg") ? "ogg" : "m4a";
+        const form = new FormData();
+        form.append("audio", blob, "intervention." + extension);
+        const result = await api("/pro/transcribe", { method: "POST", body: form });
+        const field = document.getElementById("proInterventionDescription");
+        if (field) field.value = (field.value.trim() ? field.value.trim() + "\n" : "") + result.text;
+        status.textContent = "Texte préparé. Relisez et corrigez si nécessaire avant d’enregistrer.";
+        button.textContent = "🎙️ Ajouter une autre phrase";
+      } catch (error) {
+        status.textContent = error.message || "Impossible de préparer le texte. Réessayez.";
+        button.textContent = "🎙️ Réessayer";
+      } finally {
+        button.disabled = false;
+      }
+    };
+    proInterventionRecorder.start();
+    button.textContent = "⏹️ Terminer et préparer le texte";
+    status.textContent = "Je vous écoute… Parlez naturellement, jusqu’à 45 secondes.";
+    proInterventionRecordTimeout = setTimeout(() => {
+      if (proInterventionRecorder && proInterventionRecorder.state === "recording") {
+        proInterventionRecorder.stop();
+        button.disabled = true;
+        button.textContent = "⏳ Traitement…";
+        status.textContent = "Limite atteinte. Préparation du texte…";
+      }
+    }, 45000);
+  } catch (error) {
+    proInterventionStream?.getTracks().forEach(track => track.stop());
+    proInterventionStream = null;
+    button.disabled = false;
+    button.textContent = "🎙️ Réessayer";
+    status.textContent = error.name === "NotAllowedError"
+      ? "Autorisez le microphone dans les réglages du navigateur pour utiliser le vocal."
+      : "Impossible d’ouvrir le microphone. Vérifiez les autorisations et réessayez.";
   }
 }
 
