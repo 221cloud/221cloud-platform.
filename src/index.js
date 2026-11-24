@@ -3173,35 +3173,6 @@ export default {
       }
     }
 
-    // 221CLOUD PRO : TRANSCRIPTION VOCALE DES INTERVENTIONS
-    if (path === "/api/pro/transcribe" && request.method === "POST") {
-      try {
-        const user = await currentUser(request, env);
-        if (!user) return json({ error: "Vous devez être connecté." }, 401);
-        if (!env.AI) return json({ error: "La fonction vocale n’est pas encore activée sur le serveur." }, 503);
-        const contentLength = Number(request.headers.get("content-length") || 0);
-        if (contentLength > 5 * 1024 * 1024) return json({ error: "L’enregistrement est trop long. Faites une description plus courte." }, 413);
-        const form = await request.formData();
-        const audio = form.get("audio");
-        if (!audio || typeof audio.arrayBuffer !== "function" || !String(audio.type || "").startsWith("audio/")) {
-          return json({ error: "Enregistrement audio invalide. Réessayez." }, 400);
-        }
-        if (audio.size < 1000 || audio.size > 5 * 1024 * 1024) {
-          return json({ error: "L’enregistrement doit être court (45 secondes maximum)." }, 400);
-        }
-        const audioBytes = new Uint8Array(await audio.arrayBuffer());
-        const transcription = await env.AI.run("@cf/openai/whisper", {
-          audio: Array.from(audioBytes)
-        });
-        const text = String(transcription?.text || "").trim();
-        if (!text) return json({ error: "Je n’ai pas réussi à comprendre l’enregistrement. Réessayez plus lentement." }, 422);
-        return json({ text: text.slice(0, 8000) }, 200, { "Cache-Control": "no-store" });
-      } catch (error) {
-        console.error("ERREUR 221CLOUD TRANSCRIPTION VOCALE:", error);
-        return json({ error: "La transcription a échoué. Vérifiez votre connexion et réessayez." }, 500);
-      }
-    }
-
     // 221CLOUD PRO : INTERVENTIONS ET URGENCES
     const proInterventionRouteMatch = path.match(/^\/api\/pro\/interventions(?:\/([^/]+))?$/);
     if (proInterventionRouteMatch) {
