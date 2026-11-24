@@ -6933,18 +6933,75 @@ async function renderProInvoicesPage() {
     list.innerHTML = '<div class="empty">Aucune facture pour le moment. Ouvrez vos devis pour créer votre première facture.</div>';
     return;
   }
-  list.innerHTML = proInvoicesCache.map(invoice => `
-    <div class="item-card">
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap">
-        <div><strong>${escapeHTML(invoice.invoice_number)}</strong><div class="muted">${escapeHTML(invoice.client_name || "Client")}</div></div>
-        <span class="status">${invoice.payment_status === "paid" ? "Payée" : "À payer"}</span>
+  list.innerHTML = proInvoicesCache.map(invoice => {
+    const total = Number(invoice.total_amount) || 0;
+    const paid = Math.min(total, Math.max(0, Number(invoice.amount_paid) || 0));
+    const remaining = Math.max(0, total - paid);
+    const statusLabel = invoice.payment_status === "paid"
+      ? "Payée"
+      : invoice.payment_status === "partial" ? "Partiellement payée" : "À payer";
+    return `
+      <div class="item-card">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap">
+          <div><strong>${escapeHTML(invoice.invoice_number)}</strong><div class="muted">${escapeHTML(invoice.client_name || "Client")}</div></div>
+          <span class="status">${statusLabel}</span>
+        </div>
+        <div class="muted" style="margin-top:8px">${escapeHTML(invoice.description || "")}</div>
+        <div style="display:flex;justify-content:space-between;gap:10px;margin-top:12px"><span class="muted">Montant total</span><strong>${escapeHTML(formatProMoney(total))}</strong></div>
+        <div style="display:flex;justify-content:space-between;gap:10px;margin-top:6px"><span class="muted">Déjà reçu</span><strong>${escapeHTML(formatProMoney(paid))}</strong></div>
+        <div style="display:flex;justify-content:space-between;gap:10px;margin-top:6px"><span class="muted">Reste à recevoir</span><strong>${escapeHTML(formatProMoney(remaining))}</strong></div>
+        <div class="muted" style="margin-top:8px">Créée le ${escapeHTML(formatDate(invoice.created_at))}</div>
+        <div class="item-actions">
+          <button type="button" onclick="updateProInvoicePayment('${escapeHTML(invoice.id)}')">💰 Enregistrer un paiement</button>
+          <button type="button" class="secondary" onclick="printProInvoice('${escapeHTML(invoice.id)}')">📄 Exporter la facture en PDF</button>
+        </div>
       </div>
-      <div class="muted" style="margin-top:8px">${escapeHTML(invoice.description || "")}</div>
-      <div style="display:flex;justify-content:space-between;gap:10px;margin-top:12px"><span class="muted">Montant total</span><strong>${escapeHTML(formatProMoney(invoice.total_amount))}</strong></div>
-      <div class="muted" style="margin-top:5px">Créée le ${escapeHTML(formatDate(invoice.created_at))}</div>
-      <div class="item-actions"><button type="button" class="secondary" onclick="printProInvoice('${escapeHTML(invoice.id)}')">📄 Exporter la facture en PDF</button></div>
-    </div>
-  `).join("");
+    `;
+  }).join("");
+}
+
+async function updateProInvoicePayment(invoiceId) {
+  const invoice = proInvoicesCache.find(item => item.id === invoiceId);
+  if (!invoice) {
+    alert("Facture introuvable. Actualisez la page puis réessayez.");
+    return;
+  }
+
+  const currentPaid = Number(invoice.amount_paid) || 0;
+  const rawAmount = window.prompt(
+    "Quel est le montant total déjà reçu pour cette facture ?\nTotal : " +
+    formatProMoney(invoice.total_amount) + "\nDéjà reçu : " + formatProMoney(currentPaid) +
+    "\nSaisissez le montant cumulé reçu en FCFA :",
+    String(currentPaid)
+  );
+  if (rawAmount === null) return;
+
+  const amountPaid = Number(String(rawAmount).trim());
+  const totalAmount = Number(invoice.total_amount);
+  if (!Number.isSafeInteger(amountPaid) || amountPaid < 0 || amountPaid > totalAmount) {
+    alert("Montant invalide. Saisissez un nombre entier entre 0 et " + totalAmount + " FCFA.");
+    return;
+  }
+
+  const remaining = totalAmount - amountPaid;
+  const statusLabel = amountPaid === totalAmount
+    ? "Payée"
+    : amountPaid > 0 ? "Partiellement payée" : "À payer";
+  if (!window.confirm(
+    "Confirmer le paiement ?\nDéjà reçu : " + formatProMoney(amountPaid) +
+    "\nReste à recevoir : " + formatProMoney(remaining) +
+    "\nStatut : " + statusLabel
+  )) return;
+
+  try {
+    await api("/pro/invoices/" + encodeURIComponent(invoiceId), {
+      method: "PATCH",
+      body: JSON.stringify({ amount_paid: amountPaid })
+    });
+    await renderProInvoicesPage();
+  } catch (error) {
+    alert(error.message || "Impossible d'enregistrer le paiement.");
+  }
 }
 
 async function createProInvoiceFromQuote(quoteId) {
@@ -6980,7 +7037,7 @@ function printProInvoice(invoiceId) {
     '<div class="brand">221CLOUD PRO <span class="muted">· FACTURE</span></div><p class="muted">Date : ' + escapeHTML(formatDate(invoice.created_at)) + ' · N° : ' + escapeHTML(invoice.invoice_number) + '</p>' +
     '<h1>Facture de travaux</h1><section class="panel"><h2>Client</h2><strong>' + escapeHTML(invoice.client_name || "Client") + '</strong><div>' + (invoice.client_phone ? 'Téléphone : ' + escapeHTML(invoice.client_phone) : 'Téléphone non renseigné') + '</div><div>' + (invoice.client_address ? 'Adresse : ' + escapeHTML(invoice.client_address) : 'Adresse non renseignée') + '</div></section>' +
     '<h2>Travaux réalisés</h2><div class="panel">' + escapeHTML(invoice.description || "") + '</div><h2>Matériaux et fournitures</h2><table><thead><tr><th>#</th><th>Désignation</th><th>Quantité</th><th>Prix unitaire</th><th>Total</th></tr></thead><tbody>' + rows + '</tbody></table>' +
-    '<section class="totals"><p><span>Total matériaux</span><strong>' + escapeHTML(formatProMoney(invoice.material_amount)) + '</strong></p><p><span>Main-d’œuvre</span><strong>' + escapeHTML(formatProMoney(invoice.labour_amount)) + '</strong></p><p class="grand"><span>TOTAL À PAYER</span><strong>' + escapeHTML(formatProMoney(invoice.total_amount)) + '</strong></p></section>' +
+    '<section class="totals"><p><span>Total matériaux</span><strong>' + escapeHTML(formatProMoney(invoice.material_amount)) + '</strong></p><p><span>Main-d’œuvre</span><strong>' + escapeHTML(formatProMoney(invoice.labour_amount)) + '</strong></p><p class="grand"><span>TOTAL FACTURE</span><strong>' + escapeHTML(formatProMoney(invoice.total_amount)) + '</strong></p><p><span>Montant déjà reçu</span><strong>' + escapeHTML(formatProMoney(invoice.amount_paid || 0)) + '</strong></p><p><span>Reste à recevoir</span><strong>' + escapeHTML(formatProMoney(Math.max(0, Number(invoice.total_amount) - Number(invoice.amount_paid || 0)))) + '</strong></p></section>' +
     '<div class="sign"><span>Signature de l’artisan</span><span>Signature du client</span></div><p class="muted" style="text-align:center;margin-top:35px">Document préparé avec 221Cloud Pro · Montants en FCFA</p></body></html>';
   popup.document.open(); popup.document.write(html); popup.document.close();
   popup.onload = () => popup.print();
