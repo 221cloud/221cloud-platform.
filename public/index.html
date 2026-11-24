@@ -614,7 +614,7 @@ footer {
 body.pro-mode .layout { display:block; }
 body.pro-mode .layout aside { display:none; }
 body.pro-mode .layout main { width:100%; max-width:980px; margin:0 auto; padding:22px 16px; }
-body.pro-mode footer { display:none; }
+body.pro-mode footer { display:block; }
 body.pro-mode .app > header .brand { letter-spacing:-1px; }
 /* 221Cloud Pro — confort d'utilisation sur téléphone */
 body.pro-mode #mainContent {
@@ -862,7 +862,7 @@ body.pro-mode #mainContent .section-head {
     </aside>
     <main id="mainContent"></main>
   </div>
-  <footer>221Cloud — Votre espace numérique</footer>
+  <footer>221Cloud — Votre espace numérique · <button class="link" type="button" onclick="showPage('about')">À propos</button></footer>
 </section>
 
 <script>
@@ -1312,7 +1312,25 @@ function showPage(page) {
   else if (page === "admin") renderAdmin();
   else if (page === "account") renderAccount();
   else if (page === "assistant-access") renderAssistantAccessPage();
+  else if (page === "about") renderAboutPage();
 }
+
+function renderAboutPage() {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="dashboard-hero">
+      <div class="dashboard-kicker">À propos</div>
+      <h1>221Cloud Pro</h1>
+      <p>Un espace numérique conçu pour simplifier la gestion de votre activité, vos documents et votre organisation.</p>
+    </div>
+    <div class="card" style="max-width:680px;margin:0 auto;text-align:center;padding:30px 22px">
+      <div class="muted" style="font-size:12px;letter-spacing:1.5px;text-transform:uppercase">Une création signée</div>
+      <div style="font-size:30px;font-weight:800;letter-spacing:1px;margin:12px 0;background:linear-gradient(100deg,#438cff,#9b79ff);-webkit-background-clip:text;background-clip:text;color:transparent">Tech92</div>
+      <p class="muted" style="line-height:1.7;margin:0">Une signature discrète, pour celles et ceux qui savent regarder.</p>
+    </div>
+    <div style="margin-top:18px;text-align:center"><button class="secondary" onclick="showPage(IS_PRO_MODE ? 'pro' : 'overview')">Retour</button></div>
+  `;
+}
+
 
 /* TABLEAU DE BORD */
 
