@@ -482,6 +482,36 @@ async function ensureProSchema(env) {
   await env.DB.prepare(
     "CREATE INDEX IF NOT EXISTS idx_pro_cash_owner_date ON pro_cash_movements(user_id, movement_date DESC, created_at DESC)"
   ).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS pro_stock_items (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      unit TEXT NOT NULL,
+      quantity REAL NOT NULL DEFAULT 0,
+      alert_threshold REAL NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_pro_stock_items_owner_name ON pro_stock_items(user_id, name COLLATE NOCASE)"
+  ).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS pro_stock_movements (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      item_id TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      description TEXT,
+      movement_date TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_pro_stock_movements_owner_date ON pro_stock_movements(user_id, movement_date DESC, created_at DESC)"
+  ).run();
 }
 
 async function ensureCustomerDatabaseStructureSchema(env) {
@@ -2733,6 +2763,103 @@ export default {
         if (error?.status === 413) return json({ error: "La requête est trop volumineuse." }, 413);
         console.error("ERREUR 221CLOUD PRO CAISSE:", error);
         return json({ error: "Impossible de traiter la caisse pour le moment." }, 500);
+      }
+    }
+
+    // 221CLOUD PRO : STOCK DE MATÉRIEL
+    if (path === "/api/pro/stock" || path === "/api/pro/stock/items" || path === "/api/pro/stock/movements") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureProSchema(env);
+
+        if (request.method === "GET" && path === "/api/pro/stock") {
+          const [itemResult, movementResult] = await Promise.all([
+            env.DB.prepare(
+              "SELECT id, name, unit, quantity, alert_threshold, created_at, updated_at FROM pro_stock_items WHERE user_id = ? ORDER BY name COLLATE NOCASE ASC LIMIT 500"
+            ).bind(user.id).all(),
+            env.DB.prepare(
+              `SELECT m.id, m.item_id, i.name AS item_name, i.unit, m.direction,
+                      m.quantity, m.description, m.movement_date, m.created_at
+               FROM pro_stock_movements m
+               JOIN pro_stock_items i ON i.id = m.item_id AND i.user_id = m.user_id
+               WHERE m.user_id = ?
+               ORDER BY m.movement_date DESC, m.created_at DESC LIMIT 500`
+            ).bind(user.id).all()
+          ]);
+          return json({
+            items: itemResult.results || [],
+            movements: movementResult.results || []
+          }, 200, { "Cache-Control": "no-store" });
+        }
+
+        if (request.method === "POST" && path === "/api/pro/stock/items") {
+          const body = await readLimitedJsonBody(request);
+          const name = String(body.name || "").trim();
+          const unit = String(body.unit || "").trim();
+          const quantity = Number(body.quantity);
+          const alertThreshold = Number(body.alert_threshold);
+          const allowedUnits = new Set(["Pièce", "mètre", "rouleau", "boîte", "paquet", "kg", "litre", "autre"]);
+          if (!name || name.length > 120) return json({ error: "Le nom de l’article doit contenir de 1 à 120 caractères." }, 400);
+          if (!allowedUnits.has(unit)) return json({ error: "Choisissez une unité valide." }, 400);
+          if (!Number.isFinite(quantity) || quantity < 0 || quantity > 1000000) return json({ error: "La quantité initiale doit être comprise entre 0 et 1 000 000." }, 400);
+          if (!Number.isFinite(alertThreshold) || alertThreshold < 0 || alertThreshold > 1000000) return json({ error: "Le seuil d’alerte est invalide." }, 400);
+          const duplicate = await env.DB.prepare(
+            "SELECT id FROM pro_stock_items WHERE user_id = ? AND name = ? COLLATE NOCASE LIMIT 1"
+          ).bind(user.id, name).first();
+          if (duplicate) return json({ error: "Cet article existe déjà dans votre stock." }, 409);
+          const id = crypto.randomUUID();
+          await env.DB.prepare(
+            "INSERT INTO pro_stock_items (id, user_id, name, unit, quantity, alert_threshold) VALUES (?, ?, ?, ?, ?, ?)"
+          ).bind(id, user.id, name, unit, quantity, alertThreshold).run();
+          if (quantity > 0) {
+            await env.DB.prepare(
+              "INSERT INTO pro_stock_movements (id, user_id, item_id, direction, quantity, description, movement_date) VALUES (?, ?, ?, 'entree', ?, ?, ?)"
+            ).bind(crypto.randomUUID(), user.id, id, quantity, "Stock initial", new Date().toISOString().slice(0, 10)).run();
+          }
+          const item = await env.DB.prepare(
+            "SELECT id, name, unit, quantity, alert_threshold, created_at, updated_at FROM pro_stock_items WHERE id = ? AND user_id = ? LIMIT 1"
+          ).bind(id, user.id).first();
+          return json({ message: "Article ajouté au stock.", item }, 201, { "Cache-Control": "no-store" });
+        }
+
+        if (request.method === "POST" && path === "/api/pro/stock/movements") {
+          const body = await readLimitedJsonBody(request);
+          const itemId = String(body.item_id || "").trim();
+          const direction = String(body.direction || "").trim();
+          const quantity = Number(body.quantity);
+          const description = String(body.description || "").trim();
+          const movementDate = String(body.movement_date || "").trim();
+          if (!itemId || !["entree", "sortie"].includes(direction)) return json({ error: "Choisissez un article et un type de mouvement." }, 400);
+          if (!Number.isFinite(quantity) || quantity <= 0 || quantity > 1000000) return json({ error: "La quantité doit être supérieure à zéro." }, 400);
+          if (description.length > 200) return json({ error: "La description est trop longue (200 caractères maximum)." }, 400);
+          if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(movementDate) ||
+              Number.isNaN(Date.parse(movementDate + "T00:00:00Z")) ||
+              new Date(movementDate + "T00:00:00Z").toISOString().slice(0, 10) !== movementDate) {
+            return json({ error: "La date du mouvement est invalide." }, 400);
+          }
+          const item = await env.DB.prepare(
+            "SELECT id, quantity FROM pro_stock_items WHERE id = ? AND user_id = ? LIMIT 1"
+          ).bind(itemId, user.id).first();
+          if (!item) return json({ error: "Article introuvable dans votre stock." }, 404);
+          const delta = direction === "entree" ? quantity : -quantity;
+          const update = await env.DB.prepare(
+            "UPDATE pro_stock_items SET quantity = quantity + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND (? = 'entree' OR quantity >= ?)"
+          ).bind(delta, itemId, user.id, direction, quantity).run();
+          if (!Number(update?.meta?.changes || 0)) {
+            return json({ error: "Stock insuffisant pour cette sortie de matériel." }, 409);
+          }
+          await env.DB.prepare(
+            "INSERT INTO pro_stock_movements (id, user_id, item_id, direction, quantity, description, movement_date) VALUES (?, ?, ?, ?, ?, ?, ?)"
+          ).bind(crypto.randomUUID(), user.id, itemId, direction, quantity, description, movementDate).run();
+          return json({ message: "Mouvement de stock enregistré." }, 201, { "Cache-Control": "no-store" });
+        }
+
+        return json({ error: "Méthode non autorisée." }, 405);
+      } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête est trop volumineuse." }, 413);
+        console.error("ERREUR 221CLOUD PRO STOCK:", error);
+        return json({ error: "Impossible de traiter le stock pour le moment." }, 500);
       }
     }
 
