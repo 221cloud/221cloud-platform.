@@ -410,6 +410,45 @@ async function ensureProSchema(env) {
   await env.DB.prepare(
     "CREATE INDEX IF NOT EXISTS idx_pro_quote_items_owner_quote ON pro_quote_items(user_id, quote_id)"
   ).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS pro_invoices (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      quote_id TEXT NOT NULL,
+      client_id TEXT NOT NULL,
+      invoice_number TEXT NOT NULL,
+      client_name TEXT NOT NULL,
+      client_phone TEXT,
+      client_address TEXT,
+      description TEXT NOT NULL,
+      labour_amount INTEGER NOT NULL DEFAULT 0,
+      material_amount INTEGER NOT NULL DEFAULT 0,
+      total_amount INTEGER NOT NULL DEFAULT 0,
+      payment_status TEXT NOT NULL DEFAULT 'unpaid',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, quote_id),
+      UNIQUE(user_id, invoice_number)
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_pro_invoices_owner_created ON pro_invoices(user_id, created_at DESC)"
+  ).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS pro_invoice_items (
+      id TEXT PRIMARY KEY,
+      invoice_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      label TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      unit TEXT NOT NULL,
+      unit_price INTEGER NOT NULL,
+      total_amount INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_pro_invoice_items_owner_invoice ON pro_invoice_items(user_id, invoice_id)"
+  ).run();
 }
 
 async function ensureCustomerDatabaseStructureSchema(env) {
@@ -2420,6 +2459,96 @@ export default {
 
 
     // 221CLOUD PRO : DEVIS DÉTAILLÉS EN BROUILLON, PRIVÉS PAR UTILISATEUR
+    // 221CLOUD PRO : FACTURES
+    if (path === "/api/pro/invoices") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureProSchema(env);
+
+        if (request.method === "GET") {
+          const result = await env.DB.prepare(
+            `SELECT id, quote_id, client_id, invoice_number, client_name, client_phone,
+                    client_address, description, labour_amount, material_amount,
+                    total_amount, payment_status, created_at
+             FROM pro_invoices WHERE user_id = ? ORDER BY created_at DESC LIMIT 200`
+          ).bind(user.id).all();
+          const invoices = result.results || [];
+          const itemResult = await env.DB.prepare(
+            "SELECT id, invoice_id, label, quantity, unit, unit_price, total_amount FROM pro_invoice_items WHERE user_id = ? ORDER BY created_at ASC"
+          ).bind(user.id).all();
+          const itemsByInvoice = new Map();
+          for (const item of (itemResult.results || [])) {
+            if (!itemsByInvoice.has(item.invoice_id)) itemsByInvoice.set(item.invoice_id, []);
+            itemsByInvoice.get(item.invoice_id).push(item);
+          }
+          return json({
+            invoices: invoices.map(invoice => ({ ...invoice, items: itemsByInvoice.get(invoice.id) || [] }))
+          }, 200, { "Cache-Control": "no-store" });
+        }
+
+        if (request.method === "POST") {
+          const body = await readLimitedJsonBody(request);
+          const quoteId = String(body.quote_id || "").trim();
+          if (!quoteId) return json({ error: "Choisissez un devis à transformer en facture." }, 400);
+
+          const existing = await env.DB.prepare(
+            "SELECT id FROM pro_invoices WHERE quote_id = ? AND user_id = ? LIMIT 1"
+          ).bind(quoteId, user.id).first();
+          if (existing) return json({ error: "Une facture existe déjà pour ce devis." }, 409);
+
+          const quote = await env.DB.prepare(
+            `SELECT q.id, q.client_id, c.name AS client_name, c.phone AS client_phone,
+                    c.address AS client_address, q.description, q.labour_amount,
+                    q.material_amount, q.total_amount
+             FROM pro_quotes q
+             JOIN pro_clients c ON c.id = q.client_id AND c.user_id = q.user_id
+             WHERE q.id = ? AND q.user_id = ? LIMIT 1`
+          ).bind(quoteId, user.id).first();
+          if (!quote) return json({ error: "Devis introuvable." }, 404);
+
+          const sourceItems = await env.DB.prepare(
+            "SELECT label, quantity, unit, unit_price, total_amount FROM pro_quote_items WHERE quote_id = ? AND user_id = ? ORDER BY created_at ASC"
+          ).bind(quoteId, user.id).all();
+          const id = crypto.randomUUID();
+          const now = new Date();
+          const datePart = now.toISOString().slice(0,10).replace(/-/g,"");
+          const invoiceNumber = "FAC-" + datePart + "-" + crypto.randomUUID().slice(0,6).toUpperCase();
+          const items = sourceItems.results || [];
+          const statements = [env.DB.prepare(
+            `INSERT INTO pro_invoices
+             (id, user_id, quote_id, client_id, invoice_number, client_name, client_phone,
+              client_address, description, labour_amount, material_amount, total_amount, payment_status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid')`
+          ).bind(id, user.id, quote.id, quote.client_id, invoiceNumber, quote.client_name,
+            quote.client_phone, quote.client_address, quote.description, quote.labour_amount,
+            quote.material_amount, quote.total_amount)];
+          for (const item of items) {
+            statements.push(env.DB.prepare(
+              `INSERT INTO pro_invoice_items
+               (id, invoice_id, user_id, label, quantity, unit, unit_price, total_amount)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+            ).bind(crypto.randomUUID(), id, user.id, item.label, item.quantity, item.unit, item.unit_price, item.total_amount));
+          }
+          await env.DB.batch(statements);
+          return json({ message: "Facture créée à partir du devis.", invoice: {
+            id, quote_id: quote.id, client_id: quote.client_id, invoice_number: invoiceNumber,
+            client_name: quote.client_name, client_phone: quote.client_phone,
+            client_address: quote.client_address, description: quote.description,
+            labour_amount: quote.labour_amount, material_amount: quote.material_amount,
+            total_amount: quote.total_amount, payment_status: "unpaid",
+            created_at: now.toISOString(), items
+          } }, 201);
+        }
+
+        return json({ error: "Méthode non autorisée." }, 405);
+      } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête est trop volumineuse." }, 413);
+        console.error("ERREUR 221CLOUD PRO FACTURES:", error);
+        return json({ error: "Impossible de traiter les factures pour le moment." }, 500);
+      }
+    }
+
     const proQuoteRouteMatch = path.match(/^\/api\/pro\/quotes(?:\/([^/]+))?$/);
     if (proQuoteRouteMatch) {
       try {
