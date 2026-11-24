@@ -512,6 +512,24 @@ async function ensureProSchema(env) {
   await env.DB.prepare(
     "CREATE INDEX IF NOT EXISTS idx_pro_stock_movements_owner_date ON pro_stock_movements(user_id, movement_date DESC, created_at DESC)"
   ).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS pro_stock_purchases (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      item_id TEXT NOT NULL,
+      item_name TEXT NOT NULL,
+      supplier TEXT NOT NULL DEFAULT '',
+      quantity REAL NOT NULL,
+      unit TEXT NOT NULL,
+      unit_price INTEGER NOT NULL,
+      total_amount INTEGER NOT NULL,
+      purchase_date TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_pro_stock_purchases_owner_date ON pro_stock_purchases(user_id, purchase_date DESC, created_at DESC)"
+  ).run();
 }
 
 async function ensureCustomerDatabaseStructureSchema(env) {
@@ -2763,6 +2781,73 @@ export default {
         if (error?.status === 413) return json({ error: "La requête est trop volumineuse." }, 413);
         console.error("ERREUR 221CLOUD PRO CAISSE:", error);
         return json({ error: "Impossible de traiter la caisse pour le moment." }, 500);
+      }
+    }
+
+    // 221CLOUD PRO : ACHATS DE MATÉRIEL
+    if (path === "/api/pro/stock/purchases") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureProSchema(env);
+
+        if (request.method === "GET") {
+          const result = await env.DB.prepare(
+            "SELECT id, item_id, item_name, supplier, quantity, unit, unit_price, total_amount, purchase_date, created_at FROM pro_stock_purchases WHERE user_id = ? ORDER BY purchase_date DESC, created_at DESC LIMIT 500"
+          ).bind(user.id).all();
+          return json({ purchases: result.results || [] }, 200, { "Cache-Control": "no-store" });
+        }
+
+        if (request.method === "POST") {
+          const body = await readLimitedJsonBody(request);
+          const itemId = String(body.item_id || "").trim();
+          const supplier = String(body.supplier || "").trim();
+          const quantity = Number(body.quantity);
+          const unitPrice = Number(body.unit_price);
+          const purchaseDate = String(body.purchase_date || "").trim();
+          if (!itemId) return json({ error: "Choisissez un article du stock." }, 400);
+          if (supplier.length > 120) return json({ error: "Le nom du fournisseur est trop long." }, 400);
+          if (!Number.isFinite(quantity) || quantity <= 0 || quantity > 1000000) return json({ error: "La quantité doit être supérieure à zéro." }, 400);
+          if (!Number.isSafeInteger(unitPrice) || unitPrice < 0 || unitPrice > 1000000000) return json({ error: "Le prix unitaire doit être un montant valide en FCFA." }, 400);
+          const totalAmount = Math.round(quantity * unitPrice);
+          if (!Number.isSafeInteger(totalAmount) || totalAmount <= 0 || totalAmount > 1000000000) return json({ error: "Le montant total de l’achat est invalide." }, 400);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(purchaseDate) ||
+              Number.isNaN(Date.parse(purchaseDate + "T00:00:00Z")) ||
+              new Date(purchaseDate + "T00:00:00Z").toISOString().slice(0, 10) !== purchaseDate) {
+            return json({ error: "La date de l’achat est invalide." }, 400);
+          }
+          const item = await env.DB.prepare(
+            "SELECT id, name, unit FROM pro_stock_items WHERE id = ? AND user_id = ? LIMIT 1"
+          ).bind(itemId, user.id).first();
+          if (!item) return json({ error: "Article introuvable dans votre stock." }, 404);
+
+          const purchaseId = crypto.randomUUID();
+          const description = "Achat de " + item.name + (supplier ? " chez " + supplier : "");
+          await env.DB.batch([
+            env.DB.prepare(
+              "UPDATE pro_stock_items SET quantity = quantity + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?"
+            ).bind(quantity, itemId, user.id),
+            env.DB.prepare(
+              "INSERT INTO pro_stock_purchases (id, user_id, item_id, item_name, supplier, quantity, unit, unit_price, total_amount, purchase_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            ).bind(purchaseId, user.id, itemId, item.name, supplier, quantity, item.unit, unitPrice, totalAmount, purchaseDate),
+            env.DB.prepare(
+              "INSERT INTO pro_stock_movements (id, user_id, item_id, direction, quantity, description, movement_date) VALUES (?, ?, ?, 'entree', ?, ?, ?)"
+            ).bind(crypto.randomUUID(), user.id, itemId, quantity, description, purchaseDate),
+            env.DB.prepare(
+              "INSERT INTO pro_expenses (id, user_id, category, description, amount, expense_date) VALUES (?, ?, 'Matériel', ?, ?, ?)"
+            ).bind(crypto.randomUUID(), user.id, description, totalAmount, purchaseDate)
+          ]);
+          return json({
+            message: "Achat enregistré. Le stock et les dépenses ont été mis à jour.",
+            purchase: { id: purchaseId, item_name: item.name, quantity, unit: item.unit, total_amount: totalAmount }
+          }, 201, { "Cache-Control": "no-store" });
+        }
+
+        return json({ error: "Méthode non autorisée." }, 405);
+      } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête est trop volumineuse." }, 413);
+        console.error("ERREUR 221CLOUD PRO ACHATS STOCK:", error);
+        return json({ error: "Impossible d’enregistrer cet achat pour le moment." }, 500);
       }
     }
 
