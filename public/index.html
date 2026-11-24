@@ -7188,13 +7188,30 @@ async function renderProStockPage() {
       </form>
     </div>
     <div class="card">
+      <div class="section-head"><h2>🏪 Mes fournisseurs</h2></div>
+      <p class="muted">Enregistrez les boutiques où vous achetez votre matériel pour retrouver leurs coordonnées et vos achats.</p>
+      <form id="proSupplierForm" class="form-card" onsubmit="saveProSupplier(event)">
+        <label for="proSupplierName">Nom de la boutique ou du fournisseur</label>
+        <input id="proSupplierName" maxlength="120" required placeholder="Ex. : Électricité Ndiaye">
+        <label for="proSupplierPhone">Téléphone (facultatif)</label>
+        <input id="proSupplierPhone" maxlength="40" type="tel" inputmode="tel" placeholder="Ex. : 77 000 00 00">
+        <label for="proSupplierAddress">Adresse (facultatif)</label>
+        <input id="proSupplierAddress" maxlength="200" placeholder="Ex. : Marché central, Mbour">
+        <label for="proSupplierNotes">Note (facultatif)</label>
+        <input id="proSupplierNotes" maxlength="300" placeholder="Ex. : Fournisseur habituel de câbles">
+        <button id="proSupplierSave" type="submit">＋ Ajouter le fournisseur</button>
+        <div id="proSupplierMessage" class="notice" role="status" aria-live="polite"></div>
+      </form>
+      <div id="proSuppliersList"><div class="empty">Chargement des fournisseurs…</div></div>
+    </div>
+    <div class="card">
       <div class="section-head"><h2>🛒 Enregistrer un achat</h2></div>
       <p class="muted">L'achat augmente automatiquement le stock et s'ajoute une seule fois à vos dépenses.</p>
       <form id="proStockPurchaseForm" class="form-card" onsubmit="saveProStockPurchase(event)">
         <label for="proStockPurchaseItem">Matériel acheté</label>
         <select id="proStockPurchaseItem" required><option value="">Chargement…</option></select>
         <label for="proStockPurchaseSupplier">Fournisseur (facultatif)</label>
-        <input id="proStockPurchaseSupplier" maxlength="120" placeholder="Ex. : Boutique électrique">
+        <select id="proStockPurchaseSupplier"><option value="">Non précisé</option></select>
         <label for="proStockPurchaseQuantity">Quantité achetée</label>
         <input id="proStockPurchaseQuantity" type="number" min="0.01" max="1000000" step="0.01" inputmode="decimal" required placeholder="Ex. : 20">
         <label for="proStockPurchaseUnitPrice">Prix par unité (FCFA)</label>
@@ -7243,6 +7260,61 @@ async function renderProStockPage() {
   if (purchaseDate) purchaseDate.value = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
   await loadProStock();
   await loadProStockPurchases();
+  await loadProSuppliers();
+}
+
+async function loadProSuppliers() {
+  const list = document.getElementById("proSuppliersList");
+  if (!list) return;
+  try {
+    const data = await api("/pro/suppliers");
+    const suppliers = Array.isArray(data.suppliers) ? data.suppliers : [];
+    const select = document.getElementById("proStockPurchaseSupplier");
+    if (select) {
+      const current = select.value;
+      select.innerHTML = '<option value="">Non précisé</option>' + suppliers.map(s =>
+        '<option value="' + escapeHTML(s.id) + '">' + escapeHTML(s.name) + '</option>'
+      ).join("");
+      if (current && suppliers.some(s => s.id === current)) select.value = current;
+    }
+    list.innerHTML = suppliers.length ? suppliers.map(s => {
+      const contact = [s.phone, s.address].filter(Boolean).map(escapeHTML).join(" · ");
+      return '<div class="item-card"><strong>' + escapeHTML(s.name) + '</strong>' +
+        (contact ? '<div class="muted" style="margin-top:6px">' + contact + '</div>' : '') +
+        (s.notes ? '<div class="muted" style="margin-top:5px">' + escapeHTML(s.notes) + '</div>' : '') +
+        '<div class="muted" style="margin-top:7px">' + escapeHTML(s.purchase_count) + ' achat(s) · Total : ' + escapeHTML(Number(s.total_purchases).toLocaleString("fr-FR")) + ' FCFA</div></div>';
+    }).join("") : '<div class="empty">Aucun fournisseur enregistré pour le moment.</div>';
+  } catch (error) {
+    list.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message || "Impossible de charger les fournisseurs.") + '</div>';
+  }
+}
+
+async function saveProSupplier(event) {
+  event.preventDefault();
+  const form = document.getElementById("proSupplierForm");
+  const button = document.getElementById("proSupplierSave");
+  const message = document.getElementById("proSupplierMessage");
+  if (!form || !button || !message) return;
+  const body = {
+    name: document.getElementById("proSupplierName").value.trim(),
+    phone: document.getElementById("proSupplierPhone").value.trim(),
+    address: document.getElementById("proSupplierAddress").value.trim(),
+    notes: document.getElementById("proSupplierNotes").value.trim()
+  };
+  if (!body.name) { message.textContent = "Indiquez le nom du fournisseur."; return; }
+  if (!window.confirm("Enregistrer ce fournisseur ?\n" + body.name + (body.phone ? "\nTéléphone : " + body.phone : ""))) return;
+  button.disabled = true;
+  message.textContent = "Enregistrement…";
+  try {
+    await api("/pro/suppliers", { method: "POST", body: JSON.stringify(body) });
+    form.reset();
+    message.textContent = "Fournisseur enregistré.";
+    await loadProSuppliers();
+  } catch (error) {
+    message.textContent = error.message || "Impossible d’enregistrer ce fournisseur.";
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function loadProStockPurchases() {
@@ -7269,7 +7341,7 @@ async function saveProStockPurchase(event) {
   if (!form || !button || !message) return;
   const body = {
     item_id: document.getElementById("proStockPurchaseItem").value,
-    supplier: document.getElementById("proStockPurchaseSupplier").value.trim(),
+    supplier_id: document.getElementById("proStockPurchaseSupplier").value,
     quantity: Number(document.getElementById("proStockPurchaseQuantity").value),
     unit_price: Number(document.getElementById("proStockPurchaseUnitPrice").value),
     purchase_date: document.getElementById("proStockPurchaseDate").value
