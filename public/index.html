@@ -6411,6 +6411,7 @@ function renderProPage() {
       <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir le tableau de bord financier" onclick="renderProFinancialPage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">💰</div><div><h3>Argent</h3><p>Argent reçu et à recevoir</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
       <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir la gestion du stock de matériel" onclick="renderProStockPage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">🔌</div><div><h3>Stock</h3><p>Matériel disponible et mouvements</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
       <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir les chantiers et travaux" onclick="renderProJobsPage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">🏗️</div><div><h3>Chantiers</h3><p>Travaux à faire, en cours et terminés</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
+      <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir le calendrier et les rendez-vous" onclick="renderProCalendarPage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">📅</div><div><h3>Calendrier</h3><p>Rendez-vous et travaux prévus</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
 
     </div>
 
@@ -6577,6 +6578,165 @@ async function updateProJobStatus(jobId, status) {
   } catch (error) {
     alert(error.message || "Impossible de modifier l’état du chantier.");
     await loadProJobs();
+  }
+}
+
+async function renderProCalendarPage() {
+  const main = document.getElementById("mainContent");
+  if (!main) return;
+  const today = new Date();
+  const todayValue = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-" + String(today.getDate()).padStart(2, "0");
+  main.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin:0 0 18px">
+      <button type="button" class="secondary" onclick="returnToProHome()" style="min-width:104px">← Retour</button>
+      <div><div class="dashboard-kicker" style="color:#8de7c7">221CLOUD PRO</div><strong style="font-size:18px">Calendrier</strong></div>
+    </div>
+    <div class="card">
+      <div class="section-head"><h2>＋ Ajouter un rendez-vous</h2></div>
+      <p class="muted">Notez une visite, un rendez-vous ou un travail prévu.</p>
+      <form id="proCalendarForm" class="form-card" onsubmit="saveProCalendarEvent(event)">
+        <label for="proCalendarTitle">Motif du rendez-vous *</label>
+        <input id="proCalendarTitle" maxlength="160" required placeholder="Ex. : Visite chez le client">
+        <label for="proCalendarClient">Client *</label>
+        <select id="proCalendarClient" required onchange="loadProCalendarJobsForClient(this.value)"><option value="">Chargement des clients…</option></select>
+        <label for="proCalendarJob">Chantier lié (facultatif)</label>
+        <select id="proCalendarJob"><option value="">Aucun chantier précis</option></select>
+        <label for="proCalendarDate">Date *</label>
+        <input id="proCalendarDate" type="date" value="${todayValue}" required>
+        <label for="proCalendarTime">Heure (facultatif)</label>
+        <input id="proCalendarTime" type="time">
+        <label for="proCalendarNotes">Note (facultatif)</label>
+        <textarea id="proCalendarNotes" rows="2" maxlength="1000" placeholder="Adresse, matériel à apporter, détails…"></textarea>
+        <button id="proCalendarSave" type="submit">＋ Enregistrer le rendez-vous</button>
+        <div id="proCalendarMessage" class="notice" role="status" aria-live="polite"></div>
+      </form>
+    </div>
+    <div class="card">
+      <div class="section-head"><h2>📅 Rendez-vous prévus</h2><span class="muted" id="proCalendarCount">Chargement…</span></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <button type="button" class="secondary" onclick="filterProCalendar('all')">Tous</button>
+        <button type="button" class="secondary" onclick="filterProCalendar('today')">Aujourd’hui</button>
+        <button type="button" class="secondary" onclick="filterProCalendar('week')">7 prochains jours</button>
+      </div>
+      <div id="proCalendarList"><div class="empty">Chargement du calendrier…</div></div>
+    </div>
+  `;
+  const data = await api("/pro/clients");
+  const clients = Array.isArray(data.clients) ? data.clients : [];
+  const select = document.getElementById("proCalendarClient");
+  select.innerHTML = '<option value="">Choisir un client</option>' + clients.map(client =>
+    '<option value="' + escapeHTML(client.id) + '">' + escapeHTML(client.name) + '</option>'
+  ).join("");
+  if (!clients.length) select.innerHTML = '<option value="">Ajoutez d’abord un client</option>';
+  await loadProCalendarEvents();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+let proCalendarEventsCache = [];
+let proCalendarFilter = "all";
+
+async function loadProCalendarJobsForClient(clientId) {
+  const select = document.getElementById("proCalendarJob");
+  if (!select) return;
+  select.innerHTML = '<option value="">Aucun chantier précis</option>';
+  if (!clientId) return;
+  try {
+    const data = await api("/pro/jobs");
+    const jobs = (data.jobs || []).filter(job => job.client_id === clientId);
+    select.innerHTML = '<option value="">Aucun chantier précis</option>' + jobs.map(job =>
+      '<option value="' + escapeHTML(job.id) + '">' + escapeHTML(job.title) + '</option>'
+    ).join("");
+  } catch (error) {
+    select.innerHTML = '<option value="">Impossible de charger les chantiers</option>';
+  }
+}
+
+async function loadProCalendarEvents() {
+  const list = document.getElementById("proCalendarList");
+  if (!list) return;
+  try {
+    const data = await api("/pro/calendar");
+    proCalendarEventsCache = Array.isArray(data.events) ? data.events : [];
+    filterProCalendar(proCalendarFilter);
+  } catch (error) {
+    list.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message || "Impossible de charger le calendrier.") + '</div>';
+  }
+}
+
+function filterProCalendar(filter) {
+  proCalendarFilter = filter;
+  const list = document.getElementById("proCalendarList");
+  if (!list) return;
+  const now = new Date();
+  const today = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") + "-" + String(now.getDate()).padStart(2, "0");
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7);
+  const endValue = end.getFullYear() + "-" + String(end.getMonth() + 1).padStart(2, "0") + "-" + String(end.getDate()).padStart(2, "0");
+  const events = proCalendarEventsCache.filter(event => {
+    if (filter === "today") return event.event_date === today;
+    if (filter === "week") return event.event_date >= today && event.event_date <= endValue;
+    return true;
+  });
+  const count = document.getElementById("proCalendarCount");
+  if (count) count.textContent = events.length + (events.length > 1 ? " rendez-vous" : " rendez-vous");
+  list.innerHTML = events.length ? events.map(event => {
+    const statusLabel = event.status === "done" ? "Effectué" : event.status === "cancelled" ? "Annulé" : "Prévu";
+    return '<div class="item-card"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><strong>' + escapeHTML(event.title) + '</strong><strong>' + escapeHTML(statusLabel) + '</strong></div><div style="margin-top:7px">📅 ' + escapeHTML(formatDate(event.event_date)) + (event.event_time ? ' · 🕒 ' + escapeHTML(event.event_time) : '') + '</div><div class="muted" style="margin-top:5px">👤 ' + escapeHTML(event.client_name) + (event.job_title ? ' · 🏗️ ' + escapeHTML(event.job_title) : '') + (event.client_phone ? ' · ☎️ ' + escapeHTML(event.client_phone) : '') + '</div>' + (event.notes ? '<p style="margin:8px 0 0">' + escapeHTML(event.notes) + '</p>' : '') + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button type="button" class="secondary" onclick="updateProCalendarStatus(\'' + escapeHTML(event.id) + '\', \'done\')">Marquer effectué</button><button type="button" class="secondary" onclick="updateProCalendarStatus(\'' + escapeHTML(event.id) + '\', \'cancelled\')">Annuler</button><button type="button" class="secondary" onclick="deleteProCalendarEvent(\'' + escapeHTML(event.id) + '\')">Supprimer</button></div></div>';
+  }).join("") : '<div class="empty">Aucun rendez-vous dans cette période.</div>';
+}
+
+async function saveProCalendarEvent(event) {
+  event.preventDefault();
+  const form = document.getElementById("proCalendarForm");
+  const button = document.getElementById("proCalendarSave");
+  const message = document.getElementById("proCalendarMessage");
+  if (!form || !button || !message) return;
+  const body = {
+    title: document.getElementById("proCalendarTitle").value.trim(),
+    client_id: document.getElementById("proCalendarClient").value,
+    job_id: document.getElementById("proCalendarJob").value,
+    event_date: document.getElementById("proCalendarDate").value,
+    event_time: document.getElementById("proCalendarTime").value,
+    notes: document.getElementById("proCalendarNotes").value.trim()
+  };
+  if (!body.title || !body.client_id || !body.event_date) {
+    message.textContent = "Indiquez le motif, le client et la date.";
+    return;
+  }
+  if (!window.confirm("Enregistrer ce rendez-vous ?\n" + body.title)) return;
+  button.disabled = true;
+  message.textContent = "Enregistrement…";
+  try {
+    await api("/pro/calendar", { method: "POST", body: JSON.stringify(body) });
+    form.reset();
+    const dateInput = document.getElementById("proCalendarDate");
+    if (dateInput) dateInput.value = body.event_date;
+    const jobSelect = document.getElementById("proCalendarJob");
+    if (jobSelect) jobSelect.innerHTML = '<option value="">Aucun chantier précis</option>';
+    message.textContent = "Rendez-vous enregistré.";
+    await loadProCalendarEvents();
+  } catch (error) {
+    message.textContent = error.message || "Impossible d’enregistrer le rendez-vous.";
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function updateProCalendarStatus(eventId, status) {
+  try {
+    await api("/pro/calendar/" + encodeURIComponent(eventId), { method: "PATCH", body: JSON.stringify({ status }) });
+    await loadProCalendarEvents();
+  } catch (error) {
+    alert(error.message || "Impossible de modifier le rendez-vous.");
+  }
+}
+
+async function deleteProCalendarEvent(eventId) {
+  if (!window.confirm("Supprimer ce rendez-vous ? Cette action est définitive.")) return;
+  try {
+    await api("/pro/calendar/" + encodeURIComponent(eventId), { method: "DELETE" });
+    await loadProCalendarEvents();
+  } catch (error) {
+    alert(error.message || "Impossible de supprimer le rendez-vous.");
   }
 }
 
