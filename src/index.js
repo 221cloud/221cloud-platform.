@@ -430,6 +430,10 @@ async function ensureProSchema(env) {
       UNIQUE(user_id, invoice_number)
     )
   `).run();
+  const invoiceColumns = await env.DB.prepare("PRAGMA table_info(pro_invoices)").all();
+  if (!(invoiceColumns.results || []).some(column => column.name === "amount_paid")) {
+    await env.DB.prepare("ALTER TABLE pro_invoices ADD COLUMN amount_paid INTEGER NOT NULL DEFAULT 0").run();
+  }
   await env.DB.prepare(
     "CREATE INDEX IF NOT EXISTS idx_pro_invoices_owner_created ON pro_invoices(user_id, created_at DESC)"
   ).run();
@@ -2459,6 +2463,47 @@ export default {
 
 
     // 221CLOUD PRO : DEVIS DÉTAILLÉS EN BROUILLON, PRIVÉS PAR UTILISATEUR
+    // 221CLOUD PRO : SUIVI DES PAIEMENTS DE FACTURES
+    const proInvoicePaymentMatch = path.match(/^\/api\/pro\/invoices\/([^/]+)$/);
+    if (proInvoicePaymentMatch) {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureProSchema(env);
+        if (request.method !== "PATCH") {
+          return json({ error: "Méthode non autorisée." }, 405);
+        }
+
+        const invoiceId = decodeURIComponent(proInvoicePaymentMatch[1]);
+        const invoice = await env.DB.prepare(
+          "SELECT id, total_amount FROM pro_invoices WHERE id = ? AND user_id = ? LIMIT 1"
+        ).bind(invoiceId, user.id).first();
+        if (!invoice) return json({ error: "Facture introuvable." }, 404);
+
+        const body = await readLimitedJsonBody(request);
+        const amountPaid = Number(body.amount_paid);
+        const totalAmount = Number(invoice.total_amount);
+        if (!Number.isSafeInteger(amountPaid) || amountPaid < 0 || amountPaid > totalAmount) {
+          return json({ error: "Le montant reçu doit être compris entre 0 et le total de la facture." }, 400);
+        }
+        const paymentStatus = amountPaid === totalAmount ? "paid" : amountPaid > 0 ? "partial" : "unpaid";
+        await env.DB.prepare(
+          "UPDATE pro_invoices SET amount_paid = ?, payment_status = ? WHERE id = ? AND user_id = ?"
+        ).bind(amountPaid, paymentStatus, invoiceId, user.id).run();
+
+        return json({
+          message: "Paiement de la facture mis à jour.",
+          amount_paid: amountPaid,
+          remaining_amount: totalAmount - amountPaid,
+          payment_status: paymentStatus
+        }, 200, { "Cache-Control": "no-store" });
+      } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête est trop volumineuse." }, 413);
+        console.error("ERREUR 221CLOUD PRO PAIEMENT FACTURE:", error);
+        return json({ error: "Impossible de mettre à jour le paiement pour le moment." }, 500);
+      }
+    }
+
     // 221CLOUD PRO : FACTURES
     if (path === "/api/pro/invoices") {
       try {
@@ -2470,7 +2515,7 @@ export default {
           const result = await env.DB.prepare(
             `SELECT id, quote_id, client_id, invoice_number, client_name, client_phone,
                     client_address, description, labour_amount, material_amount,
-                    total_amount, payment_status, created_at
+                    total_amount, amount_paid, payment_status, created_at
              FROM pro_invoices WHERE user_id = ? ORDER BY created_at DESC LIMIT 200`
           ).bind(user.id).all();
           const invoices = result.results || [];
