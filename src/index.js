@@ -597,6 +597,10 @@ async function ensureProSchema(env) {
   await env.DB.prepare(
     "CREATE INDEX IF NOT EXISTS idx_pro_interventions_owner_status ON pro_interventions(user_id, status, priority, created_at DESC)"
   ).run();
+  const interventionColumns = await env.DB.prepare("PRAGMA table_info(pro_interventions)").all();
+  if (!(interventionColumns.results || []).some(column => column.name === "completed_at")) {
+    await env.DB.prepare("ALTER TABLE pro_interventions ADD COLUMN completed_at TEXT").run();
+  }
   const purchaseColumns = await env.DB.prepare("PRAGMA table_info(pro_stock_purchases)").all();
   if (!(purchaseColumns.results || []).some(column => column.name === "supplier_id")) {
     await env.DB.prepare("ALTER TABLE pro_stock_purchases ADD COLUMN supplier_id TEXT").run();
@@ -3183,7 +3187,7 @@ export default {
           const result = await env.DB.prepare(
             `SELECT i.id, i.client_id, c.name AS client_name, c.phone AS client_phone,
                     i.title, i.address, i.description, i.priority, i.status,
-                    i.created_at, i.updated_at
+                    i.created_at, i.updated_at, i.completed_at
              FROM pro_interventions i
              JOIN pro_clients c ON c.id = i.client_id AND c.user_id = i.user_id
              WHERE i.user_id = ?
@@ -3225,8 +3229,8 @@ export default {
             return json({ error: "Choisissez un état et une urgence valides." }, 400);
           }
           const result = await env.DB.prepare(
-            "UPDATE pro_interventions SET status = ?, priority = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?"
-          ).bind(status, priority, interventionId, user.id).run();
+            "UPDATE pro_interventions SET status = ?, priority = ?, completed_at = CASE WHEN ? = 'done' THEN COALESCE(completed_at, CURRENT_TIMESTAMP) ELSE NULL END, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?"
+          ).bind(status, priority, status, interventionId, user.id).run();
           if (!Number(result?.meta?.changes || 0)) return json({ error: "Intervention introuvable." }, 404);
           return json({ message: "Intervention mise à jour." }, 200, { "Cache-Control": "no-store" });
         }
