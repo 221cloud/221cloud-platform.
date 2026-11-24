@@ -6410,6 +6410,8 @@ function renderProPage() {
       <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir la rubrique clients" onclick="renderProClientsPage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">👥</div><div><h3>Clients</h3><p>Les personnes pour qui vous travaillez</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
       <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir le tableau de bord financier" onclick="renderProFinancialPage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">💰</div><div><h3>Argent</h3><p>Argent reçu et à recevoir</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
       <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir la gestion du stock de matériel" onclick="renderProStockPage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">🔌</div><div><h3>Stock</h3><p>Matériel disponible et mouvements</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
+      <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir les chantiers et travaux" onclick="renderProJobsPage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">🏗️</div><div><h3>Chantiers</h3><p>Travaux à faire, en cours et terminés</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
+
     </div>
 
 
@@ -6455,6 +6457,127 @@ function returnToProHome() {
   saveProClientPageDraft();
   renderProPage();
   window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function renderProJobsPage() {
+  const main = document.getElementById("mainContent");
+  if (!main) return;
+  main.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin:0 0 18px">
+      <button type="button" class="secondary" onclick="returnToProHome()" style="min-width:104px">← Retour</button>
+      <div><div class="dashboard-kicker" style="color:#8de7c7">221CLOUD PRO</div><strong style="font-size:18px">Mes chantiers et travaux</strong></div>
+    </div>
+    <div class="card">
+      <div class="section-head"><h2>＋ Ajouter un chantier</h2></div>
+      <p class="muted">Enregistrez un travail et le client concerné.</p>
+      <form id="proJobForm" class="form-card" onsubmit="saveProJob(event)">
+        <label for="proJobTitle">Nom du chantier / travail *</label>
+        <input id="proJobTitle" maxlength="160" required placeholder="Ex. : Installation électrique d'une maison">
+        <label for="proJobClient">Client *</label>
+        <select id="proJobClient" required><option value="">Chargement des clients…</option></select>
+        <label for="proJobAddress">Adresse du chantier</label>
+        <input id="proJobAddress" maxlength="240" placeholder="Ex. : Mbour, quartier Grand Mbour">
+        <label for="proJobDescription">Travail à effectuer</label>
+        <textarea id="proJobDescription" rows="3" maxlength="2000" placeholder="Décrivez le travail à faire…"></textarea>
+        <label for="proJobDate">Date prévue (facultatif)</label>
+        <input id="proJobDate" type="date">
+        <label for="proJobStatus">État du chantier</label>
+        <select id="proJobStatus"><option value="todo">À faire</option><option value="in_progress">En cours</option><option value="done">Terminé</option></select>
+        <button id="proJobSave" type="submit">＋ Enregistrer le chantier</button>
+        <div id="proJobMessage" class="notice" role="status" aria-live="polite"></div>
+      </form>
+    </div>
+    <div class="card">
+      <div class="section-head"><h2>📋 Mes chantiers</h2><span class="muted" id="proJobCount">Chargement…</span></div>
+      <div id="proJobsList"><div class="empty">Chargement des chantiers…</div></div>
+    </div>
+  `;
+  const clientsData = await api("/pro/clients");
+  const clients = Array.isArray(clientsData.clients) ? clientsData.clients : [];
+  const clientSelect = document.getElementById("proJobClient");
+  clientSelect.innerHTML = '<option value="">Choisir un client</option>' + clients.map(client =>
+    '<option value="' + escapeHTML(client.id) + '">' + escapeHTML(client.name) + '</option>'
+  ).join("");
+  if (!clients.length) {
+    clientSelect.innerHTML = '<option value="">Ajoutez d’abord un client</option>';
+  }
+  await loadProJobs();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function proJobStatusLabel(status) {
+  if (status === "in_progress") return "En cours";
+  if (status === "done") return "Terminé";
+  return "À faire";
+}
+
+async function loadProJobs() {
+  const list = document.getElementById("proJobsList");
+  if (!list) return;
+  try {
+    const data = await api("/pro/jobs");
+    const jobs = Array.isArray(data.jobs) ? data.jobs : [];
+    const count = document.getElementById("proJobCount");
+    if (count) count.textContent = jobs.length + (jobs.length > 1 ? " chantiers" : " chantier");
+    list.innerHTML = jobs.length ? jobs.map(job => {
+      const quoteRows = (job.quotes || []).map(q =>
+        '<div class="muted" style="margin-top:5px">📄 Devis : ' + escapeHTML(q.description) + ' · ' + escapeHTML(Number(q.total_amount).toLocaleString("fr-FR")) + ' FCFA</div>'
+      ).join("");
+      const invoiceRows = (job.invoices || []).map(inv =>
+        '<div class="muted" style="margin-top:5px">🧾 Facture ' + escapeHTML(inv.invoice_number) + ' · ' + escapeHTML(Number(inv.total_amount).toLocaleString("fr-FR")) + ' FCFA · Reçu : ' + escapeHTML(Number(inv.amount_paid || 0).toLocaleString("fr-FR")) + ' FCFA</div>'
+      ).join("");
+      const docs = quoteRows || invoiceRows ? '<div style="margin-top:10px;padding-top:9px;border-top:1px solid var(--border)"><strong>Devis et factures du client</strong>' + quoteRows + invoiceRows + '</div>' : '<div class="muted" style="margin-top:9px">Aucun devis ou facture enregistré pour ce client.</div>';
+      return '<div class="item-card"><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap"><strong>' + escapeHTML(job.title) + '</strong><strong>' + escapeHTML(proJobStatusLabel(job.status)) + '</strong></div><div class="muted" style="margin-top:6px">👤 ' + escapeHTML(job.client_name) + (job.address ? ' · 📍 ' + escapeHTML(job.address) : '') + (job.start_date ? ' · 📅 ' + escapeHTML(formatDate(job.start_date)) : '') + '</div>' + (job.description ? '<p style="margin:8px 0 0">' + escapeHTML(job.description) + '</p>' : '') + '<label for="proJobStatus-' + escapeHTML(job.id) + '" style="display:block;margin-top:12px">Modifier l’état</label><select id="proJobStatus-' + escapeHTML(job.id) + '" onchange="updateProJobStatus(\'' + escapeHTML(job.id) + '\', this.value)"><option value="todo"' + (job.status === "todo" ? " selected" : "") + '>À faire</option><option value="in_progress"' + (job.status === "in_progress" ? " selected" : "") + '>En cours</option><option value="done"' + (job.status === "done" ? " selected" : "") + '>Terminé</option></select>' + docs + '</div>';
+    }).join("") : '<div class="empty">Aucun chantier enregistré. Ajoutez votre premier chantier ci-dessus.</div>';
+  } catch (error) {
+    list.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message || "Impossible de charger les chantiers.") + '</div>';
+  }
+}
+
+async function saveProJob(event) {
+  event.preventDefault();
+  const form = document.getElementById("proJobForm");
+  const button = document.getElementById("proJobSave");
+  const message = document.getElementById("proJobMessage");
+  if (!form || !button || !message) return;
+  const body = {
+    title: document.getElementById("proJobTitle").value.trim(),
+    client_id: document.getElementById("proJobClient").value,
+    address: document.getElementById("proJobAddress").value.trim(),
+    description: document.getElementById("proJobDescription").value.trim(),
+    start_date: document.getElementById("proJobDate").value,
+    status: document.getElementById("proJobStatus").value
+  };
+  if (!body.title || !body.client_id) {
+    message.textContent = "Indiquez le nom du chantier et choisissez un client.";
+    return;
+  }
+  if (!window.confirm("Enregistrer ce chantier ?\n" + body.title)) return;
+  button.disabled = true;
+  message.textContent = "Enregistrement…";
+  try {
+    await api("/pro/jobs", { method: "POST", body: JSON.stringify(body) });
+    form.reset();
+    message.textContent = "Chantier enregistré.";
+    await loadProJobs();
+  } catch (error) {
+    message.textContent = error.message || "Impossible d’enregistrer le chantier.";
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function updateProJobStatus(jobId, status) {
+  try {
+    await api("/pro/jobs/" + encodeURIComponent(jobId), {
+      method: "PATCH",
+      body: JSON.stringify({ status })
+    });
+    await loadProJobs();
+  } catch (error) {
+    alert(error.message || "Impossible de modifier l’état du chantier.");
+    await loadProJobs();
+  }
 }
 
 async function renderProClientsPage() {
