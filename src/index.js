@@ -453,6 +453,20 @@ async function ensureProSchema(env) {
   await env.DB.prepare(
     "CREATE INDEX IF NOT EXISTS idx_pro_invoice_items_owner_invoice ON pro_invoice_items(user_id, invoice_id)"
   ).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS pro_expenses (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      category TEXT NOT NULL,
+      description TEXT NOT NULL,
+      amount INTEGER NOT NULL,
+      expense_date TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_pro_expenses_owner_date ON pro_expenses(user_id, expense_date DESC, created_at DESC)"
+  ).run();
 }
 
 async function ensureCustomerDatabaseStructureSchema(env) {
@@ -2591,6 +2605,60 @@ export default {
         if (error?.status === 413) return json({ error: "La requête est trop volumineuse." }, 413);
         console.error("ERREUR 221CLOUD PRO FACTURES:", error);
         return json({ error: "Impossible de traiter les factures pour le moment." }, 500);
+      }
+    }
+
+    // 221CLOUD PRO : DÉPENSES
+    if (path === "/api/pro/expenses") {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureProSchema(env);
+
+        if (request.method === "GET") {
+          const result = await env.DB.prepare(
+            "SELECT id, category, description, amount, expense_date, created_at FROM pro_expenses WHERE user_id = ? ORDER BY expense_date DESC, created_at DESC LIMIT 500"
+          ).bind(user.id).all();
+          return json({ expenses: result.results || [] }, 200, { "Cache-Control": "no-store" });
+        }
+
+        if (request.method === "POST") {
+          const body = await readLimitedJsonBody(request);
+          const allowedCategories = new Set(["Matériel", "Transport", "Main-d’œuvre", "Autre"]);
+          const category = String(body.category || "").trim();
+          const description = String(body.description || "").trim();
+          const amount = Number(body.amount);
+          const expenseDate = String(body.expense_date || "").trim();
+          if (!allowedCategories.has(category)) {
+            return json({ error: "Choisissez une catégorie de dépense valide." }, 400);
+          }
+          if (!description || description.length > 200) {
+            return json({ error: "Ajoutez une description de 1 à 200 caractères." }, 400);
+          }
+          if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 1000000000) {
+            return json({ error: "Le montant doit être un nombre entier positif en FCFA." }, 400);
+          }
+          if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(expenseDate) ||
+              Number.isNaN(Date.parse(expenseDate + "T00:00:00Z")) ||
+              new Date(expenseDate + "T00:00:00Z").toISOString().slice(0, 10) !== expenseDate) {
+            return json({ error: "La date de la dépense est invalide." }, 400);
+          }
+
+          const id = crypto.randomUUID();
+          await env.DB.prepare(
+            "INSERT INTO pro_expenses (id, user_id, category, description, amount, expense_date) VALUES (?, ?, ?, ?, ?, ?)"
+          ).bind(id, user.id, category, description, amount, expenseDate).run();
+          const expense = await env.DB.prepare(
+            "SELECT id, category, description, amount, expense_date, created_at FROM pro_expenses WHERE id = ? AND user_id = ? LIMIT 1"
+          ).bind(id, user.id).first();
+          return json({ message: "Dépense enregistrée.", expense }, 201, { "Cache-Control": "no-store" });
+        }
+
+        return json({ error: "Méthode non autorisée." }, 405);
+      } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête est trop volumineuse." }, 413);
+        console.error("ERREUR 221CLOUD PRO DÉPENSES:", error);
+        return json({ error: "Impossible de traiter les dépenses pour le moment." }, 500);
       }
     }
 
