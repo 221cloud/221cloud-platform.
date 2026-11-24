@@ -3,6 +3,7 @@
   "name": "221cloud-platform",
   "main": "src/index.js",
   "compatibility_date": "2026-11-19",
+  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
