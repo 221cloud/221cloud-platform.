@@ -877,6 +877,7 @@ if (IS_PRO_MODE) {
 }
 let currentUser = null;
 let proQuotesCache = [];
+let proInvoicesCache = [];
 let proEditingQuoteId = null;
 let proQuoteDraftState = null;
 let projectsCache = [];
@@ -6405,7 +6406,7 @@ function renderProPage() {
     <div class="section-head pro-menu-heading"><h2>Que voulez-vous faire ?</h2></div>
     <div class="grid">
       <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir le formulaire de devis" onclick="renderProQuotePage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">📄</div><div><h3>Devis</h3><p>Prix d'un travail</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
-      <div class="card pro-shortcut-card pro-shortcut-soon" aria-disabled="true"><div class="shortcut"><div class="shortcut-icon">🧾</div><div><h3>Facture</h3><p>Après le travail</p><span class="status">Bientôt</span></div></div></div>
+      <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir les factures" onclick="renderProInvoicesPage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">🧾</div><div><h3>Factures</h3><p>Documents des travaux réalisés</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
       <div class="card pro-shortcut-card" role="button" tabindex="0" aria-label="Ouvrir la rubrique clients" onclick="renderProClientsPage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click()}"><div class="shortcut"><div class="shortcut-icon">👥</div><div><h3>Clients</h3><p>Les personnes pour qui vous travaillez</p><span class="status online">Touchez pour ouvrir</span></div></div></div>
       <div class="card pro-shortcut-card pro-shortcut-soon" aria-disabled="true"><div class="shortcut"><div class="shortcut-icon">💰</div><div><h3>Argent</h3><p>Argent reçu et à recevoir</p><span class="status">Bientôt</span></div></div></div>
       <div class="card pro-shortcut-card pro-shortcut-soon" aria-disabled="true"><div class="shortcut"><div class="shortcut-icon">🔌</div><div><h3>Matériel</h3><p>Vos outils et fournitures</p><span class="status">Bientôt</span></div></div></div>
@@ -6500,6 +6501,7 @@ async function renderProQuotePage() {
   const main = document.getElementById("mainContent");
   main.innerHTML = "\n    <div style=\"display:flex;align-items:center;gap:12px;margin:0 0 18px\">\n      <button type=\"button\" class=\"secondary\" onclick=\"returnToProHome()\" style=\"min-width:104px\">← Retour</button>\n      <div><div class=\"dashboard-kicker\" style=\"color:#8de7c7\">221CLOUD PRO</div><strong style=\"font-size:18px\">Nouveau devis</strong></div>\n    </div>\n    <div class=\"card\" id=\"proQuoteSection\">\n      <div class=\"section-head\"><h2>📄 Faire un devis</h2><span class=\"status online\">Disponible</span></div>\n      <p class=\"muted\">Préparez le prix d'un travail. Le devis sera gardé en brouillon.</p>\n      <form id=\"proQuoteForm\" class=\"form-card\" onsubmit=\"saveProQuote(event)\">\n        <label for=\"proQuoteClient\">Choisir le client *</label>\n        <select id=\"proQuoteClient\" required><option value=\"\">Chargement des clients…</option></select>\n        <label for=\"proQuoteDescription\">Quel travail faut-il faire ? *</label>\n        <textarea id=\"proQuoteDescription\" rows=\"3\" maxlength=\"2000\" required placeholder=\"Exemple : Installer trois prises électriques dans le salon.\"></textarea>\n        <label for=\"proQuoteLabour\">Prix de la main-d'œuvre (FCFA)</label>\n        <input id=\"proQuoteLabour\" type=\"number\" min=\"0\" max=\"1000000000\" step=\"1\" value=\"0\" inputmode=\"numeric\" oninput=\"updateProQuoteTotal()\">\n        <div style=\"margin-top:12px\">\n          <h3>🔌 Matériaux et fournitures</h3><p class=\"muted\">Ajoutez chaque matériel avec sa quantité et son prix.</p>\n          <div id=\"proQuoteItems\">\n            <div class=\"pro-quote-material-row\" data-pro-material-row style=\"border:1px solid var(--border);border-radius:12px;padding:12px;margin:10px 0\">\n              <label>Nom du matériel</label><input class=\"pro-material-label\" maxlength=\"160\" placeholder=\"Exemple : Prise électrique\" oninput=\"updateProQuoteTotal()\">\n              <label>Quantité</label><input class=\"pro-material-quantity\" type=\"number\" min=\"0.01\" max=\"1000000\" step=\"0.01\" value=\"1\" inputmode=\"decimal\" oninput=\"updateProQuoteTotal()\">\n              <label>Unité</label><select class=\"pro-material-unit\"><option>Pièce</option><option>Mètre</option><option>Rouleau</option><option>Boîte</option><option>Paquet</option><option>Kg</option><option>Litre</option><option>Forfait</option><option>Autre</option></select>\n              <label>Prix unitaire (FCFA)</label><input class=\"pro-material-price\" type=\"number\" min=\"0\" max=\"1000000000\" step=\"1\" value=\"0\" inputmode=\"numeric\" oninput=\"updateProQuoteTotal()\">\n              <div class=\"muted\" style=\"margin-top:8px\">Total de cette ligne : <strong class=\"pro-material-line-total\">0 FCFA</strong></div>\n              <button type=\"button\" class=\"secondary\" onclick=\"this.closest('[data-pro-material-row]').remove();updateProQuoteTotal()\">Retirer ce matériel</button>\n            </div>\n          </div>\n          <button type=\"button\" class=\"secondary\" onclick=\"addProMaterialRow()\">＋ Ajouter un autre matériel</button>\n        </div>\n        <div class=\"notice\" style=\"margin-top:12px\">\n          <div>Total des matériaux : <strong id=\"proQuoteMaterialsTotal\">0 FCFA</strong></div>\n          <div>Main-d'œuvre : <strong id=\"proQuoteLabourSummary\">0 FCFA</strong></div>\n          <div style=\"margin-top:8px\"><strong>Total du devis : <span id=\"proQuoteTotal\">0 FCFA</span></strong></div>\n        </div>\n        <div style=\"display:flex;gap:8px;flex-wrap:wrap;margin-top:12px\">\n          <button id=\"proQuoteSave\" type=\"submit\">＋ Enregistrer le devis en brouillon</button>\n          <button id=\"proQuoteCancelEdit\" type=\"button\" class=\"secondary hidden\" onclick=\"cancelProQuoteEdit()\">Annuler la modification</button>\n        </div>\n        <div id=\"proQuoteMessage\" class=\"notice\" role=\"status\" aria-live=\"polite\"></div>\n      </form>\n      <div class=\"section-head\"><h3>Mes devis enregistrés</h3></div>\n      <div id=\"proQuotesList\"><div class=\"empty\">Chargement des devis…</div></div>\n    </div>\n";
   await loadProClients();
+  await loadProInvoices();
   await loadProQuotes();
   if (proQuoteDraftState) {
     const draft = proQuoteDraftState;
@@ -6900,6 +6902,90 @@ function updateProQuoteTotal() {
   if (total) total.textContent = formatProMoney(safeLabour + materials);
 }
 
+async function loadProInvoices() {
+  try {
+    const data = await api("/pro/invoices");
+    proInvoicesCache = Array.isArray(data.invoices) ? data.invoices : [];
+  } catch (error) {
+    console.error("Chargement des factures impossible:", error);
+    proInvoicesCache = [];
+  }
+}
+
+async function renderProInvoicesPage() {
+  const main = document.getElementById("mainContent");
+  if (!main) return;
+  main.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin:0 0 18px">
+      <button type="button" class="secondary" onclick="returnToProHome()" style="min-width:104px">← Retour</button>
+      <div><div class="dashboard-kicker" style="color:#8de7c7">221CLOUD PRO</div><strong style="font-size:18px">Mes factures</strong></div>
+    </div>
+    <div class="card">
+      <div class="section-head"><h2>🧾 Factures enregistrées</h2></div>
+      <p class="muted">Créez une facture à partir d’un devis, sans ressaisir les informations.</p>
+      <div id="proInvoicesList"><div class="empty">Chargement des factures…</div></div>
+      <div class="item-actions"><button type="button" class="secondary" onclick="renderProQuotePage()">📄 Voir mes devis</button></div>
+    </div>
+  `;
+  await loadProInvoices();
+  const list = document.getElementById("proInvoicesList");
+  if (!proInvoicesCache.length) {
+    list.innerHTML = '<div class="empty">Aucune facture pour le moment. Ouvrez vos devis pour créer votre première facture.</div>';
+    return;
+  }
+  list.innerHTML = proInvoicesCache.map(invoice => `
+    <div class="item-card">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap">
+        <div><strong>${escapeHTML(invoice.invoice_number)}</strong><div class="muted">${escapeHTML(invoice.client_name || "Client")}</div></div>
+        <span class="status">${invoice.payment_status === "paid" ? "Payée" : "À payer"}</span>
+      </div>
+      <div class="muted" style="margin-top:8px">${escapeHTML(invoice.description || "")}</div>
+      <div style="display:flex;justify-content:space-between;gap:10px;margin-top:12px"><span class="muted">Montant total</span><strong>${escapeHTML(formatProMoney(invoice.total_amount))}</strong></div>
+      <div class="muted" style="margin-top:5px">Créée le ${escapeHTML(formatDate(invoice.created_at))}</div>
+      <div class="item-actions"><button type="button" class="secondary" onclick="printProInvoice('${escapeHTML(invoice.id)}')">📄 Exporter la facture en PDF</button></div>
+    </div>
+  `).join("");
+}
+
+async function createProInvoiceFromQuote(quoteId) {
+  const quote = proQuotesCache.find(item => item.id === quoteId);
+  if (!quote) { alert("Devis introuvable. Actualisez la page puis réessayez."); return; }
+  const confirmed = window.confirm(
+    "Créer une facture pour " + (quote.client_name || "ce client") +
+    " d’un montant de " + formatProMoney(quote.total_amount) + " ? Les informations du devis seront reprises."
+  );
+  if (!confirmed) return;
+  try {
+    await api("/pro/invoices", { method: "POST", body: JSON.stringify({ quote_id: quoteId }) });
+    await loadProInvoices();
+    await renderProInvoicesPage();
+  } catch (error) {
+    alert(error.message || "Impossible de créer la facture.");
+  }
+}
+
+function printProInvoice(invoiceId) {
+  const invoice = proInvoicesCache.find(item => item.id === invoiceId);
+  if (!invoice) { alert("Facture introuvable. Actualisez la page puis réessayez."); return; }
+  const popup = window.open("", "_blank");
+  if (!popup) { alert("Autorisez les fenêtres pop-up pour exporter la facture."); return; }
+  const items = Array.isArray(invoice.items) ? invoice.items : [];
+  const rows = items.length ? items.map((item,index) =>
+    '<tr><td>' + (index+1) + '</td><td>' + escapeHTML(item.label) + '</td><td>' +
+    escapeHTML(String(item.quantity)) + ' ' + escapeHTML(item.unit) + '</td><td>' +
+    escapeHTML(formatProMoney(item.unit_price)) + '</td><td>' +
+    escapeHTML(formatProMoney(item.total_amount)) + '</td></tr>'
+  ).join("") : '<tr><td colspan="5">Aucun détail de matériel</td></tr>';
+  const html = '<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Facture 221Cloud Pro</title><style>body{font-family:Arial,sans-serif;color:#172033;padding:24px;line-height:1.5}h1,h2{color:#123b34}.brand{font-size:22px;font-weight:bold;color:#123b34;border-bottom:3px solid #123b34;padding-bottom:12px}.muted{color:#64748b}.panel{background:#f4f7f6;padding:12px;border:1px solid #dce5e1;border-radius:8px}table{width:100%;border-collapse:collapse;margin-top:10px}th{background:#123b34;color:white;text-align:left}td,th{padding:9px;border-bottom:1px solid #ddd}.totals{margin:20px 0 0 auto;max-width:350px}.totals p{display:flex;justify-content:space-between}.grand{font-size:18px;font-weight:bold;border-top:2px solid #123b34;padding-top:10px}.sign{display:flex;justify-content:space-between;margin-top:55px}.sign span{border-top:1px solid #999;padding-top:8px;width:42%}@page{size:A4;margin:16mm}@media print{body{padding:0}}</style></head><body>' +
+    '<div class="brand">221CLOUD PRO <span class="muted">· FACTURE</span></div><p class="muted">Date : ' + escapeHTML(formatDate(invoice.created_at)) + ' · N° : ' + escapeHTML(invoice.invoice_number) + '</p>' +
+    '<h1>Facture de travaux</h1><section class="panel"><h2>Client</h2><strong>' + escapeHTML(invoice.client_name || "Client") + '</strong><div>' + (invoice.client_phone ? 'Téléphone : ' + escapeHTML(invoice.client_phone) : 'Téléphone non renseigné') + '</div><div>' + (invoice.client_address ? 'Adresse : ' + escapeHTML(invoice.client_address) : 'Adresse non renseignée') + '</div></section>' +
+    '<h2>Travaux réalisés</h2><div class="panel">' + escapeHTML(invoice.description || "") + '</div><h2>Matériaux et fournitures</h2><table><thead><tr><th>#</th><th>Désignation</th><th>Quantité</th><th>Prix unitaire</th><th>Total</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+    '<section class="totals"><p><span>Total matériaux</span><strong>' + escapeHTML(formatProMoney(invoice.material_amount)) + '</strong></p><p><span>Main-d’œuvre</span><strong>' + escapeHTML(formatProMoney(invoice.labour_amount)) + '</strong></p><p class="grand"><span>TOTAL À PAYER</span><strong>' + escapeHTML(formatProMoney(invoice.total_amount)) + '</strong></p></section>' +
+    '<div class="sign"><span>Signature de l’artisan</span><span>Signature du client</span></div><p class="muted" style="text-align:center;margin-top:35px">Document préparé avec 221Cloud Pro · Montants en FCFA</p></body></html>';
+  popup.document.open(); popup.document.write(html); popup.document.close();
+  popup.onload = () => popup.print();
+}
+
 function printProQuote(quoteId) {
   const quote = proQuotesCache.find(item => item.id === quoteId);
   if (!quote) { alert('Devis introuvable. Actualisez la page puis réessayez.'); return; }
@@ -6982,6 +7068,11 @@ async function loadProQuotes() {
             <button type="button" class="danger" onclick="deleteProQuote('${escapeHTML(quote.id)}')">🗑️ Supprimer ce devis</button>
           </div>` : ""}
           <div class="item-actions"><button type="button" class="secondary" onclick="printProQuote(&quot;${escapeHTML(quote.id)}&quot;)">📄 Exporter en PDF</button></div>
+          <div class="item-actions">
+            ${proInvoicesCache.some(invoice => invoice.quote_id === quote.id)
+              ? '<span class="status online">Facture déjà créée</span>'
+              : `<button type="button" onclick="createProInvoiceFromQuote('${escapeHTML(quote.id)}')">🧾 Créer une facture</button>`}
+          </div>
           <p style="font-size:19px;margin:14px 0 8px"><strong>${escapeHTML(formatProMoney(quote.total_amount))}</strong></p>
           <details style="margin-top:12px">
             <summary style="cursor:pointer;color:#8eb6ff;font-weight:700;padding:8px 0">📄 Consulter le devis complet</summary>
