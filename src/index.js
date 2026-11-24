@@ -1,5 +1,5 @@
 
-const ITERATIONS = 600000;
+const ITERATIONS = 100000; // Limite maximale prise en charge par Web Crypto sur Cloudflare Workers.
 const SESSION_DAYS = 7;
 const SESSION_IDLE_MINUTES = 60;
 const DATABASE_NAME_MAX = 80;
