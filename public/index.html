@@ -7188,6 +7188,28 @@ async function renderProStockPage() {
       </form>
     </div>
     <div class="card">
+      <div class="section-head"><h2>🛒 Enregistrer un achat</h2></div>
+      <p class="muted">L'achat augmente automatiquement le stock et s'ajoute une seule fois à vos dépenses.</p>
+      <form id="proStockPurchaseForm" class="form-card" onsubmit="saveProStockPurchase(event)">
+        <label for="proStockPurchaseItem">Matériel acheté</label>
+        <select id="proStockPurchaseItem" required><option value="">Chargement…</option></select>
+        <label for="proStockPurchaseSupplier">Fournisseur (facultatif)</label>
+        <input id="proStockPurchaseSupplier" maxlength="120" placeholder="Ex. : Boutique électrique">
+        <label for="proStockPurchaseQuantity">Quantité achetée</label>
+        <input id="proStockPurchaseQuantity" type="number" min="0.01" max="1000000" step="0.01" inputmode="decimal" required placeholder="Ex. : 20">
+        <label for="proStockPurchaseUnitPrice">Prix par unité (FCFA)</label>
+        <input id="proStockPurchaseUnitPrice" type="number" min="0" max="1000000000" step="1" inputmode="numeric" required placeholder="Ex. : 1500">
+        <label for="proStockPurchaseDate">Date de l'achat</label>
+        <input id="proStockPurchaseDate" type="date" required>
+        <button id="proStockPurchaseSave" type="submit">＋ Enregistrer l'achat</button>
+        <div id="proStockPurchaseMessage" class="notice" role="status" aria-live="polite"></div>
+      </form>
+    </div>
+    <div class="card">
+      <div class="section-head"><h2>🧾 Historique des achats</h2><span class="muted" id="proStockPurchaseCount">Chargement…</span></div>
+      <div id="proStockPurchasesList"><div class="empty">Chargement des achats…</div></div>
+    </div>
+    <div class="card">
       <div class="section-head"><h2>⇄ Entrée ou sortie de matériel</h2></div>
       <p class="muted">Ajoutez un achat ou notez le matériel utilisé pour un travail.</p>
       <form id="proStockMovementForm" class="form-card" onsubmit="saveProStockMovement(event)">
@@ -7217,7 +7239,64 @@ async function renderProStockPage() {
   const dateInput = document.getElementById("proStockMovementDate");
   const now = new Date();
   dateInput.value = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
+  const purchaseDate = document.getElementById("proStockPurchaseDate");
+  if (purchaseDate) purchaseDate.value = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
   await loadProStock();
+  await loadProStockPurchases();
+}
+
+async function loadProStockPurchases() {
+  const list = document.getElementById("proStockPurchasesList");
+  if (!list) return;
+  try {
+    const data = await api("/pro/stock/purchases");
+    const purchases = Array.isArray(data.purchases) ? data.purchases : [];
+    const count = document.getElementById("proStockPurchaseCount");
+    if (count) count.textContent = purchases.length + (purchases.length > 1 ? " achats" : " achat");
+    list.innerHTML = purchases.length ? purchases.map(p => {
+      return '<div class="item-card"><div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap"><strong>' + escapeHTML(p.item_name) + '</strong><strong>' + escapeHTML(Number(p.total_amount).toLocaleString("fr-FR")) + ' FCFA</strong></div><div class="muted" style="margin-top:7px">' + escapeHTML(p.quantity) + ' ' + escapeHTML(p.unit) + ' × ' + escapeHTML(Number(p.unit_price).toLocaleString("fr-FR")) + ' FCFA · ' + escapeHTML(p.supplier || "Fournisseur non précisé") + ' · ' + escapeHTML(formatDate(p.purchase_date)) + '</div></div>';
+    }).join("") : '<div class="empty">Aucun achat enregistré pour le moment.</div>';
+  } catch (error) {
+    list.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message || "Impossible de charger les achats.") + '</div>';
+  }
+}
+
+async function saveProStockPurchase(event) {
+  event.preventDefault();
+  const form = document.getElementById("proStockPurchaseForm");
+  const button = document.getElementById("proStockPurchaseSave");
+  const message = document.getElementById("proStockPurchaseMessage");
+  if (!form || !button || !message) return;
+  const body = {
+    item_id: document.getElementById("proStockPurchaseItem").value,
+    supplier: document.getElementById("proStockPurchaseSupplier").value.trim(),
+    quantity: Number(document.getElementById("proStockPurchaseQuantity").value),
+    unit_price: Number(document.getElementById("proStockPurchaseUnitPrice").value),
+    purchase_date: document.getElementById("proStockPurchaseDate").value
+  };
+  if (!body.item_id || !Number.isFinite(body.quantity) || body.quantity <= 0 ||
+      !Number.isSafeInteger(body.unit_price) || body.unit_price < 0 || !body.purchase_date) {
+    message.textContent = "Vérifiez l'article, la quantité, le prix et la date.";
+    return;
+  }
+  const itemName = document.getElementById("proStockPurchaseItem").selectedOptions[0]?.textContent || "Matériel";
+  const total = Math.round(body.quantity * body.unit_price);
+  if (!window.confirm("Confirmer cet achat ?\n" + itemName + "\nQuantité : " + body.quantity + "\nTotal : " + total.toLocaleString("fr-FR") + " FCFA\nLe stock et les dépenses seront mis à jour.")) return;
+  button.disabled = true;
+  message.textContent = "Enregistrement…";
+  try {
+    await api("/pro/stock/purchases", { method: "POST", body: JSON.stringify(body) });
+    form.reset();
+    const now = new Date();
+    document.getElementById("proStockPurchaseDate").value = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
+    message.textContent = "Achat enregistré. Le stock et les dépenses ont été mis à jour.";
+    await loadProStock();
+    await loadProStockPurchases();
+  } catch (error) {
+    message.textContent = error.message || "Impossible d’enregistrer cet achat.";
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function loadProStock() {
@@ -7227,6 +7306,12 @@ async function loadProStock() {
     const data = await api("/pro/stock");
     const items = Array.isArray(data.items) ? data.items : [];
     const movements = Array.isArray(data.movements) ? data.movements : [];
+    const purchaseSelect = document.getElementById("proStockPurchaseItem");
+    if (purchaseSelect) {
+      purchaseSelect.innerHTML = items.length
+        ? '<option value="">Choisir un matériel</option>' + items.map(item => '<option value="' + escapeHTML(item.id) + '">' + escapeHTML(item.name) + ' (' + escapeHTML(item.unit) + ')</option>').join("")
+        : '<option value="">Ajoutez d’abord un article</option>';
+    }
     const itemSelect = document.getElementById("proStockMovementItem");
     if (itemSelect) {
       itemSelect.innerHTML = items.length
