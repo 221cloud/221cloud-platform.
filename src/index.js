@@ -2712,7 +2712,7 @@ export default {
           if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 1000000000) {
             return json({ error: "Le montant doit être un nombre entier positif en FCFA." }, 400);
           }
-          if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(movementDate) ||
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(movementDate) ||
               Number.isNaN(Date.parse(movementDate + "T00:00:00Z")) ||
               new Date(movementDate + "T00:00:00Z").toISOString().slice(0, 10) !== movementDate) {
             return json({ error: "La date du mouvement est invalide." }, 400);
