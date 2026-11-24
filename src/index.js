@@ -1039,6 +1039,27 @@ function safeFileName(value) {
     .slice(0, 255);
 }
 
+function isVerifiedPreviewImage(mimeType, bytes) {
+  if (!(bytes instanceof Uint8Array) || bytes.length < 12) return false;
+  const type = String(mimeType || "").toLowerCase().split(";")[0].trim();
+  const ascii = (start, end) => String.fromCharCode(...bytes.slice(start, end));
+
+  switch (type) {
+    case "image/jpeg":
+      return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+    case "image/png":
+      return bytes[0] === 0x89 && ascii(1, 4) === "PNG" && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a;
+    case "image/gif":
+      return ascii(0, 6) === "GIF87a" || ascii(0, 6) === "GIF89a";
+    case "image/webp":
+      return ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP";
+    case "image/avif":
+      return ascii(4, 8) === "ftyp" && (ascii(8, 12) === "avif" || ascii(8, 12) === "avis");
+    default:
+      return false;
+  }
+}
+
 async function ensureStorageQuotaReservationsSchema(env) {
   await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS storage_quota_reservations (
@@ -9334,7 +9355,12 @@ const used = Number(usage?.used || 0);
 });
         const id = crypto.randomUUID();
         const objectKey = `${user.id}/${id}`;
-        const mimeType = file.type || "application/octet-stream";
+        const declaredMimeType = String(file.type || "application/octet-stream").toLowerCase().split(";")[0].trim();
+        const previewImageTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "image/avif"]);
+        // Une image n’est affichable en aperçu que si sa signature réelle correspond au type annoncé.
+        const mimeType = previewImageTypes.has(declaredMimeType) && !isVerifiedPreviewImage(declaredMimeType, buffer)
+          ? "application/octet-stream"
+          : (file.type || "application/octet-stream");
         const fileName = safeFileName(file.name);
 
        
