@@ -221,18 +221,44 @@ function getCookie(request, name) {
   return item ? item.slice(name.length + 1) : null;
 }
 
+let sessionMaxExpirySchemaPromise = null;
+
+async function ensureSessionMaxExpirySchema(env) {
+  if (!sessionMaxExpirySchemaPromise) {
+    sessionMaxExpirySchemaPromise = (async () => {
+      const columns = await env.DB.prepare("PRAGMA table_info(sessions)").all();
+      const hasMaxExpiry = (columns.results || []).some(column => column.name === "max_expires_at");
+      if (!hasMaxExpiry) {
+        await env.DB.prepare("ALTER TABLE sessions ADD COLUMN max_expires_at TEXT").run();
+      }
+      const legacyMaxExpiry = new Date(Date.now() + SESSION_DAYS * 86400000).toISOString();
+      await env.DB.prepare(
+        "UPDATE sessions SET max_expires_at = ? WHERE max_expires_at IS NULL"
+      ).bind(legacyMaxExpiry).run();
+    })().catch(error => {
+      sessionMaxExpirySchemaPromise = null;
+      throw error;
+    });
+  }
+  await sessionMaxExpirySchemaPromise;
+}
+
 async function createSession(env, userId) {
+  await ensureSessionMaxExpirySchema(env);
   const token = randomToken();
   const tokenHash = await hashToken(token);
-  const expires = new Date(Date.now() + SESSION_DAYS * 86400000);
+  const now = Date.now();
+  const idleExpires = new Date(now + SESSION_IDLE_MINUTES * 60000).toISOString();
+  const maxExpires = new Date(now + SESSION_DAYS * 86400000).toISOString();
 
   await env.DB.prepare(
-    "INSERT INTO sessions (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)"
+    "INSERT INTO sessions (id, user_id, token_hash, expires_at, max_expires_at) VALUES (?, ?, ?, ?, ?)"
   ).bind(
     crypto.randomUUID(),
     userId,
     tokenHash,
-    expires.toISOString()
+    idleExpires,
+    maxExpires
   ).run();
 
   return token;
@@ -252,6 +278,7 @@ async function currentUser(request, env) {
 
     if (!token) return null;
 
+  await ensureSessionMaxExpirySchema(env);
   const tokenHash = await hashToken(token);
   const now = new Date();
   const nowIso = now.toISOString();
@@ -262,18 +289,25 @@ async function currentUser(request, env) {
      JOIN users ON users.id = sessions.user_id
      WHERE sessions.token_hash = ?
        AND sessions.expires_at > ?
+       AND sessions.max_expires_at > ?
        AND users.status = 'active'
      LIMIT 1`
-  ).bind(tokenHash, nowIso).first();
+  ).bind(tokenHash, nowIso, nowIso).first();
 
   if (!result) return null;
 
-  // Expiration glissante : toute requête authentifiée prolonge la session
-  // d'une heure. Après une heure sans activité, le serveur refuse la session.
-  const nextExpiry = new Date(now.getTime() + SESSION_IDLE_MINUTES * 60000).toISOString();
+  // La session expire après une heure d'inactivité ou au plus tard après sept jours.
+  const idleExpiry = new Date(now.getTime() + SESSION_IDLE_MINUTES * 60000).toISOString();
   await env.DB.prepare(
-    "UPDATE sessions SET expires_at = ? WHERE token_hash = ? AND expires_at > ?"
-  ).bind(nextExpiry, tokenHash, nowIso).run();
+    `UPDATE sessions
+     SET expires_at = CASE
+       WHEN max_expires_at < ? THEN max_expires_at
+       ELSE ?
+     END
+     WHERE token_hash = ?
+       AND expires_at > ?
+       AND max_expires_at > ?`
+  ).bind(idleExpiry, idleExpiry, tokenHash, nowIso, nowIso).run();
 
     return result;
   })();
