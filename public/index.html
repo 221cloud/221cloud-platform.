@@ -6461,7 +6461,8 @@ async function renderProClientsPage() {
   main.innerHTML = `
     <div style="display:flex;align-items:center;gap:12px;margin:0 0 18px">
       <button type="button" class="secondary" onclick="returnToProHome()" style="min-width:104px">← Retour</button>
-      <div><div class="dashboard-kicker" style="color:#8de7c7">221CLOUD PRO</div><strong style="font-size:18px">Mes clients</strong></div>
+      <div style="flex:1"><div class="dashboard-kicker" style="color:#8de7c7">221CLOUD PRO</div><strong style="font-size:18px">Mes clients</strong></div>
+      <button type="button" class="secondary" onclick="renderProClientTrashPage()">🗑️ Corbeille</button>
     </div>
     <div class="card" id="proClientsSection">
       <div class="section-head"><h2>👥 Mes clients</h2><span class="muted" id="proClientCount">Chargement…</span></div>
@@ -6544,14 +6545,14 @@ function toggleProPanel(type) {
 
 async function deleteProClient(clientId, clientName) {
   const confirmed = window.confirm(
-    "Voulez-vous vraiment supprimer le client « " + clientName + " » ? Cette action est définitive. Un client qui possède déjà des devis ne pourra pas être supprimé."
+    "Mettre le client « " + clientName + " » dans la corbeille ? Vous pourrez le restaurer pendant 30 jours. Un client qui possède déjà des devis ne pourra pas être supprimé."
   );
   if (!confirmed) return;
 
   const message = document.getElementById("proClientDeleteMessage");
   const button = document.querySelector('button[onclick^="deleteProClient("]');
   if (button) button.disabled = true;
-  if (message) message.textContent = "Suppression en cours…";
+  if (message) message.textContent = "Déplacement vers la corbeille…";
 
   try {
     await api("/pro/clients/" + encodeURIComponent(clientId), { method: "DELETE" });
@@ -6564,6 +6565,56 @@ async function deleteProClient(clientId, clientName) {
       window.alert(error.message || "Impossible de supprimer ce client.");
     }
     if (button) button.disabled = false;
+  }
+}
+
+async function renderProClientTrashPage() {
+  const main = document.getElementById("mainContent");
+  if (!main) return;
+  main.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin:0 0 18px">
+      <button type="button" class="secondary" onclick="renderProClientsPage()" style="min-width:104px">← Clients</button>
+      <div><div class="dashboard-kicker" style="color:#8de7c7">221CLOUD PRO</div><strong style="font-size:18px">Corbeille</strong></div>
+    </div>
+    <div class="card">
+      <div class="section-head"><h2>🗑️ Clients supprimés</h2></div>
+      <p class="muted">Les clients restent ici pendant 30 jours. Vous pouvez les restaurer avant leur suppression définitive.</p>
+      <div id="proClientTrashList"><div class="empty">Chargement de la corbeille…</div></div>
+    </div>
+  `;
+  try {
+    const data = await api("/pro/clients-trash");
+    const clients = Array.isArray(data.clients) ? data.clients : [];
+    const list = document.getElementById("proClientTrashList");
+    if (!clients.length) {
+      list.innerHTML = '<div class="empty">La corbeille est vide.</div>';
+      return;
+    }
+    list.innerHTML = clients.map(client => `
+      <div class="item-card">
+        <strong>${escapeHTML(client.name)}</strong>
+        ${client.phone ? '<div class="muted">☎ ' + escapeHTML(client.phone) + '</div>' : ''}
+        ${client.address ? '<div class="muted">📍 ' + escapeHTML(client.address) + '</div>' : ''}
+        <div class="muted" style="margin-top:6px">Dans la corbeille depuis le ${escapeHTML(formatDate(client.deleted_at))}</div>
+        <div class="muted">Suppression définitive après 30 jours</div>
+        <div class="item-actions">
+          <button type="button" onclick="restoreProClient('${escapeHTML(client.id)}')">↩️ Restaurer le client</button>
+        </div>
+      </div>
+    `).join("");
+  } catch (error) {
+    document.getElementById("proClientTrashList").innerHTML =
+      '<div class="notice error-text">' + escapeHTML(error.message || "Impossible de charger la corbeille.") + '</div>';
+  }
+}
+
+async function restoreProClient(clientId) {
+  if (!window.confirm("Restaurer ce client dans votre liste ?")) return;
+  try {
+    await api("/pro/clients-trash/" + encodeURIComponent(clientId) + "/restore", { method: "POST" });
+    await renderProClientTrashPage();
+  } catch (error) {
+    window.alert(error.message || "Impossible de restaurer ce client.");
   }
 }
 
