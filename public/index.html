@@ -70,10 +70,15 @@ label {
 .hidden { display:none !important; }
 .muted { color:var(--muted); }
 .brand {
+  display:flex;
+  align-items:center;
+  gap:9px;
   font-size:25px;
   font-weight:800;
   letter-spacing:-1.2px;
 }
+.brand-mark { width:38px; height:38px; object-fit:contain; flex-shrink:0; }
+.brand small { font-size:12px; font-weight:800; letter-spacing:.4px; color:#ffc43d; background:rgba(255,196,61,.13); border:1px solid rgba(255,196,61,.35); border-radius:6px; padding:3px 6px; }
 .brand span {
   background:linear-gradient(100deg,#438cff,#9b79ff);
   -webkit-background-clip:text;
@@ -801,7 +806,7 @@ body.pro-mode #mainContent .section-head {
 
 <section id="authScreen" class="auth-screen">
   <div class="auth-card">
-    <div class="brand">221<span>Cloud</span></div>
+    <div class="brand"><img class="brand-mark" src="/icons/221cloud-pro.svg" alt="" width="38" height="38"><span>221Cloud</span><small>Pro</small></div>
     <p class="muted">Votre espace numérique.</p>
 
     <div id="loginForm">
@@ -841,7 +846,7 @@ body.pro-mode #mainContent .section-head {
 
 <section id="appScreen" class="app hidden">
   <header>
-    <div class="brand">221<span>Cloud</span></div>
+    <div class="brand"><img class="brand-mark" src="/icons/221cloud-pro.svg" alt="" width="38" height="38"><span>221Cloud</span><small>Pro</small></div>
     <button class="secondary" onclick="logout()">Déconnexion</button>
   </header>
 
@@ -872,7 +877,7 @@ if (IS_PRO_MODE) {
   document.body.classList.add("pro-mode");
   document.title = "221Cloud Pro";
   document.querySelectorAll(".auth-card .brand, #appScreen header .brand").forEach(el => {
-    el.innerHTML = '221<span>Cloud Pro</span>';
+    el.innerHTML = '<img class="brand-mark" src="/icons/221cloud-pro.svg" alt="" width="38" height="38"><span>221Cloud</span><small>Pro</small>';
   });
 }
 let currentUser = null;
@@ -1319,7 +1324,7 @@ function renderAboutPage() {
   document.getElementById("mainContent").innerHTML = `
     <div class="dashboard-hero">
       <div class="dashboard-kicker">À propos</div>
-      <h1>221Cloud Pro</h1>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px"><img src="/icons/221cloud-pro.svg" alt="Logo 221Cloud Pro" width="64" height="64"><h1 style="margin:0">221Cloud Pro</h1></div>
       <p>Un espace numérique conçu pour simplifier la gestion de votre activité, vos documents et votre organisation.</p>
     </div>
     <div class="card" style="max-width:680px;margin:0 auto;text-align:center;padding:30px 22px">
@@ -6407,7 +6412,7 @@ function renderProPage() {
   const main = document.getElementById("mainContent");
   main.innerHTML = `
     <div class="dashboard-hero" style="background:radial-gradient(circle at 85% 20%,rgba(36,214,160,.22),transparent 35%),linear-gradient(120deg,#123b34,#14294d 75%,#182044)">
-      <div class="dashboard-kicker" style="color:#8de7c7">221CLOUD PRO</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><img src="/icons/221cloud-pro.svg" alt="" width="42" height="42"><div class="dashboard-kicker" style="color:#8de7c7">221CLOUD PRO</div></div>
       <h1>Bonjour ! 👋</h1>
       <p>Tout votre travail au même endroit.</p>
       <div style="margin-top:14px;color:#b8f5df;font-weight:700">👇 Choisissez une image pour commencer</div>
