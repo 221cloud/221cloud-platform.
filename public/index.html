@@ -806,7 +806,7 @@ body.pro-mode #mainContent .section-head {
 
 <section id="authScreen" class="auth-screen">
   <div class="auth-card">
-    <div class="brand"><img class="brand-mark" src="/icons/221cloud-pro.svg" alt="" width="38" height="38"><span>221Cloud</span><small>Pro</small></div>
+    <div class="brand">221<span>Cloud</span></div>
     <p class="muted">Votre espace numérique.</p>
 
     <div id="loginForm">
@@ -846,7 +846,7 @@ body.pro-mode #mainContent .section-head {
 
 <section id="appScreen" class="app hidden">
   <header>
-    <div class="brand"><img class="brand-mark" src="/icons/221cloud-pro.svg" alt="" width="38" height="38"><span>221Cloud</span><small>Pro</small></div>
+    <div class="brand">221<span>Cloud</span></div>
     <button class="secondary" onclick="logout()">Déconnexion</button>
   </header>
 
@@ -1324,7 +1324,7 @@ function renderAboutPage() {
   document.getElementById("mainContent").innerHTML = `
     <div class="dashboard-hero">
       <div class="dashboard-kicker">À propos</div>
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px"><img src="/icons/221cloud-pro.svg" alt="Logo 221Cloud Pro" width="64" height="64"><h1 style="margin:0">221Cloud Pro</h1></div>
+      ${IS_PRO_MODE ? '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px"><img src="/icons/221cloud-pro.svg" alt="Logo 221Cloud Pro" width="64" height="64"><h1 style="margin:0">221Cloud Pro</h1></div>' : '<h1>221Cloud Pro</h1>'}
       <p>Un espace numérique conçu pour simplifier la gestion de votre activité, vos documents et votre organisation.</p>
     </div>
     <div class="card" style="max-width:680px;margin:0 auto;text-align:center;padding:30px 22px">
