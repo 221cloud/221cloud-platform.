@@ -562,6 +562,24 @@ async function ensureProSchema(env) {
   await env.DB.prepare(
     "CREATE INDEX IF NOT EXISTS idx_pro_jobs_owner_status ON pro_jobs(user_id, status, created_at DESC)"
   ).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS pro_calendar_events (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      client_id TEXT NOT NULL,
+      job_id TEXT,
+      title TEXT NOT NULL,
+      event_date TEXT NOT NULL,
+      event_time TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'planned',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_pro_calendar_owner_date ON pro_calendar_events(user_id, event_date, event_time)"
+  ).run();
   const purchaseColumns = await env.DB.prepare("PRAGMA table_info(pro_stock_purchases)").all();
   if (!(purchaseColumns.results || []).some(column => column.name === "supplier_id")) {
     await env.DB.prepare("ALTER TABLE pro_stock_purchases ADD COLUMN supplier_id TEXT").run();
@@ -3131,6 +3149,94 @@ export default {
         if (error?.status === 413) return json({ error: "La requête est trop volumineuse." }, 413);
         console.error("ERREUR 221CLOUD PRO CHANTIERS:", error);
         return json({ error: "Impossible de traiter les chantiers pour le moment." }, 500);
+      }
+    }
+
+    // 221CLOUD PRO : CALENDRIER ET RENDEZ-VOUS
+    const proCalendarRouteMatch = path.match(/^\/api\/pro\/calendar(?:\/([^/]+))?$/);
+    if (proCalendarRouteMatch) {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        await ensureProSchema(env);
+        const allowedStatuses = new Set(["planned", "done", "cancelled"]);
+
+        if (request.method === "GET" && !proCalendarRouteMatch[1]) {
+          const result = await env.DB.prepare(
+            `SELECT e.id, e.client_id, c.name AS client_name, c.phone AS client_phone,
+                    e.job_id, j.title AS job_title, e.title, e.event_date, e.event_time,
+                    e.notes, e.status, e.created_at
+             FROM pro_calendar_events e
+             JOIN pro_clients c ON c.id = e.client_id AND c.user_id = e.user_id
+             LEFT JOIN pro_jobs j ON j.id = e.job_id AND j.user_id = e.user_id
+             WHERE e.user_id = ?
+             ORDER BY e.event_date ASC, e.event_time ASC, e.created_at DESC LIMIT 500`
+          ).bind(user.id).all();
+          return json({ events: result.results || [] }, 200, { "Cache-Control": "no-store" });
+        }
+
+        if (request.method === "POST" && !proCalendarRouteMatch[1]) {
+          const body = await readLimitedJsonBody(request);
+          const clientId = String(body.client_id || "").trim();
+          const jobId = String(body.job_id || "").trim();
+          const title = String(body.title || "").trim();
+          const eventDate = String(body.event_date || "").trim();
+          const eventTime = String(body.event_time || "").trim();
+          const notes = String(body.notes || "").trim();
+          if (!clientId) return json({ error: "Choisissez un client." }, 400);
+          if (!title || title.length > 160) return json({ error: "Indiquez le motif du rendez-vous (160 caractères maximum)." }, 400);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(eventDate) ||
+              Number.isNaN(Date.parse(eventDate + "T00:00:00Z")) ||
+              new Date(eventDate + "T00:00:00Z").toISOString().slice(0, 10) !== eventDate) {
+            return json({ error: "Choisissez une date valide." }, 400);
+          }
+          if (eventTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(eventTime)) {
+            return json({ error: "L’heure du rendez-vous est invalide." }, 400);
+          }
+          if (notes.length > 1000) return json({ error: "La note est trop longue." }, 400);
+          const client = await env.DB.prepare(
+            "SELECT id FROM pro_clients WHERE id = ? AND user_id = ? AND deleted_at IS NULL LIMIT 1"
+          ).bind(clientId, user.id).first();
+          if (!client) return json({ error: "Ce client est introuvable dans votre liste." }, 404);
+          if (jobId) {
+            const job = await env.DB.prepare(
+              "SELECT id FROM pro_jobs WHERE id = ? AND client_id = ? AND user_id = ? LIMIT 1"
+            ).bind(jobId, clientId, user.id).first();
+            if (!job) return json({ error: "Ce chantier n’appartient pas à ce client." }, 400);
+          }
+          const id = crypto.randomUUID();
+          await env.DB.prepare(
+            "INSERT INTO pro_calendar_events (id, user_id, client_id, job_id, title, event_date, event_time, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+          ).bind(id, user.id, clientId, jobId || null, title, eventDate, eventTime, notes).run();
+          return json({ message: "Rendez-vous enregistré.", event: { id, client_id: clientId, job_id: jobId || null, title, event_date: eventDate, event_time: eventTime, notes, status: "planned" } }, 201, { "Cache-Control": "no-store" });
+        }
+
+        if (proCalendarRouteMatch[1] && request.method === "PATCH") {
+          const eventId = decodeURIComponent(proCalendarRouteMatch[1]);
+          const body = await readLimitedJsonBody(request);
+          const status = String(body.status || "").trim();
+          if (!allowedStatuses.has(status)) return json({ error: "Choisissez un état valide." }, 400);
+          const result = await env.DB.prepare(
+            "UPDATE pro_calendar_events SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?"
+          ).bind(status, eventId, user.id).run();
+          if (!Number(result?.meta?.changes || 0)) return json({ error: "Rendez-vous introuvable." }, 404);
+          return json({ message: "Rendez-vous mis à jour." }, 200, { "Cache-Control": "no-store" });
+        }
+
+        if (proCalendarRouteMatch[1] && request.method === "DELETE") {
+          const eventId = decodeURIComponent(proCalendarRouteMatch[1]);
+          const result = await env.DB.prepare(
+            "DELETE FROM pro_calendar_events WHERE id = ? AND user_id = ?"
+          ).bind(eventId, user.id).run();
+          if (!Number(result?.meta?.changes || 0)) return json({ error: "Rendez-vous introuvable." }, 404);
+          return json({ message: "Rendez-vous supprimé." }, 200, { "Cache-Control": "no-store" });
+        }
+
+        return json({ error: "Méthode non autorisée." }, 405);
+      } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête est trop volumineuse." }, 413);
+        console.error("ERREUR 221CLOUD PRO CALENDRIER:", error);
+        return json({ error: "Impossible de traiter le calendrier pour le moment." }, 500);
       }
     }
 
