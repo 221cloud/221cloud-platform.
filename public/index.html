@@ -1576,31 +1576,34 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
           const errorColumn = Number.isFinite(error.columnNumber) ? error.columnNumber : "inconnue";
           const errorStack = String(error.stack || "").split("\\n").slice(0, 2).join(" | ");
           let tokenLocation = "localisation introuvable";
-          if (String(error.message).includes("<")) {
-            const source = mainScript.textContent;
-            const boundaries = [0];
-            for (let i = 0; i < source.length; i++) {
-              if (source[i] === "\\n") boundaries.push(i + 1);
-            }
-            boundaries.push(source.length);
-            let low = 0;
-            let high = boundaries.length - 1;
-            while (low < high) {
-              const mid = Math.floor((low + high) / 2);
-              let hasTargetError = false;
-              try {
-                new Function(source.slice(0, boundaries[mid + 1]));
-              } catch (probeError) {
-                hasTargetError = String(probeError.message).includes("<");
+          try {
+            let nativeLocation = null;
+            const captureSyntaxError = event => {
+              if (event && event.message && String(event.message).includes("Unexpected token")) {
+                nativeLocation = {
+                  line: event.lineno || "inconnue",
+                  column: event.colno || "inconnue",
+                  message: event.message
+                };
               }
-              if (hasTargetError) high = mid;
-              else low = mid + 1;
+            };
+            window.addEventListener("error", captureSyntaxError, true);
+            const probe = document.createElement("script");
+            if (mainScript.nonce) probe.nonce = mainScript.nonce;
+            probe.textContent = "if (false) {\\n" + mainScript.textContent + "\\n}";
+            document.head.appendChild(probe);
+            probe.remove();
+            window.removeEventListener("error", captureSyntaxError, true);
+            if (nativeLocation) {
+              tokenLocation = "position navigateur ligne=" + nativeLocation.line +
+                " ; colonne=" + nativeLocation.column +
+                " ; message=" + nativeLocation.message;
+            } else {
+              tokenLocation = "le navigateur n'a pas fourni de position native";
             }
-            const offset = boundaries[Math.min(low, boundaries.length - 1)];
-            const before = source.slice(0, offset);
-            const line = before.split("\\n").length;
-            const excerpt = source.slice(Math.max(0, offset - 100), Math.min(source.length, offset + 180)).replace(/\\s+/g, " ");
-            tokenLocation = "ligne approximative=" + line + " ; extrait=" + excerpt;
+          } catch (diagnosticError) {
+            window.removeEventListener("error", captureSyntaxError, true);
+            tokenLocation = "diagnostic natif impossible=" + diagnosticError.message;
           }
           parserCheck = error.name + ": " + error.message +
             " ; ligne=" + errorLine +
