@@ -1001,6 +1001,123 @@ body.pro-mode #mainContent .application-tree-file.active {
   color:#28594d;
 }
 
+
+/* 221CloudPro — formulaires et tableaux des modules */
+body.pro-mode #mainContent .card,
+body.pro-mode #mainContent .panel,
+body.pro-mode #mainContent .form-card {
+  background:#fff;
+  color:#344847;
+  border:1px solid #e3e9e4;
+  border-radius:12px;
+  box-shadow:0 2px 8px rgba(35,58,49,.035);
+}
+body.pro-mode #mainContent label {
+  color:#52665f;
+  font-size:13px;
+  font-weight:600;
+  margin:14px 0 6px;
+}
+body.pro-mode #mainContent input,
+body.pro-mode #mainContent select,
+body.pro-mode #mainContent textarea {
+  width:100%;
+  background:#fff;
+  color:#25383c;
+  border:1px solid #d9e2dc;
+  box-shadow:none;
+  font:inherit;
+  font-size:16px;
+}
+body.pro-mode #mainContent input::placeholder,
+body.pro-mode #mainContent textarea::placeholder {
+  color:#9aa7a0;
+  opacity:1;
+}
+body.pro-mode #mainContent input:focus,
+body.pro-mode #mainContent select:focus,
+body.pro-mode #mainContent textarea:focus {
+  border-color:#527c78;
+  outline:3px solid rgba(82,124,120,.13);
+}
+body.pro-mode #mainContent input[type="checkbox"],
+body.pro-mode #mainContent input[type="radio"] {
+  width:20px;
+  min-width:20px;
+  min-height:20px;
+  height:20px;
+  margin:0 7px 0 0;
+  padding:0;
+  accent-color:#456b61;
+  vertical-align:middle;
+}
+body.pro-mode #mainContent input[type="file"] {
+  min-height:44px;
+  padding:9px;
+  font-size:14px;
+}
+body.pro-mode #mainContent input:disabled,
+body.pro-mode #mainContent select:disabled,
+body.pro-mode #mainContent textarea:disabled {
+  background:#f0f3f0;
+  color:#89958f;
+  cursor:not-allowed;
+}
+body.pro-mode #mainContent .card h2,
+body.pro-mode #mainContent .card h3,
+body.pro-mode #mainContent .panel h2,
+body.pro-mode #mainContent .panel h3 {
+  color:#294b43;
+}
+body.pro-mode #mainContent table {
+  width:100%;
+  min-width:560px;
+  border-collapse:collapse;
+  border-spacing:0;
+  color:#344847;
+  background:#fff;
+  font-size:13px;
+}
+body.pro-mode #mainContent table th {
+  background:#edf2ee;
+  color:#36564c;
+  font-weight:700;
+  text-align:left;
+}
+body.pro-mode #mainContent table th,
+body.pro-mode #mainContent table td {
+  padding:11px 10px;
+  border:1px solid #e2e9e3;
+  vertical-align:middle;
+  overflow-wrap:anywhere;
+}
+body.pro-mode #mainContent table tbody tr:nth-child(even) {
+  background:#f8faf8;
+}
+body.pro-mode #mainContent table input,
+body.pro-mode #mainContent table select {
+  min-width:90px;
+  min-height:42px;
+  padding:9px;
+  margin:0;
+  font-size:14px;
+}
+body.pro-mode #mainContent .panel:has(table) {
+  max-width:100%;
+  overflow-x:auto;
+  -webkit-overflow-scrolling:touch;
+}
+@media(max-width:520px) {
+  body.pro-mode #mainContent .card,
+  body.pro-mode #mainContent .panel,
+  body.pro-mode #mainContent .form-card {
+    padding:15px;
+  }
+  body.pro-mode #mainContent table th,
+  body.pro-mode #mainContent table td {
+    padding:9px 8px;
+  }
+}
 </style>
 </head>
 
