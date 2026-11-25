@@ -1490,25 +1490,27 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
 <div id="221cloud-static-preview-check" style="position:fixed;z-index:2147483646;top:8px;left:8px;right:8px;padding:10px;border:2px solid #16a34a;border-radius:8px;background:#052e16;color:#fff;font:13px Arial,sans-serif;text-align:center">TEST HTML 221CLOUD — VERSION DE PRÉVISUALISATION</div>
 
 <script>
-// DIAGNOSTIC TEMPORAIRE — script indépendant pour tester l’exécution JavaScript
+// DIAGNOSTIC TEMPORAIRE — vérification précise du chargement du script principal
 (function () {
+  const BUILD = "AUTH-DIAG-2026-11-25-B";
   let panel;
   let firstRuntimeError = "";
+  let policyError = "";
+
   function showDiagnostic(message) {
     try {
       if (!panel) {
         panel = document.createElement("div");
         panel.id = "authRuntimeDiagnostic";
-        panel.style.cssText = "position:fixed;z-index:2147483647;left:8px;right:8px;bottom:8px;padding:12px;border:2px solid #f0b429;border-radius:10px;background:#101827;color:#fff;font:13px/1.45 Arial,sans-serif;white-space:pre-wrap";
+        panel.style.cssText = "position:fixed;z-index:2147483647;left:8px;right:8px;bottom:8px;padding:12px;border:2px solid #f0b429;border-radius:10px;background:#101827;color:#fff;font:13px/1.45 Arial,sans-serif;white-space:pre-wrap;max-height:42vh;overflow:auto";
         document.body.appendChild(panel);
       }
-      panel.textContent = "Diagnostic temporaire 221Cloud : " + message;
+      panel.textContent = "Diagnostic temporaire 221Cloud [" + BUILD + "] : " + message;
     } catch (e) {}
   }
+
   window.__221cloudAuthDiagnostic = showDiagnostic;
 
-  // Rendre le changement de formulaire disponible dès le premier script,
-  // même si le script principal rencontre une erreur plus loin.
   window.showAuthForm = function (form) {
     const loginForm = document.getElementById("loginForm");
     const registerForm = document.getElementById("registerForm");
@@ -1527,32 +1529,58 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
       : "zone inconnue";
     showDiagnostic("CLIC DÉTECTÉ : " + label);
   }, true);
+
   window.addEventListener("error", function (event) {
-    firstRuntimeError = "ERREUR JavaScript : " + (event.message || "message indisponible") +
-      (event.lineno ? " (ligne " + event.lineno + ")" : "");
+    if (event.target && event.target !== window) {
+      firstRuntimeError = "ERREUR DE RESSOURCE : " +
+        (event.target.src || event.target.href || event.target.tagName || "ressource inconnue");
+    } else {
+      firstRuntimeError = "ERREUR JAVASCRIPT : " +
+        (event.message || "message indisponible") +
+        (event.filename ? " ; fichier : " + event.filename : "") +
+        (event.lineno ? " ; ligne : " + event.lineno : "") +
+        (event.colno ? " ; colonne : " + event.colno : "");
+    }
     showDiagnostic(firstRuntimeError);
-  });
+  }, true);
+
   window.addEventListener("unhandledrejection", function (event) {
     const reason = event.reason;
-    showDiagnostic("PROMESSE NON GÉRÉE : " + (reason && reason.message ? reason.message : String(reason)));
+    firstRuntimeError = "PROMESSE NON GÉRÉE : " +
+      (reason && reason.message ? reason.message : String(reason));
+    showDiagnostic(firstRuntimeError);
   });
+
   function reportPolicyBlock(event) {
-    showDiagnostic("SCRIPT BLOQUÉ PAR LA POLITIQUE DU NAVIGATEUR : " +
-      (event.violatedDirective || "directive inconnue") + " ; source : " +
-      (event.blockedURI || "non précisée"));
+    policyError = (event.violatedDirective || "directive inconnue") +
+      " ; source bloquée : " + (event.blockedURI || "non précisée");
+    showDiagnostic("SCRIPT/POLITIQUE BLOQUÉE : " + policyError);
   }
-  document.addEventListener("securitypolicyviolation", reportPolicyBlock);
-  window.addEventListener("securitypolicyviolation", reportPolicyBlock);
+  document.addEventListener("securitypolicyviolation", reportPolicyBlock, true);
+  window.addEventListener("securitypolicyviolation", reportPolicyBlock, true);
+
   window.addEventListener("load", function () {
     setTimeout(function () {
-      if (panel && panel.textContent.indexOf("script indépendant exécuté") !== -1) {
-        showDiagnostic(firstRuntimeError || ("PAGE CHARGÉE ; fonction register disponible : " +
-          (typeof window.register) + " ; fonction login disponible : " +
-          (typeof window.login)));
-      }
-    }, 1000);
+      const scripts = Array.from(document.scripts);
+      const mainScript = scripts.find(script =>
+        script.textContent.includes("window.__221cloudMainStarted = true;")
+      );
+      const started = window.__221cloudMainStarted === true;
+      const details = [
+        "HTML diagnostic=" + BUILD,
+        "balises script=" + scripts.length,
+        "script principal=" + (mainScript ? "présent (" + mainScript.textContent.length + " caractères)" : "ABSENT"),
+        "script principal démarré=" + started,
+        "register=" + typeof window.register,
+        "login=" + typeof window.login,
+        "erreur=" + (firstRuntimeError || "aucune capturée"),
+        "violation CSP=" + (policyError || "aucune capturée")
+      ];
+      showDiagnostic(details.join(" ; "));
+    }, 1500);
   });
-  showDiagnostic("script indépendant exécuté ; vérification en cours…");
+
+  showDiagnostic("script de diagnostic exécuté ; attente du script principal…");
 })();
 </script>
 
