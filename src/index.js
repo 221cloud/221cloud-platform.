@@ -1,5 +1,4 @@
-
-const ITERATIONS = 600000;
+const ITERATIONS = 100000; // Limite prise en charge par Web Crypto sur Cloudflare Workers.
 const SESSION_DAYS = 7;
 const SESSION_IDLE_MINUTES = 60;
 const DATABASE_NAME_MAX = 80;
@@ -166,14 +165,20 @@ async function hashPassword(password) {
     256
   );
 
-  return `pbkdf2$${ITERATIONS}$${base64(salt)}$${base64(result)}`;
+  return "pbkdf2$" + ITERATIONS + "$" + base64(salt) + "$" + base64(result);
 }
 
 async function verifyPassword(password, stored) {
   try {
     const [algorithm, iterations, salt, expected] = stored.split("$");
+    const iterationCount = Number(iterations);
 
-    if (algorithm !== "pbkdf2") return false;
+    if (
+      algorithm !== "pbkdf2" ||
+      !Number.isSafeInteger(iterationCount) ||
+      iterationCount < 1 ||
+      iterationCount > ITERATIONS
+    ) return false;
 
     const key = await crypto.subtle.importKey(
       "raw",
@@ -187,13 +192,12 @@ async function verifyPassword(password, stored) {
       {
         name: "PBKDF2",
         salt: fromBase64(salt),
-        iterations: Number(iterations),
+        iterations: iterationCount,
         hash: "SHA-256"
       },
       key,
       256
     );
-
     const actual = new Uint8Array(result);
     const expectedBytes = fromBase64(expected);
 
