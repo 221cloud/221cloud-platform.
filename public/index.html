@@ -9874,6 +9874,17 @@ body.pro-mode #authScreen a:focus-visible {
     transition-duration:.01ms !important;
   }
 }
+
+/* 221CloudPro — contraste des libellés et états dans les modules */
+body.pro-mode #mainContent .dashboard-kicker {
+  color:#52766b !important;
+}
+body.pro-mode #mainContent .success-text {
+  color:#28734f;
+}
+body.pro-mode #mainContent .error-text {
+  color:#b04452;
+}
 </style>";
   const scriptTag = "<script>" + js + "<\/script>";
   if (/<\/head>/i.test(html)) html = html.replace(/<\/head>/i, styleTag + "</head>");
