@@ -1492,7 +1492,7 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
 <script>
 // DIAGNOSTIC TEMPORAIRE — vérification précise du chargement du script principal
 (function () {
-  const BUILD = "AUTH-DIAG-2026-11-25-F";
+  const BUILD = "AUTH-DIAG-2026-11-25-G";
   let panel;
   let firstRuntimeError = "";
   let policyError = "";
@@ -1576,50 +1576,18 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
           const errorColumn = Number.isFinite(error.columnNumber) ? error.columnNumber : "inconnue";
           const errorStack = String(error.stack || "").split("\\n").slice(0, 2).join(" | ");
           let tokenLocation = "localisation introuvable";
-          let captureSyntaxError = null;
-          try {
-            let nativeLocation = null;
-            captureSyntaxError = event => {
-              if (event && event.message && String(event.message).includes("Unexpected token")) {
-                nativeLocation = {
-                  line: Number(event.lineno) || 0,
-                  column: Number(event.colno) || 0,
-                  message: event.message
-                };
-              }
-            };
-            window.addEventListener("error", captureSyntaxError, true);
-            const probe = document.createElement("script");
-            if (mainScript.nonce) probe.nonce = mainScript.nonce;
-            probe.textContent = "if (false) {\n" + mainScript.textContent + "\n}";
-            document.head.appendChild(probe);
-            probe.remove();
-            window.removeEventListener("error", captureSyntaxError, true);
-            if (nativeLocation) {
-              const sourceLines = mainScript.textContent.split("\n");
-              const candidateLine = nativeLocation.line - 1;
-              const excerptStart = Math.max(1, candidateLine - 2);
-              const excerptEnd = Math.min(sourceLines.length, candidateLine + 2);
-              const excerpt = candidateLine >= 1 && candidateLine <= sourceLines.length
-                ? sourceLines.slice(excerptStart - 1, excerptEnd)
-                    .map((line, index) => (excerptStart + index) + ": " + line)
-                    .join(" | ")
-                : "position hors script (lignes source=" + sourceLines.length +
-                    ") ; fin=" + sourceLines.slice(-4).map((line, index) =>
-                      (sourceLines.length - 3 + index) + ": " + line
-                    ).join(" | ");
-              tokenLocation = "position navigateur ligne=" + nativeLocation.line +
-                " ; colonne=" + nativeLocation.column +
-                " ; ligne source candidate=" + candidateLine +
-                " ; extrait=" + excerpt +
-                " ; message=" + nativeLocation.message;
-            } else {
-              tokenLocation = "le navigateur n'a pas fourni de position native";
-            }
-          } catch (diagnosticError) {
-            if (captureSyntaxError) window.removeEventListener("error", captureSyntaxError, true);
-            tokenLocation = "diagnostic natif impossible=" + diagnosticError.message;
-          }
+          const sourceLines = mainScript.textContent.split("\n");
+          const sourceTail = sourceLines.slice(-6).map((line, index) =>
+            (sourceLines.length - 5 + index) + ": " + line
+          ).join(" | ");
+          const selectedScriptIndex = scripts.indexOf(mainScript);
+          const sourceHead = sourceLines.slice(0, 4).map((line, index) =>
+            (index + 1) + ": " + line
+          ).join(" | ");
+          tokenLocation = "script sélectionné=" + selectedScriptIndex +
+            " ; lignes source=" + sourceLines.length +
+            " ; début=" + sourceHead +
+            " ; fin=" + sourceTail;
           parserCheck = error.name + ": " + error.message +
             " ; ligne=" + errorLine +
             " ; colonne=" + errorColumn +
@@ -1630,6 +1598,7 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
       const details = [
         "HTML diagnostic=" + BUILD,
         "balises script=" + scripts.length,
+        "scripts DOM=" + scripts.map((script, index) => index + ":" + script.textContent.length + " caractères").join(", "),
         "test indépendant avant script principal=" + (window.__221cloudPreMainProbe === true),
         "script principal=" + (mainScript ? "présent (" + mainScript.textContent.length + " caractères)" : "ABSENT"),
         "compilation du script principal=" + parserCheck,
