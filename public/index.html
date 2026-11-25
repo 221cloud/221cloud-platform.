@@ -1198,6 +1198,56 @@ body.pro-mode #mainContent .pro-shortcut-card.pro-shortcut-soon {
     flex:1 1 100%;
   }
 }
+
+/* 221Cloud IDE editor layer */
+.ide-editor-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0}
+.ide-language-chip{display:inline-flex;border:1px solid #b8c9c0;background:#edf4ef;color:#28554a;border-radius:20px;padding:5px 10px;font-size:12px;font-weight:700}
+.ide-editor-shell{position:relative;display:flex;min-height:320px;max-height:68vh;overflow:hidden;border:1px solid #cbd5d0;border-radius:10px;background:#fff;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+.ide-line-numbers{flex:0 0 42px;padding:12px 8px;text-align:right;color:#84938c;background:#f3f6f3;border-right:1px solid #e1e7e2;white-space:pre;overflow:hidden;user-select:none}
+.ide-highlight{position:absolute;inset:0 0 0 42px;margin:0;padding:12px 14px;overflow:hidden;pointer-events:none;white-space:pre;tab-size:4;color:#26343a;font:inherit;line-height:1.5}
+.ide-editor-shell textarea#applicationCodeEditor{position:relative;z-index:1;flex:1;width:calc(100% - 42px)!important;min-width:0;height:auto;min-height:320px;max-height:68vh;margin:0;padding:12px 14px;border:0;border-radius:0;background:transparent!important;color:transparent!important;-webkit-text-fill-color:transparent;caret-color:#183f3b;line-height:1.5;resize:vertical;tab-size:4;overflow:auto;white-space:pre;box-shadow:none!important}
+.ide-editor-shell textarea#applicationCodeEditor::selection{background:rgba(75,133,205,.28)}
+.ide-token-keyword{color:#7952a5;font-weight:600}.ide-token-string{color:#28734f}.ide-token-comment{color:#829087;font-style:italic}.ide-token-number{color:#b05c25}.ide-token-tag{color:#176b91}.ide-token-attribute{color:#9a5b20}
+.ide-completions{position:absolute;z-index:5;left:52px;bottom:12px;max-width:min(320px,calc(100% - 64px));max-height:180px;overflow:auto;padding:6px;background:#fff;border:1px solid #cbd5d0;border-radius:9px;box-shadow:0 8px 24px rgba(20,40,35,.16)}
+.ide-completions button{display:block;width:100%;padding:7px 10px;text-align:left;background:#fff!important;color:#25383c!important;border-radius:5px;box-shadow:none!important;font:13px ui-monospace,monospace}
+.ide-completions button:hover,.ide-completions button:focus{background:#edf4ef!important;outline:2px solid #527c78}
+@media(max-width:600px){.ide-editor-shell{max-height:55vh}}
+
+@media(max-width:600px){
+  .ide-editor-toolbar{align-items:stretch}
+  .ide-editor-toolbar .ide-language-chip{align-self:flex-start}
+  .ide-editor-toolbar button{min-height:44px;flex:1 1 100%}
+  .ide-editor-shell{min-height:260px;max-height:58vh;border-radius:8px}
+  .ide-line-numbers{flex-basis:36px;padding-left:5px;padding-right:6px;font-size:12px}
+  .ide-highlight{inset-inline-start:36px;padding-left:12px;font-size:14px}
+  .ide-editor-shell textarea#applicationCodeEditor{font-size:14px!important;min-height:260px;padding-left:12px;padding-right:12px}
+  .ide-completions{left:42px;right:8px;max-width:none;max-height:35vh}
+  .ide-completions button{min-height:42px;font-size:14px}
+}
+.ide-editor-shell:focus-within{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.18)}
+.ide-editor-shell textarea#applicationCodeEditor:focus{outline:none}
+.ide-editor-toolbar button:focus-visible,
+.ide-completions button:focus-visible,
+#mainContent button:focus-visible,
+#mainContent input:focus-visible,
+#mainContent select:focus-visible{
+  outline:3px solid #f0b429!important;
+  outline-offset:2px!important;
+}
+body.pro-a11y-contrast .ide-editor-shell{border:2px solid #111827;background:#fff}
+body.pro-a11y-contrast .ide-line-numbers{color:#263238;background:#e5e7eb;border-right:2px solid #374151}
+body.pro-a11y-contrast .ide-highlight{color:#111827}
+body.pro-a11y-contrast .ide-token-keyword{color:#4c1d95;font-weight:800}
+body.pro-a11y-contrast .ide-token-string{color:#14532d;font-weight:700}
+body.pro-a11y-contrast .ide-token-comment{color:#475569;font-weight:600}
+body.pro-a11y-contrast .ide-token-number{color:#9a3412;font-weight:700}
+body.pro-a11y-contrast .ide-token-tag{color:#075985;font-weight:800}
+body.pro-a11y-contrast .ide-token-attribute{color:#854d0e;font-weight:800}
+body.pro-a11y-buttons .ide-editor-toolbar button,
+body.pro-a11y-buttons .ide-completions button{min-height:48px;border:2px solid #183d42!important}
+@media(prefers-reduced-motion:reduce){
+  .ide-editor-shell,.ide-editor-toolbar button{transition:none!important}
+}
 </style>
 
 <style id="proAccessibilityModeStyles">
@@ -1470,6 +1520,10 @@ let dashboardNotificationsCache = [];
 let activeStorageFolderId = null;
 let storageView = "files";
 let applicationEditorState = null;
+let applicationCodeMirrorInstance = null;
+let applicationCodeMirrorEnabled = false;
+let applicationCodeMirrorLoader = null;
+let applicationCodeMirrorMountToken = 0;
 let activeAutomationProjectId = null;
 let automationTasksCache = [];
 
@@ -1492,6 +1546,10 @@ function confirmLeaveApplicationEditor() {
       !confirm("Certaines modifications ne sont pas enregistrées. Voulez-vous vraiment quitter l'éditeur et les abandonner ?")) {
     return false;
   }
+  applicationCodeMirrorMountToken++;
+  if (applicationCodeMirrorInstance) applicationCodeMirrorInstance.destroy();
+  applicationCodeMirrorInstance = null;
+  applicationCodeMirrorEnabled = false;
   applicationEditorState = null;
   return true;
 }
@@ -9121,9 +9179,11 @@ async function openApplicationEditor(projectId) {
     "<div id=\"applicationTrashPanel\" class=\"item-card\" hidden><div class=\"section-head\"><h3>Corbeille de l'application</h3><button class=\"secondary\" type=\"button\" onclick=\"toggleApplicationTrash(false)\">Fermer</button></div><div id=\"applicationTrashList\"><p class=\"muted\">Chargement...</p></div></div></div>" +
     "<div class=\"card\"><div class=\"section-head\"><h2 id=\"applicationActiveFileTitle\">Éditeur</h2><span class=\"muted\">Code du fichier sélectionné</span></div>" +
     "<label for=\"applicationCodeEditor\">Contenu du fichier</label>" +
-    "<p class=\"muted\">Tab : indentation · Maj+Tab : réduire · Entrée : indentation automatique · Ctrl/Cmd+S : enregistrer</p>" +
-    "<textarea id=\"applicationCodeEditor\" spellcheck=\"false\" autocapitalize=\"off\" autocomplete=\"off\" style=\"width:100%;min-height:320px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.5;white-space:pre;overflow:auto\" placeholder=\"Chargement du code...\"></textarea>" +
-    "<div class=\"item-card\" style=\"margin:12px 0\"><label for=\"applicationSearchInput\">Rechercher dans le fichier ouvert</label><input id=\"applicationSearchInput\" type=\"search\" placeholder=\"Mot ou expression à rechercher\" style=\"width:100%\"><label for=\"applicationReplaceInput\">Remplacer par</label><input id=\"applicationReplaceInput\" type=\"text\" placeholder=\"Nouveau texte\" style=\"width:100%\"><div class=\"item-actions\"><button class=\"secondary\" type=\"button\" onclick=\"findApplicationEditorMatch(-1)\">Précédent</button><button class=\"secondary\" type=\"button\" onclick=\"findApplicationEditorMatch(1)\">Suivant</button><button class=\"secondary\" type=\"button\" onclick=\"replaceApplicationEditorMatch()\">Remplacer</button><button class=\"secondary\" type=\"button\" onclick=\"replaceAllApplicationEditorMatches()\">Tout remplacer</button></div><p id=\"applicationSearchStatus\" class=\"muted\" aria-live=\"polite\">Recherche limitée au fichier ouvert. Les remplacements restent non enregistrés jusqu'à la sauvegarde.</p></div>" +
+    "<div class=\"ide-editor-toolbar\"><span id=\"applicationEditorLanguage\" class=\"ide-language-chip\">Détection du langage…</span><span id=\"applicationEditorStats\" class=\"muted\">0 ligne · 0 caractère</span><button id=\"applicationLegacyCompletionButton\" class=\"secondary\" type=\"button\" onclick=\"showApplicationEditorCompletions(true)\">Suggestions · Ctrl+Espace</button><button id=\"applicationCodeMirrorToggle\" class=\"secondary\" type=\"button\" onclick=\"toggleApplicationCodeMirror()\">Essayer CodeMirror</button></div>" +
+    "<div class=\"ide-editor-shell\"><div id=\"applicationEditorLineNumbers\" class=\"ide-line-numbers\" aria-hidden=\"true\">1</div><pre id=\"applicationEditorHighlight\" class=\"ide-highlight\" aria-hidden=\"true\"></pre>" +
+    "<textarea id=\"applicationCodeEditor\" spellcheck=\"false\" autocapitalize=\"off\" autocomplete=\"off\" autocorrect=\"off\" wrap=\"off\" style=\"width:100%;min-height:320px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.5;white-space:pre;overflow:auto\" placeholder=\"Chargement du code...\" aria-label=\"Éditeur de code\"></textarea><div id=\"applicationCodeMirrorHost\" class=\"application-codemirror-host\" hidden style=\"width:100%;height:420px;min-height:320px;overflow:hidden;border:1px solid #283653;border-radius:10px;background:#0b1222\"></div>" +
+    "<div id=\"applicationEditorCompletions\" class=\"ide-completions\" role=\"listbox\" hidden></div></div>" +
+    "<div id=\"applicationEditorSearchPanel\" class=\"item-card\" style=\"margin:12px 0\"><label for=\"applicationSearchInput\">Rechercher dans le fichier ouvert</label><input id=\"applicationSearchInput\" type=\"search\" placeholder=\"Mot ou expression à rechercher\" style=\"width:100%\"><label for=\"applicationReplaceInput\">Remplacer par</label><input id=\"applicationReplaceInput\" type=\"text\" placeholder=\"Nouveau texte\" style=\"width:100%\"><div class=\"item-actions\"><button class=\"secondary\" type=\"button\" onclick=\"findApplicationEditorMatch(-1)\">Précédent</button><button class=\"secondary\" type=\"button\" onclick=\"findApplicationEditorMatch(1)\">Suivant</button><button class=\"secondary\" type=\"button\" onclick=\"replaceApplicationEditorMatch()\">Remplacer</button><button class=\"secondary\" type=\"button\" onclick=\"replaceAllApplicationEditorMatches()\">Tout remplacer</button></div><p id=\"applicationSearchStatus\" class=\"muted\" aria-live=\"polite\">Recherche limitée au fichier ouvert. Les remplacements restent non enregistrés jusqu'à la sauvegarde.</p></div>" +
     "<div class=\"item-actions\" style=\"margin-top:12px\"><button id=\"saveApplicationFilesButton\" type=\"button\" onclick=\"saveApplicationFiles()\">Enregistrer tous les fichiers</button>" +
     "<button class=\"secondary\" type=\"button\" onclick=\"refreshApplicationPreview()\">Actualiser l'aperçu</button><span id=\"applicationSaveStatus\" class=\"muted\" aria-live=\"polite\"></span></div>" +
     "<p class=\"muted\">Les modifications restent dans votre espace 221Cloud. Enregistrez-les avant de quitter cette page.</p></div>" +
@@ -9139,7 +9199,11 @@ async function openApplicationEditor(projectId) {
     "<div class=\"notice\">Limites actuelles : 50 fichiers maximum, 256 Ko par fichier et 1 Mo de code au total. L'historique conserve les 30 dernières versions de chaque fichier. Les fichiers additionnels ne sont pas encore inclus dans la publication publique.</div>";
 
   const codeEditor = document.getElementById("applicationCodeEditor");
-  if (codeEditor) codeEditor.addEventListener("keydown", handleApplicationEditorKeydown);
+  if (codeEditor) {
+    codeEditor.addEventListener("keydown", handleApplicationEditorKeydown);
+    codeEditor.addEventListener("input", () => { updateApplicationEditorDecorations(); showApplicationEditorCompletions(false); });
+    codeEditor.addEventListener("scroll", syncApplicationEditorScroll);
+  }
   const searchInput = document.getElementById("applicationSearchInput");
   if (searchInput) searchInput.addEventListener("input", updateApplicationSearchStatus);
 
@@ -9385,6 +9449,7 @@ function replaceApplicationEditorMatch() {
     return;
   }
   editor.setRangeText(replacement.value, editor.selectionStart, editor.selectionEnd, "end");
+  updateApplicationEditorDecorations();
   if (applicationEditorState && applicationEditorState.activeFile) {
     applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
   }
@@ -9418,10 +9483,64 @@ function replaceAllApplicationEditorMatches() {
   }
   editor.value = output + source.slice(cursor);
   editor.setSelectionRange(0, 0);
+  updateApplicationEditorDecorations();
   if (applicationEditorState && applicationEditorState.activeFile) {
     applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
   }
   if (status) status.textContent = matches.length + " remplacement(s) effectué(s). Pensez à enregistrer.";
+}
+
+
+function getApplicationEditorLanguage(fileName) {
+  const ext=String(fileName||"").split(".").pop().toLowerCase();
+  return ({html:"HTML",htm:"HTML",css:"CSS",js:"JavaScript",mjs:"JavaScript",ts:"TypeScript",tsx:"TypeScript JSX",jsx:"JavaScript JSX",json:"JSON",py:"Python",md:"Markdown",sql:"SQL",xml:"XML",svg:"SVG",sh:"Shell",yaml:"YAML",yml:"YAML"})[ext]||"Texte brut";
+}
+function highlightApplicationEditorCode(source,language) {
+  const esc=v=>String(v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const html=/HTML|XML|SVG/.test(language);
+  const re=html?/(<!--[\s\S]*?-->|<\/?[A-Za-z][^>]*>)/g:/(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\x60(?:\\.|[^\x60\\])*\x60|\b\d+(?:\.\d+)?\b|\b(?:const|let|var|function|return|if|else|for|while|class|new|this|import|from|export|default|async|await|try|catch|throw|true|false|null|undefined|def|elif|pass|lambda|print|in|not|and|or|None|True|False)\b)/gi;
+  let out="",pos=0,m;
+  while((m=re.exec(String(source)))!==null){
+    out+=esc(String(source).slice(pos,m.index));const t=m[0];let c="ide-token-keyword";
+    if (/^(\/\/|#|\/\*|<!--)/.test(t)) c="ide-token-comment";
+    else if (/^["'\x60]/.test(t)) c="ide-token-string";
+    else if (/^\d/.test(t)) c="ide-token-number";
+    else if (/^</.test(t)){out+=esc(t).replace(/(&lt;\/?)([A-Za-z][\w:-]*)/,"$1<span class=\"ide-token-tag\">$2</span>").replace(/([\w:-]+)(=)/g,"<span class=\"ide-token-attribute\">$1</span>$2");pos=m.index+t.length;continue;}
+    out+='<span class="'+c+'">'+esc(t)+'</span>';pos=m.index+t.length;
+  }
+  out+=esc(String(source).slice(pos));return out+(String(source).endsWith("\n")?" ":"\n ");
+}
+function syncApplicationEditorScroll(){
+  const e=document.getElementById("applicationCodeEditor"),h=document.getElementById("applicationEditorHighlight"),n=document.getElementById("applicationEditorLineNumbers");
+  if(!e)return;if(h)h.style.transform="translate("+(-e.scrollLeft)+"px,"+(-e.scrollTop)+"px)";if(n)n.scrollTop=e.scrollTop;
+}
+function updateApplicationEditorDecorations(){
+  const e=document.getElementById("applicationCodeEditor");if(!e)return;const src=e.value,lines=src.split("\n");
+  const lang=getApplicationEditorLanguage(applicationEditorState?.activeFile);
+  const chip=document.getElementById("applicationEditorLanguage"),stats=document.getElementById("applicationEditorStats"),hi=document.getElementById("applicationEditorHighlight"),nums=document.getElementById("applicationEditorLineNumbers");
+  if(chip)chip.textContent=lang;if(stats)stats.textContent=lines.length+" ligne(s) · "+src.length+" caractère(s)";
+  if(hi)hi.innerHTML=highlightApplicationEditorCode(src,lang);if(nums)nums.textContent=lines.map((_,i)=>i+1).join("\n");syncApplicationEditorScroll();
+}
+function showApplicationEditorCompletions(force=false){
+  const e=document.getElementById("applicationCodeEditor"),p=document.getElementById("applicationEditorCompletions");if(!e||!p)return;
+  const prefix=e.value.slice(0,e.selectionStart).match(/[A-Za-z_$][\w$]*$/)?.[0]||"";if(!force&&prefix.length<2){p.hidden=true;e.removeAttribute("aria-activedescendant");e.setAttribute("aria-expanded","false");return;}
+  const lang=getApplicationEditorLanguage(applicationEditorState?.activeFile),isPy=lang==="Python",isHtml=/HTML|XML|SVG/.test(lang),isCss=lang==="CSS";
+  const items=isPy?["def ","class ","if ","elif ","else:","for ","while ","return ","import ","print()","True","False","None"]:isHtml?["<div></div>","<section></section>","<main></main>","<button></button>","<a href=\"\"></a>","<img src=\"\" alt=\"\">"]:isCss?["display: flex;","display: grid;","position: relative;","justify-content: center;","align-items: center;","@media () {\n\n}","color: ;","background: ;"]:["const ","let ","function ","async function ","if () {\n\n}","for (const item of items) {\n\n}","console.log()","return ","import ","export default "];
+  const found=items.filter(x=>!prefix||x.toLowerCase().startsWith(prefix.toLowerCase())).slice(0,8);if(!found.length){p.hidden=true;e.removeAttribute("aria-activedescendant");e.setAttribute("aria-expanded","false");return;}
+  p.innerHTML=found.map((x,i)=>'<button id="applicationEditorCompletionOption'+i+'" type="button" role="option" aria-selected="'+(i===0?'true':'false')+'" onclick="insertApplicationEditorCompletion('+i+')">'+escapeHTML(x)+'</button>').join("");
+  p.dataset.items=JSON.stringify(found);p.dataset.activeIndex="0";p.hidden=false;e.setAttribute("aria-controls","applicationEditorCompletions");e.setAttribute("aria-expanded","true");e.setAttribute("aria-activedescendant","applicationEditorCompletionOption0");
+}
+function moveApplicationEditorCompletion(step){
+  const e=document.getElementById("applicationCodeEditor"),p=document.getElementById("applicationEditorCompletions");if(!e||!p||p.hidden)return false;
+  const buttons=Array.from(p.querySelectorAll('[role="option"]'));if(!buttons.length)return false;
+  const current=Number(p.dataset.activeIndex||0),next=(current+step+buttons.length)%buttons.length;
+  buttons.forEach((button,index)=>button.setAttribute("aria-selected",index===next?"true":"false"));p.dataset.activeIndex=String(next);e.setAttribute("aria-activedescendant",buttons[next].id);buttons[next].scrollIntoView({block:"nearest"});return true;
+}
+function insertApplicationEditorCompletion(i){
+  const e=document.getElementById("applicationCodeEditor"),p=document.getElementById("applicationEditorCompletions");if(!e||!p)return;
+  let a=[];try{a=JSON.parse(p.dataset.items||"[]")}catch(_){}const v=a[i];if(!v)return;
+  const m=e.value.slice(0,e.selectionStart).match(/[A-Za-z_$][\w$]*$/),start=m?e.selectionStart-m[0].length:e.selectionStart;
+  e.setRangeText(v,start,e.selectionEnd,"end");p.hidden=true;e.setAttribute("aria-expanded","false");e.removeAttribute("aria-activedescendant");updateApplicationEditorDecorations();e.focus();
 }
 
 function handleApplicationEditorKeydown(event) {
@@ -9434,7 +9553,15 @@ function handleApplicationEditorKeydown(event) {
   }
 
   if (editor.disabled || !applicationEditorState || applicationEditorState.saving) return;
-
+  if ((event.ctrlKey || event.metaKey) && event.key === " ") { event.preventDefault(); showApplicationEditorCompletions(true); return; }
+  const completionPanel=document.getElementById("applicationEditorCompletions");
+  if (completionPanel && !completionPanel.hidden) {
+    if (event.key === "ArrowDown") { event.preventDefault(); moveApplicationEditorCompletion(1); return; }
+    if (event.key === "ArrowUp") { event.preventDefault(); moveApplicationEditorCompletion(-1); return; }
+    if (event.key === "Enter") { event.preventDefault(); insertApplicationEditorCompletion(Number(completionPanel.dataset.activeIndex||0)); return; }
+    if (event.key === "Escape") { event.preventDefault(); completionPanel.hidden=true; editor.setAttribute("aria-expanded","false"); editor.removeAttribute("aria-activedescendant"); return; }
+    if (event.key === "Tab" && !event.shiftKey && completionPanel.querySelector("button")) { event.preventDefault(); insertApplicationEditorCompletion(Number(completionPanel.dataset.activeIndex||0)); return; }
+  }
   if (event.key === "Tab") {
     event.preventDefault();
     const value = editor.value;
@@ -9443,6 +9570,7 @@ function handleApplicationEditorKeydown(event) {
 
     if (start === end && !event.shiftKey) {
       editor.setRangeText("    ", start, end, "end");
+      updateApplicationEditorDecorations();
       return;
     }
 
@@ -9476,6 +9604,7 @@ function handleApplicationEditorKeydown(event) {
       Math.max(firstLineStart, start + (event.shiftKey ? -startAdjustment : startAdjustment)),
       Math.max(firstLineStart, end + (event.shiftKey ? -endAdjustment : endAdjustment))
     );
+    updateApplicationEditorDecorations();
     return;
   }
 
@@ -9490,6 +9619,7 @@ function handleApplicationEditorKeydown(event) {
     const trimmedPrefix = linePrefix.trimEnd();
     const extraIndentation = /[\{\[\(]$/.test(trimmedPrefix) ? "    " : "";
     editor.setRangeText("\n" + indentation + extraIndentation, start, end, "end");
+    updateApplicationEditorDecorations();
   }
 }
 
@@ -9715,6 +9845,111 @@ function renderApplicationFileTree() {
   container.innerHTML = treeHTML || "<p class=\"muted\">Aucun fichier. Créez votre premier fichier avec « Nouveau fichier ».</p>";
 }
 
+
+async function mountApplicationCodeMirrorEditor() {
+  const editor = document.getElementById("applicationCodeEditor");
+  const host = document.getElementById("applicationCodeMirrorHost");
+  if (!editor || !host || !applicationCodeMirrorEnabled || !window.CloudIDE221) return null;
+  const mountToken = ++applicationCodeMirrorMountToken;
+  if (applicationCodeMirrorInstance) applicationCodeMirrorInstance.destroy();
+  applicationCodeMirrorInstance = null;
+  const nextInstance = await window.CloudIDE221.mountEditor({
+    host,
+    value: editor.value,
+    fileName: applicationEditorState?.activeFile || "",
+    readOnly: Boolean(applicationEditorState?.saving || applicationEditorState?.restoring),
+    onChange: value => {
+      editor.value = value;
+      if (applicationEditorState && applicationEditorState.activeFile) applicationEditorState.files[applicationEditorState.activeFile] = value;
+      const stats = document.getElementById("applicationEditorStats");
+      if (stats) stats.textContent = value.split("\n").length + " ligne(s) · " + value.length + " caractère(s)";
+    }
+  });
+  if (mountToken !== applicationCodeMirrorMountToken || !applicationCodeMirrorEnabled) {
+    nextInstance.destroy();
+    return null;
+  }
+  applicationCodeMirrorInstance = nextInstance;
+  applicationCodeMirrorInstance.setReadOnly(Boolean(applicationEditorState?.saving || applicationEditorState?.restoring));
+  return applicationCodeMirrorInstance;
+}
+
+async function toggleApplicationCodeMirror(forceEnabled) {
+  const editor = document.getElementById("applicationCodeEditor");
+  const host = document.getElementById("applicationCodeMirrorHost");
+  const button = document.getElementById("applicationCodeMirrorToggle");
+  const highlight = document.getElementById("applicationEditorHighlight");
+  const lineNumbers = document.getElementById("applicationEditorLineNumbers");
+  const completions = document.getElementById("applicationEditorCompletions");
+  const legacyCompletions = document.getElementById("applicationLegacyCompletionButton");
+  const searchPanel = document.getElementById("applicationEditorSearchPanel");
+  if (!editor || !host) return;
+  const enable = typeof forceEnabled === "boolean" ? forceEnabled : !applicationCodeMirrorEnabled;
+
+  if (!enable) {
+    applicationCodeMirrorMountToken++;
+    if (applicationCodeMirrorInstance) {
+      editor.value = applicationCodeMirrorInstance.getValue();
+      if (applicationEditorState && applicationEditorState.activeFile) applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
+      applicationCodeMirrorInstance.destroy();
+    }
+    applicationCodeMirrorInstance = null;
+    applicationCodeMirrorEnabled = false;
+    host.hidden = true;
+    editor.hidden = false;
+    if (highlight) highlight.hidden = false;
+    if (lineNumbers) lineNumbers.hidden = false;
+    if (legacyCompletions) legacyCompletions.hidden = false;
+    if (searchPanel) searchPanel.hidden = false;
+    if (button) button.textContent = "Essayer CodeMirror";
+    if (completions) completions.hidden = true;
+    updateApplicationEditorDecorations();
+    return;
+  }
+
+  try {
+    if (!window.CloudIDE221) {
+      if (!applicationCodeMirrorLoader) {
+        applicationCodeMirrorLoader = new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.type = "module";
+          script.src = "/assets/ide-editor/main.js?v=20261125-2";
+          script.async = true;
+          script.onload = () => window.CloudIDE221 ? resolve(window.CloudIDE221) : reject(new Error("Le module CodeMirror n’a pas été initialisé."));
+          script.onerror = () => reject(new Error("Impossible de charger CodeMirror. Vérifiez votre connexion puis réessayez."));
+          document.head.appendChild(script);
+        });
+      }
+      await applicationCodeMirrorLoader;
+    }
+    applicationCodeMirrorEnabled = true;
+    editor.hidden = true;
+    host.hidden = false;
+    if (highlight) highlight.hidden = true;
+    if (lineNumbers) lineNumbers.hidden = true;
+    if (legacyCompletions) legacyCompletions.hidden = true;
+    if (searchPanel) searchPanel.hidden = true;
+    if (completions) completions.hidden = true;
+    const mounted = await mountApplicationCodeMirrorEditor();
+    if (!mounted) throw new Error("Le nouvel éditeur n’a pas pu être initialisé.");
+    if (button) button.textContent = "Revenir à l’éditeur classique";
+    const status = document.getElementById("applicationSaveStatus");
+    if (status) status.textContent = "CodeMirror activé. Les modifications restent synchronisées avec la sauvegarde habituelle.";
+  } catch (error) {
+    applicationCodeMirrorLoader = null;
+    applicationCodeMirrorEnabled = false;
+    host.hidden = true;
+    editor.hidden = false;
+    if (highlight) highlight.hidden = false;
+    if (lineNumbers) lineNumbers.hidden = false;
+    if (legacyCompletions) legacyCompletions.hidden = false;
+    if (searchPanel) searchPanel.hidden = false;
+    if (button) button.textContent = "Réessayer CodeMirror";
+    const status = document.getElementById("applicationSaveStatus");
+    if (status) status.textContent = error.message || "CodeMirror n’a pas pu être activé.";
+  }
+}
+
 function renderApplicationEditorFile() {
   if (!applicationEditorState) return;
   const editor = document.getElementById("applicationCodeEditor");
@@ -9726,6 +9961,13 @@ function renderApplicationEditorFile() {
     ? (applicationEditorState.files[applicationEditorState.activeFile] || "")
     : "";
   editor.disabled = !applicationEditorState.activeFile;
+  updateApplicationEditorDecorations();
+  if (applicationCodeMirrorEnabled) mountApplicationCodeMirrorEditor().catch(error => {
+    const status = document.getElementById("applicationSaveStatus");
+    if (status) status.textContent = error.message || "Impossible de charger le langage de ce fichier.";
+  });
+  const completionPanel = document.getElementById("applicationEditorCompletions");
+  if (completionPanel) completionPanel.hidden = true;
   loadApplicationFileVersions();
 }
 
@@ -9822,6 +10064,7 @@ async function saveApplicationFiles() {
     button.textContent = "Enregistrement...";
   }
   if (editor) editor.disabled = true;
+  if (applicationCodeMirrorInstance) applicationCodeMirrorInstance.setReadOnly(true);
   document.querySelectorAll("#applicationFileTabs button").forEach(tab => { tab.disabled = true; });
   if (status) status.textContent = "Sauvegarde et création des versions...";
   let savedCount = 0;
@@ -9857,6 +10100,7 @@ async function saveApplicationFiles() {
   } finally {
     if (applicationEditorState) applicationEditorState.saving = false;
     if (editor) editor.disabled = false;
+    if (applicationCodeMirrorInstance) applicationCodeMirrorInstance.setReadOnly(false);
     document.querySelectorAll("#applicationFileTabs button").forEach(tab => { tab.disabled = false; });
     if (button) {
       button.disabled = false;
@@ -9907,6 +10151,7 @@ async function restoreApplicationFileVersion(versionId, versionNumber) {
   const editor = document.getElementById("applicationCodeEditor");
   const saveButton = document.getElementById("saveApplicationFilesButton");
   if (editor) editor.disabled = true;
+  if (applicationCodeMirrorInstance) applicationCodeMirrorInstance.setReadOnly(true);
   if (saveButton) saveButton.disabled = true;
   document.querySelectorAll("#applicationFileTabs button, #applicationVersionHistory button").forEach(button => { button.disabled = true; });
   if (status) status.textContent = "Restauration en cours...";
@@ -9932,6 +10177,7 @@ async function restoreApplicationFileVersion(versionId, versionNumber) {
       const currentEditor = document.getElementById("applicationCodeEditor");
       const currentSaveButton = document.getElementById("saveApplicationFilesButton");
       if (currentEditor) currentEditor.disabled = false;
+      if (applicationCodeMirrorInstance) applicationCodeMirrorInstance.setReadOnly(false);
       if (currentSaveButton) currentSaveButton.disabled = false;
       document.querySelectorAll("#applicationFileTabs button, #applicationVersionHistory button").forEach(button => { button.disabled = false; });
     }
