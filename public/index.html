@@ -1505,6 +1505,18 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
     } catch (e) {}
   }
   window.__221cloudAuthDiagnostic = showDiagnostic;
+
+  // Rendre le changement de formulaire disponible dès le premier script,
+  // même si le script principal rencontre une erreur plus loin.
+  window.showAuthForm = function (form) {
+    const loginForm = document.getElementById("loginForm");
+    const registerForm = document.getElementById("registerForm");
+    const authMessage = document.getElementById("authMessage");
+    if (loginForm) loginForm.classList.toggle("hidden", form !== "login");
+    if (registerForm) registerForm.classList.toggle("hidden", form !== "register");
+    if (authMessage) authMessage.classList.add("hidden");
+  };
+
   document.addEventListener("click", function (event) {
     const target = event.target && event.target.closest
       ? event.target.closest("button, a, [role='button'], input[type='submit'], [onclick]")
