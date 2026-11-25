@@ -1557,6 +1557,7 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
 </script>
 
 <script>
+window.__221cloudMainStarted = true;
 const API = "/api";
 if (window.__221cloudAuthDiagnostic) window.__221cloudAuthDiagnostic("script principal démarré ; diagnostic en cours…");
 const IS_PRO_MODE = window.location.pathname === "/pro" || window.location.pathname === "/pro/";
@@ -10985,6 +10986,16 @@ if ("serviceWorker" in navigator) {
     });
   });
 }
+</script>
+<script>
+(function () {
+  const started = window.__221cloudMainStarted === true;
+  const registerType = typeof window.register;
+  const loginType = typeof window.login;
+  const message = "TEST APRÈS SCRIPT PRINCIPAL : démarré=" + started +
+    " ; register=" + registerType + " ; login=" + loginType;
+  if (window.__221cloudAuthDiagnostic) window.__221cloudAuthDiagnostic(message);
+})();
 </script>
 </body>
 </html>
