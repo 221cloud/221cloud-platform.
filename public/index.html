@@ -1118,6 +1118,86 @@ body.pro-mode #mainContent .panel:has(table) {
     padding:9px 8px;
   }
 }
+
+/* 221CloudPro — navigation et états des modules */
+body.pro-mode aside {
+  background:#f8faf8;
+  border-right:1px solid #e2e8e3;
+}
+body.pro-mode .nav-title {
+  color:#8a9690;
+  font-weight:700;
+}
+body.pro-mode .nav-btn {
+  color:#52645e;
+  border:1px solid transparent;
+  border-radius:9px;
+  background:transparent;
+}
+body.pro-mode .nav-btn:hover {
+  color:#234b48;
+  background:#edf3ee;
+  box-shadow:none;
+}
+body.pro-mode .nav-btn.active {
+  color:#1c4b50;
+  background:#e8f0eb;
+  border-color:#dce8df;
+  box-shadow:inset 3px 0 #456b61;
+  font-weight:700;
+}
+body.pro-mode #mainContent .item-actions {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:9px;
+}
+body.pro-mode #mainContent .item-actions button {
+  flex:0 1 auto;
+  min-width:0;
+}
+body.pro-mode #mainContent .pro-shortcut-card:hover {
+  background:#fbfcfa;
+  border-color:#cbd9cf;
+  box-shadow:0 4px 12px rgba(28,48,48,.06);
+}
+body.pro-mode #mainContent .pro-shortcut-card .shortcut-icon {
+  background:#f0f4f1;
+  color:#456b61;
+}
+body.pro-mode #mainContent .pro-shortcut-card .pro-tool-copy strong {
+  color:#2b4143;
+}
+body.pro-mode #mainContent .pro-shortcut-card .pro-tool-copy small {
+  color:#818d87;
+}
+body.pro-mode #mainContent .pro-shortcut-card.pro-shortcut-soon {
+  background:#f7f9f7;
+  border-style:dashed;
+  opacity:.78;
+}
+@media(max-width:760px) {
+  body.pro-mode aside {
+    background:#f8faf8;
+    border-right:0;
+    border-bottom:1px solid #e2e8e3;
+  }
+  body.pro-mode .nav-btn {
+    color:#52645e;
+    background:#fff;
+    border:1px solid #e5ebe6;
+  }
+  body.pro-mode .nav-btn.active {
+    background:#e8f0eb;
+    border-color:#dce8df;
+    box-shadow:none;
+  }
+}
+@media(max-width:520px) {
+  body.pro-mode #mainContent .item-actions button {
+    flex:1 1 100%;
+  }
+}
 </style>
 </head>
 
