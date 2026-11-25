@@ -9595,7 +9595,39 @@ function refreshApplicationPreview() {
     html = policyTag + html;
   }
 
-    const styleTag = "<style>" + css + "\n</style>";
+    const styleTag = "<style>" + css + "\n
+/* 221CloudPro — harmonisation du stockage avec le thème clair */
+body.pro-mode #mainContent .storage-grid .card {
+  background:#fafbf9;
+  border:1px solid #e2e9e3;
+  box-shadow:0 3px 12px rgba(37,52,58,.05);
+  color:#344847;
+}
+body.pro-mode #mainContent .storage-grid .card:hover {
+  border-color:#cbd9d0;
+  box-shadow:0 5px 16px rgba(37,52,58,.08);
+}
+body.pro-mode #mainContent .file-name {
+  color:#344847;
+}
+body.pro-mode #mainContent .storage-folder-arrow {
+  color:#527c70;
+}
+body.pro-mode #mainContent .storage-folder-usage-track {
+  background:#e8eee9;
+}
+body.pro-mode #mainContent .storage-folder-usage-fill {
+  background:#527c70;
+}
+body.pro-mode #mainContent .storage-thumbnail-button,
+body.pro-mode #mainContent .storage-thumbnail {
+  background:#f1f4f1;
+  border-color:#e2e9e3;
+}
+body.pro-mode #mainContent .storage-thumbnail-fallback {
+  color:#667873;
+}
+</style>";
   const scriptTag = "<script>" + js + "<\/script>";
   if (/<\/head>/i.test(html)) html = html.replace(/<\/head>/i, styleTag + "</head>");
   else html = styleTag + html;
