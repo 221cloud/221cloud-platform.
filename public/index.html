@@ -1523,6 +1523,7 @@ let applicationEditorState = null;
 let applicationCodeMirrorInstance = null;
 let applicationCodeMirrorEnabled = false;
 let applicationCodeMirrorLoader = null;
+let applicationCodeMirrorMountToken = 0;
 let activeAutomationProjectId = null;
 let automationTasksCache = [];
 
@@ -1545,6 +1546,7 @@ function confirmLeaveApplicationEditor() {
       !confirm("Certaines modifications ne sont pas enregistrées. Voulez-vous vraiment quitter l'éditeur et les abandonner ?")) {
     return false;
   }
+  applicationCodeMirrorMountToken++;
   if (applicationCodeMirrorInstance) applicationCodeMirrorInstance.destroy();
   applicationCodeMirrorInstance = null;
   applicationCodeMirrorEnabled = false;
@@ -9844,12 +9846,14 @@ function renderApplicationFileTree() {
 }
 
 
-function mountApplicationCodeMirrorEditor() {
+async function mountApplicationCodeMirrorEditor() {
   const editor = document.getElementById("applicationCodeEditor");
   const host = document.getElementById("applicationCodeMirrorHost");
-  if (!editor || !host || !applicationCodeMirrorEnabled || !window.CloudIDE221) return;
+  if (!editor || !host || !applicationCodeMirrorEnabled || !window.CloudIDE221) return null;
+  const mountToken = ++applicationCodeMirrorMountToken;
   if (applicationCodeMirrorInstance) applicationCodeMirrorInstance.destroy();
-  applicationCodeMirrorInstance = window.CloudIDE221.mountEditor({
+  applicationCodeMirrorInstance = null;
+  const nextInstance = await window.CloudIDE221.mountEditor({
     host,
     value: editor.value,
     fileName: applicationEditorState?.activeFile || "",
@@ -9861,6 +9865,13 @@ function mountApplicationCodeMirrorEditor() {
       if (stats) stats.textContent = value.split("\n").length + " ligne(s) · " + value.length + " caractère(s)";
     }
   });
+  if (mountToken !== applicationCodeMirrorMountToken || !applicationCodeMirrorEnabled) {
+    nextInstance.destroy();
+    return null;
+  }
+  applicationCodeMirrorInstance = nextInstance;
+  applicationCodeMirrorInstance.setReadOnly(Boolean(applicationEditorState?.saving || applicationEditorState?.restoring));
+  return applicationCodeMirrorInstance;
 }
 
 async function toggleApplicationCodeMirror(forceEnabled) {
@@ -9876,6 +9887,7 @@ async function toggleApplicationCodeMirror(forceEnabled) {
   const enable = typeof forceEnabled === "boolean" ? forceEnabled : !applicationCodeMirrorEnabled;
 
   if (!enable) {
+    applicationCodeMirrorMountToken++;
     if (applicationCodeMirrorInstance) {
       editor.value = applicationCodeMirrorInstance.getValue();
       if (applicationEditorState && applicationEditorState.activeFile) applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
@@ -9900,7 +9912,8 @@ async function toggleApplicationCodeMirror(forceEnabled) {
       if (!applicationCodeMirrorLoader) {
         applicationCodeMirrorLoader = new Promise((resolve, reject) => {
           const script = document.createElement("script");
-          script.src = "/assets/ide-editor.js?v=20261125-1";
+          script.type = "module";
+          script.src = "/assets/ide-editor/main.js?v=20261125-2";
           script.async = true;
           script.onload = () => window.CloudIDE221 ? resolve(window.CloudIDE221) : reject(new Error("Le module CodeMirror n’a pas été initialisé."));
           script.onerror = () => reject(new Error("Impossible de charger CodeMirror. Vérifiez votre connexion puis réessayez."));
@@ -9917,7 +9930,8 @@ async function toggleApplicationCodeMirror(forceEnabled) {
     if (legacyCompletions) legacyCompletions.hidden = true;
     if (searchPanel) searchPanel.hidden = true;
     if (completions) completions.hidden = true;
-    mountApplicationCodeMirrorEditor();
+    const mounted = await mountApplicationCodeMirrorEditor();
+    if (!mounted) throw new Error("Le nouvel éditeur n’a pas pu être initialisé.");
     if (button) button.textContent = "Revenir à l’éditeur classique";
     const status = document.getElementById("applicationSaveStatus");
     if (status) status.textContent = "CodeMirror activé. Les modifications restent synchronisées avec la sauvegarde habituelle.";
@@ -9948,7 +9962,10 @@ function renderApplicationEditorFile() {
     : "";
   editor.disabled = !applicationEditorState.activeFile;
   updateApplicationEditorDecorations();
-  if (applicationCodeMirrorEnabled) mountApplicationCodeMirrorEditor();
+  if (applicationCodeMirrorEnabled) mountApplicationCodeMirrorEditor().catch(error => {
+    const status = document.getElementById("applicationSaveStatus");
+    if (status) status.textContent = error.message || "Impossible de charger le langage de ce fichier.";
+  });
   const completionPanel = document.getElementById("applicationEditorCompletions");
   if (completionPanel) completionPanel.hidden = true;
   loadApplicationFileVersions();
