@@ -38,7 +38,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package-lock.json public/assets/ide-editor.js
+          git add -A package-lock.json public/assets/
           if git diff --cached --quiet; then
             echo "No generated changes to commit."
           else
