@@ -1944,7 +1944,11 @@ async function login() {
   }
 }
 
-// Les actions d’authentification sont attachées en JavaScript plutôt que via onclick HTML.
+// Exposer explicitement les fonctions appelées par les attributs onclick HTML.
+window.showAuthForm = showAuthForm;
+window.login = login;
+window.register = register;
+
 if (window.__221cloudAuthDiagnostic) {
   const ids = ["loginButton", "registerButton", "showRegisterButton", "showLoginButton"];
   const states = ids.map(id => {
