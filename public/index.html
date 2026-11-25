@@ -9902,6 +9902,16 @@ body.pro-mode #mainContent .success-text {
 body.pro-mode #mainContent .error-text {
   color:#b04452;
 }
+
+/* 221CloudPro — confort sur les très petits écrans */
+@media(max-width:360px) {
+  body.pro-mode #mainContent .grid {
+    grid-template-columns:minmax(0,1fr);
+  }
+  body.pro-mode #mainContent .pro-tools-grid {
+    grid-template-columns:minmax(0,1fr);
+  }
+}
 </style>";
   const scriptTag = "<script>" + js + "<\/script>";
   if (/<\/head>/i.test(html)) html = html.replace(/<\/head>/i, styleTag + "</head>");
