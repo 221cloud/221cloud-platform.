@@ -1492,7 +1492,7 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
 <script>
 // DIAGNOSTIC TEMPORAIRE — vérification précise du chargement du script principal
 (function () {
-  const BUILD = "AUTH-DIAG-2026-11-25-E";
+  const BUILD = "AUTH-DIAG-2026-11-25-F";
   let panel;
   let firstRuntimeError = "";
   let policyError = "";
@@ -1582,8 +1582,8 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
             captureSyntaxError = event => {
               if (event && event.message && String(event.message).includes("Unexpected token")) {
                 nativeLocation = {
-                  line: event.lineno || "inconnue",
-                  column: event.colno || "inconnue",
+                  line: Number(event.lineno) || 0,
+                  column: Number(event.colno) || 0,
                   message: event.message
                 };
               }
@@ -1596,8 +1596,22 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
             probe.remove();
             window.removeEventListener("error", captureSyntaxError, true);
             if (nativeLocation) {
+              const sourceLines = mainScript.textContent.split("\n");
+              const candidateLine = nativeLocation.line - 1;
+              const excerptStart = Math.max(1, candidateLine - 2);
+              const excerptEnd = Math.min(sourceLines.length, candidateLine + 2);
+              const excerpt = candidateLine >= 1 && candidateLine <= sourceLines.length
+                ? sourceLines.slice(excerptStart - 1, excerptEnd)
+                    .map((line, index) => (excerptStart + index) + ": " + line)
+                    .join(" | ")
+                : "position hors script (lignes source=" + sourceLines.length +
+                    ") ; fin=" + sourceLines.slice(-4).map((line, index) =>
+                      (sourceLines.length - 3 + index) + ": " + line
+                    ).join(" | ");
               tokenLocation = "position navigateur ligne=" + nativeLocation.line +
                 " ; colonne=" + nativeLocation.column +
+                " ; ligne source candidate=" + candidateLine +
+                " ; extrait=" + excerpt +
                 " ; message=" + nativeLocation.message;
             } else {
               tokenLocation = "le navigateur n'a pas fourni de position native";
