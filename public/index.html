@@ -1492,7 +1492,7 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
 <script>
 // DIAGNOSTIC TEMPORAIRE — vérification précise du chargement du script principal
 (function () {
-  const BUILD = "AUTH-DIAG-2026-11-25-H";
+  const BUILD = "AUTH-DIAG-2026-11-25-I";
   let panel;
   let firstRuntimeError = "";
   let policyError = "";
@@ -9665,11 +9665,11 @@ function getApplicationEditorLanguage(fileName) {
 function highlightApplicationEditorCode(source,language) {
   const esc=v=>String(v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   const html=/HTML|XML|SVG/.test(language);
-  const re=html?/(<!--[\s\S]*?-->|<\/?[A-Za-z][^>]*>)/g:/(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\x60(?:\\.|[^\x60\\])*\x60|\b\d+(?:\.\d+)?\b|\b(?:const|let|var|function|return|if|else|for|while|class|new|this|import|from|export|default|async|await|try|catch|throw|true|false|null|undefined|def|elif|pass|lambda|print|in|not|and|or|None|True|False)\b)/gi;
+  const re=html?/(\\x3c!--[\s\S]*?-->|<\/?[A-Za-z][^>]*>)/g:/(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\x60(?:\\.|[^\x60\\])*\x60|\b\d+(?:\.\d+)?\b|\b(?:const|let|var|function|return|if|else|for|while|class|new|this|import|from|export|default|async|await|try|catch|throw|true|false|null|undefined|def|elif|pass|lambda|print|in|not|and|or|None|True|False)\b)/gi;
   let out="",pos=0,m;
   while((m=re.exec(String(source)))!==null){
     out+=esc(String(source).slice(pos,m.index));const t=m[0];let c="ide-token-keyword";
-    if (/^(\/\/|#|\/\*|<!--)/.test(t)) c="ide-token-comment";
+    if (/^(\/\/|#|\/\*|\\x3c!--)/.test(t)) c="ide-token-comment";
     else if (/^["'\x60]/.test(t)) c="ide-token-string";
     else if (/^\d/.test(t)) c="ide-token-number";
     else if (/^</.test(t)){out+=esc(t).replace(/(&lt;\/?)([A-Za-z][\w:-]*)/,"$1<span class=\"ide-token-tag\">$2</span>").replace(/([\w:-]+)(=)/g,"<span class=\"ide-token-attribute\">$1</span>$2");pos=m.index+t.length;continue;}
