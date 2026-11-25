@@ -10549,13 +10549,13 @@ function formatDate(value) {
 
 const PRO_ACCESSIBILITY_STORAGE_KEY = "221cloudpro-accessibility-v1";
 function getProAccessibilityPreferences() {
-  const defaults = { textSize: "normal", contrast: false, easyButtons: true };
+  const defaults = { textSize: "normal", contrast: false, easyButtons: false };
   try {
     const saved = JSON.parse(localStorage.getItem(PRO_ACCESSIBILITY_STORAGE_KEY) || "{}");
     return {
       textSize: ["normal", "large", "xlarge"].includes(saved.textSize) ? saved.textSize : defaults.textSize,
       contrast: saved.contrast === true,
-      easyButtons: saved.easyButtons !== false
+      easyButtons: saved.easyButtons === true
     };
   } catch (error) {
     return defaults;
