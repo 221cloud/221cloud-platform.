@@ -9467,7 +9467,87 @@ function refreshApplicationPreview() {
     html = policyTag + html;
   }
 
-    const styleTag = "<style>" + css + "\n</style>";
+    const styleTag = "<style>" + css + "\n
+/* 221CloudPro — cohérence visuelle de l'écran de connexion */
+body.pro-mode #authScreen {
+  background:#f4f5f2;
+  color:#25343a;
+}
+body.pro-mode #authScreen .auth-card {
+  background:#fff;
+  border:1px solid #e3e9e4;
+  border-radius:16px;
+  box-shadow:0 8px 28px rgba(28,48,48,.06);
+  color:#25343a;
+}
+body.pro-mode #authScreen .brand {
+  color:#1c4b50;
+  letter-spacing:-.65px;
+}
+body.pro-mode #authScreen .brand span {
+  color:#1c4b50;
+  background:none;
+  -webkit-text-fill-color:#1c4b50;
+}
+body.pro-mode #authScreen .brand small {
+  color:#9a682e;
+  background:#f7f0e6;
+  border:1px solid #ead9c2;
+}
+body.pro-mode #authScreen h1 {
+  color:#20383e;
+  letter-spacing:-.35px;
+}
+body.pro-mode #authScreen .muted,
+body.pro-mode #authScreen .auth-switch {
+  color:#75817e;
+}
+body.pro-mode #authScreen label {
+  color:#40534f;
+  font-weight:600;
+}
+body.pro-mode #authScreen input,
+body.pro-mode #authScreen select {
+  background:#fff;
+  color:#25383c;
+  border:1px solid #d9e0dc;
+  border-radius:9px;
+  box-shadow:none;
+}
+body.pro-mode #authScreen input::placeholder {
+  color:#9aa49f;
+}
+body.pro-mode #authScreen input:focus,
+body.pro-mode #authScreen select:focus {
+  border-color:#527c78;
+  outline:3px solid rgba(82,124,120,.12);
+}
+body.pro-mode #authScreen button:not(.link) {
+  color:#fff;
+  background:#1c4b50;
+  border-radius:9px;
+  box-shadow:none;
+}
+body.pro-mode #authScreen button:not(.link):hover {
+  background:#285c60;
+  filter:none;
+}
+body.pro-mode #authScreen .link {
+  color:#456b61;
+  background:transparent;
+}
+body.pro-mode #authScreen .notice {
+  background:#f0f4f1;
+  border:1px solid #dfe8e1;
+  border-radius:10px;
+  color:#52625d;
+}
+@media(max-width:520px) {
+  body.pro-mode #authScreen { padding:16px; }
+  body.pro-mode #authScreen .auth-card { padding:23px 20px; }
+}
+
+</style>";
   const scriptTag = "<script>" + js + "<\/script>";
   if (/<\/head>/i.test(html)) html = html.replace(/<\/head>/i, styleTag + "</head>");
   else html = styleTag + html;
