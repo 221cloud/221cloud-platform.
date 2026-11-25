@@ -1492,7 +1492,7 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
 <script>
 // DIAGNOSTIC TEMPORAIRE — vérification précise du chargement du script principal
 (function () {
-  const BUILD = "AUTH-DIAG-2026-11-25-G";
+  const BUILD = "AUTH-DIAG-2026-11-25-H";
   let panel;
   let firstRuntimeError = "";
   let policyError = "";
@@ -1584,10 +1584,18 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
           const sourceHead = sourceLines.slice(0, 4).map((line, index) =>
             (index + 1) + ": " + line
           ).join(" | ");
+          const scriptOuterTail = String(mainScript.outerHTML || "").slice(-500);
+          const nextNode = mainScript.nextSibling;
+          const nextNodeInfo = nextNode
+            ? nextNode.nodeName + ":" + String(nextNode.textContent || "").slice(0, 100)
+            : "aucun";
           tokenLocation = "script sélectionné=" + selectedScriptIndex +
             " ; lignes source=" + sourceLines.length +
             " ; début=" + sourceHead +
-            " ; fin=" + sourceTail;
+            " ; fin=" + sourceTail +
+            " ; parent=" + (mainScript.parentNode && mainScript.parentNode.nodeName) +
+            " ; nœud suivant=" + nextNodeInfo +
+            " ; outerHTML fin=" + scriptOuterTail;
           parserCheck = error.name + ": " + error.message +
             " ; ligne=" + errorLine +
             " ; colonne=" + errorColumn +
