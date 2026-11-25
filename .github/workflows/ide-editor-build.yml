@@ -1,0 +1,43 @@
+name: Build 221Cloud IDE editor
+
+on:
+  push:
+    branches:
+      - feat/ide-language-aware-editor
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ide-editor-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install pinned dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build CodeMirror bundle
+        run: npm run build:ide
+      - name: Commit reproducible lockfile and browser bundle
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json public/assets/ide-editor.js
+          if git diff --cached --quiet; then
+            echo "No generated changes to commit."
+          else
+            git commit -m "Build CodeMirror IDE browser bundle"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
