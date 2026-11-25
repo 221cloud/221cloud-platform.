@@ -1591,7 +1591,7 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
             window.addEventListener("error", captureSyntaxError, true);
             const probe = document.createElement("script");
             if (mainScript.nonce) probe.nonce = mainScript.nonce;
-            probe.textContent = "if (false) {\\n" + mainScript.textContent + "\\n}";
+            probe.textContent = "if (false) {\n" + mainScript.textContent + "\n}";
             document.head.appendChild(probe);
             probe.remove();
             window.removeEventListener("error", captureSyntaxError, true);
