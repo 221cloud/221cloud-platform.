@@ -1563,7 +1563,7 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
     setTimeout(function () {
       const scripts = Array.from(document.scripts);
       const mainScript = scripts.find(script =>
-        script.textContent.includes("window.__221cloudMainStarted = true;")
+        /(?:^|\n)\s*window\.__221cloudMainStarted\s*=\s*true\s*;/.test(script.textContent)
       );
       const started = window.__221cloudMainStarted === true;
       const details = [
