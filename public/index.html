@@ -1534,6 +1534,20 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
     const reason = event.reason;
     showDiagnostic("PROMESSE NON GÉRÉE : " + (reason && reason.message ? reason.message : String(reason)));
   });
+  window.addEventListener("securitypolicyviolation", function (event) {
+    showDiagnostic("SCRIPT BLOQUÉ PAR LA POLITIQUE DU NAVIGATEUR : " +
+      (event.violatedDirective || "directive inconnue") + " ; source : " +
+      (event.blockedURI || "non précisée"));
+  });
+  window.addEventListener("load", function () {
+    setTimeout(function () {
+      if (panel && panel.textContent.indexOf("script indépendant exécuté") !== -1) {
+        showDiagnostic("PAGE CHARGÉE ; fonction register disponible : " +
+          (typeof window.register) + " ; fonction login disponible : " +
+          (typeof window.login));
+      }
+    }, 1000);
+  });
   showDiagnostic("script indépendant exécuté ; vérification en cours…");
 })();
 </script>
