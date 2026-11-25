@@ -9453,41 +9453,41 @@ function getApplicationEditorLanguage(fileName) {
 function highlightApplicationEditorCode(source,language) {
   const esc=v=>String(v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   const html=/HTML|XML|SVG/.test(language);
-  const re=html?/(<!--[\\s\\S]*?-->|<\\/?[A-Za-z][^>]*>)/g:/(\\/\\/[^\\n]*|#[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/|"(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'|\\x60(?:\\\\.|[^\\x60\\\\])*\\x60|\\b\\d+(?:\\.\\d+)?\\b|\\b(?:const|let|var|function|return|if|else|for|while|class|new|this|import|from|export|default|async|await|try|catch|throw|true|false|null|undefined|def|elif|pass|lambda|print|in|not|and|or|None|True|False)\\b)/gi;
+  const re=html?/(<!--[\\s\\S]*?-->|<\/?[A-Za-z][^>]*>)/g:/(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\x60(?:\\.|[^\x60\\])*\x60|\b\d+(?:\.\d+)?\b|\b(?:const|let|var|function|return|if|else|for|while|class|new|this|import|from|export|default|async|await|try|catch|throw|true|false|null|undefined|def|elif|pass|lambda|print|in|not|and|or|None|True|False)\b)/gi;
   let out="",pos=0,m;
   while((m=re.exec(String(source)))!==null){
     out+=esc(String(source).slice(pos,m.index));const t=m[0];let c="ide-token-keyword";
-    if(/^(\\/\\/|#|\\/\\*|<!--)/.test(t))c="ide-token-comment";
-    else if(/^["'\\x60]/.test(t))c="ide-token-string";
-    else if(/^\\d/.test(t))c="ide-token-number";
-    else if(/^</.test(t)){out+=esc(t).replace(/(&lt;\\/?)([A-Za-z][\\w:-]*)/,"$1<span class=\\"ide-token-tag\\">$2</span>").replace(/([\\w:-]+)(=)/g,"<span class=\\"ide-token-attribute\\">$1</span>$2");pos=m.index+t.length;continue;}
+    if (/^(\/\/|#|\/\*|<!--)/.test(t)) c="ide-token-comment";
+    else if (/^["'\x60]/.test(t)) c="ide-token-string";
+    else if (/^\d/.test(t)) c="ide-token-number";
+    else if (/^</.test(t)){out+=esc(t).replace(/(&lt;\/?)([A-Za-z][\w:-]*)/,"$1<span class=\"ide-token-tag\">$2</span>").replace(/([\w:-]+)(=)/g,"<span class=\"ide-token-attribute\">$1</span>$2");pos=m.index+t.length;continue;}
     out+='<span class="'+c+'">'+esc(t)+'</span>';pos=m.index+t.length;
   }
-  out+=esc(String(source).slice(pos));return out+(String(source).endsWith("\\n")?" ":"\\n ");
+  out+=esc(String(source).slice(pos));return out+(String(source).endsWith("\n")?" ":"\n ");
 }
 function syncApplicationEditorScroll(){
   const e=document.getElementById("applicationCodeEditor"),h=document.getElementById("applicationEditorHighlight"),n=document.getElementById("applicationEditorLineNumbers");
   if(!e)return;if(h)h.style.transform="translate("+(-e.scrollLeft)+"px,"+(-e.scrollTop)+"px)";if(n)n.scrollTop=e.scrollTop;
 }
 function updateApplicationEditorDecorations(){
-  const e=document.getElementById("applicationCodeEditor");if(!e)return;const src=e.value,lines=src.split("\\n");
+  const e=document.getElementById("applicationCodeEditor");if(!e)return;const src=e.value,lines=src.split("\n");
   const lang=getApplicationEditorLanguage(applicationEditorState?.activeFile);
   const chip=document.getElementById("applicationEditorLanguage"),stats=document.getElementById("applicationEditorStats"),hi=document.getElementById("applicationEditorHighlight"),nums=document.getElementById("applicationEditorLineNumbers");
   if(chip)chip.textContent=lang;if(stats)stats.textContent=lines.length+" ligne(s) · "+src.length+" caractère(s)";
-  if(hi)hi.innerHTML=highlightApplicationEditorCode(src,lang);if(nums)nums.textContent=lines.map((_,i)=>i+1).join("\\n");syncApplicationEditorScroll();
+  if(hi)hi.innerHTML=highlightApplicationEditorCode(src,lang);if(nums)nums.textContent=lines.map((_,i)=>i+1).join("\n");syncApplicationEditorScroll();
 }
 function showApplicationEditorCompletions(force=false){
   const e=document.getElementById("applicationCodeEditor"),p=document.getElementById("applicationEditorCompletions");if(!e||!p)return;
-  const prefix=e.value.slice(0,e.selectionStart).match(/[A-Za-z_$][\\w$]*$/)?.[0]||"";if(!force&&prefix.length<2){p.hidden=true;return;}
+  const prefix=e.value.slice(0,e.selectionStart).match(/[A-Za-z_$][\w$]*$/)?.[0]||"";if(!force&&prefix.length<2){p.hidden=true;return;}
   const lang=getApplicationEditorLanguage(applicationEditorState?.activeFile),isPy=lang==="Python",isHtml=/HTML|XML|SVG/.test(lang),isCss=lang==="CSS";
-  const items=isPy?["def ","class ","if ","elif ","else:","for ","while ","return ","import ","print()","True","False","None"]:isHtml?["<div></div>","<section></section>","<main></main>","<button></button>","<a href=\\"\\"></a>","<img src=\\"\\" alt=\\"\\">"]:isCss?["display: flex;","display: grid;","position: relative;","justify-content: center;","align-items: center;","@media () {\\n\\n}","color: ;","background: ;"]:["const ","let ","function ","async function ","if () {\\n\\n}","for (const item of items) {\\n\\n}","console.log()","return ","import ","export default "];
+  const items=isPy?["def ","class ","if ","elif ","else:","for ","while ","return ","import ","print()","True","False","None"]:isHtml?["<div></div>","<section></section>","<main></main>","<button></button>","<a href=\"\"></a>","<img src=\"\" alt=\"\">"]:isCss?["display: flex;","display: grid;","position: relative;","justify-content: center;","align-items: center;","@media () {\n\n}","color: ;","background: ;"]:["const ","let ","function ","async function ","if () {\n\n}","for (const item of items) {\n\n}","console.log()","return ","import ","export default "];
   const found=items.filter(x=>!prefix||x.toLowerCase().startsWith(prefix.toLowerCase())).slice(0,8);if(!found.length){p.hidden=true;return;}
   p.innerHTML=found.map((x,i)=>'<button type="button" role="option" onclick="insertApplicationEditorCompletion('+i+')">'+escapeHTML(x)+'</button>').join("");p.dataset.items=JSON.stringify(found);p.hidden=false;
 }
 function insertApplicationEditorCompletion(i){
   const e=document.getElementById("applicationCodeEditor"),p=document.getElementById("applicationEditorCompletions");if(!e||!p)return;
   let a=[];try{a=JSON.parse(p.dataset.items||"[]")}catch(_){}const v=a[i];if(!v)return;
-  const m=e.value.slice(0,e.selectionStart).match(/[A-Za-z_$][\\w$]*$/),start=m?e.selectionStart-m[0].length:e.selectionStart;
+  const m=e.value.slice(0,e.selectionStart).match(/[A-Za-z_$][\w$]*$/),start=m?e.selectionStart-m[0].length:e.selectionStart;
   e.setRangeText(v,start,e.selectionEnd,"end");p.hidden=true;updateApplicationEditorDecorations();e.focus();
 }
 
