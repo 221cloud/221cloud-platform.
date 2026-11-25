@@ -1313,6 +1313,36 @@ body.pro-mode.pro-a11y-buttons #mainContent [tabindex]:focus-visible {
   body.pro-mode .app > header .pro-accessibility-trigger { font-size:12px; padding:9px 8px; }
   body.pro-mode.pro-a11y-text-xlarge #mainContent .grid { grid-template-columns:1fr !important; }
 }
+
+/* 221CloudPro — en-tête mobile sans débordement */
+@media (max-width: 520px) {
+  body.pro-mode .app > header {
+    height: auto;
+    min-height: 68px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  body.pro-mode .app > header .brand {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+  body.pro-mode .app > header .pro-accessibility-trigger,
+  body.pro-mode .app > header button[onclick="logout()"] {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 46px;
+    margin: 0;
+    padding: 10px 8px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-size: 13px;
+    line-height: 1.2;
+  }
+}
 </style>
 
 
