@@ -1575,9 +1575,37 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
           const errorLine = Number.isFinite(error.lineNumber) ? error.lineNumber : "inconnue";
           const errorColumn = Number.isFinite(error.columnNumber) ? error.columnNumber : "inconnue";
           const errorStack = String(error.stack || "").split("\\n").slice(0, 2).join(" | ");
+          let tokenLocation = "localisation introuvable";
+          if (String(error.message).includes("<")) {
+            const source = mainScript.textContent;
+            const boundaries = [0];
+            for (let i = 0; i < source.length; i++) {
+              if (source[i] === "\\n") boundaries.push(i + 1);
+            }
+            boundaries.push(source.length);
+            let low = 0;
+            let high = boundaries.length - 1;
+            while (low < high) {
+              const mid = Math.floor((low + high) / 2);
+              let hasTargetError = false;
+              try {
+                new Function(source.slice(0, boundaries[mid + 1]));
+              } catch (probeError) {
+                hasTargetError = String(probeError.message).includes("<");
+              }
+              if (hasTargetError) high = mid;
+              else low = mid + 1;
+            }
+            const offset = boundaries[Math.min(low, boundaries.length - 1)];
+            const before = source.slice(0, offset);
+            const line = before.split("\\n").length;
+            const excerpt = source.slice(Math.max(0, offset - 100), Math.min(source.length, offset + 180)).replace(/\\s+/g, " ");
+            tokenLocation = "ligne approximative=" + line + " ; extrait=" + excerpt;
+          }
           parserCheck = error.name + ": " + error.message +
             " ; ligne=" + errorLine +
             " ; colonne=" + errorColumn +
+            " ; " + tokenLocation +
             " ; stack=" + errorStack;
         }
       }
