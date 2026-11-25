@@ -1492,7 +1492,7 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
 <script>
 // DIAGNOSTIC TEMPORAIRE — vérification précise du chargement du script principal
 (function () {
-  const BUILD = "AUTH-DIAG-2026-11-25-D";
+  const BUILD = "AUTH-DIAG-2026-11-25-E";
   let panel;
   let firstRuntimeError = "";
   let policyError = "";
@@ -1572,7 +1572,13 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
           new Function(mainScript.textContent);
           parserCheck = "syntaxe acceptée par le moteur JavaScript";
         } catch (error) {
-          parserCheck = error.name + ": " + error.message;
+          const errorLine = Number.isFinite(error.lineNumber) ? error.lineNumber : "inconnue";
+          const errorColumn = Number.isFinite(error.columnNumber) ? error.columnNumber : "inconnue";
+          const errorStack = String(error.stack || "").split("\\n").slice(0, 2).join(" | ");
+          parserCheck = error.name + ": " + error.message +
+            " ; ligne=" + errorLine +
+            " ; colonne=" + errorColumn +
+            " ; stack=" + errorStack;
         }
       }
       const details = [
