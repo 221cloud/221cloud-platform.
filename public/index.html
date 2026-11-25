@@ -1199,6 +1199,143 @@ body.pro-mode #mainContent .pro-shortcut-card.pro-shortcut-soon {
   }
 }
 </style>
+
+<style id="proAccessibilityModeStyles">
+.pro-accessibility-trigger { display:none; }
+body.pro-mode .app > header { gap:8px; }
+body.pro-mode .app > header .pro-accessibility-trigger {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:44px;
+  padding:10px 12px;
+  border:2px solid #31565a;
+  border-radius:12px;
+  background:#e8f0ed;
+  color:#183d42;
+  font-size:14px;
+  font-weight:700;
+}
+body.pro-mode.pro-a11y-text-large #mainContent p,
+body.pro-mode.pro-a11y-text-large #mainContent label,
+body.pro-mode.pro-a11y-text-large #mainContent .muted,
+body.pro-mode.pro-a11y-text-large #mainContent small,
+body.pro-mode.pro-a11y-text-large #mainContent li,
+body.pro-mode.pro-a11y-text-large #mainContent td,
+body.pro-mode.pro-a11y-text-large #mainContent th {
+  font-size:1.125rem !important;
+  line-height:1.65 !important;
+}
+body.pro-mode.pro-a11y-text-large #mainContent button { font-size:1rem !important; }
+body.pro-mode.pro-a11y-text-xlarge #mainContent p,
+body.pro-mode.pro-a11y-text-xlarge #mainContent label,
+body.pro-mode.pro-a11y-text-xlarge #mainContent .muted,
+body.pro-mode.pro-a11y-text-xlarge #mainContent small,
+body.pro-mode.pro-a11y-text-xlarge #mainContent li,
+body.pro-mode.pro-a11y-text-xlarge #mainContent td,
+body.pro-mode.pro-a11y-text-xlarge #mainContent th {
+  font-size:1.25rem !important;
+  line-height:1.7 !important;
+}
+body.pro-mode.pro-a11y-text-xlarge #mainContent button { font-size:1.05rem !important; }
+body.pro-mode.pro-a11y-text-large #mainContent input,
+body.pro-mode.pro-a11y-text-large #mainContent select,
+body.pro-mode.pro-a11y-text-large #mainContent textarea,
+body.pro-mode.pro-a11y-text-xlarge #mainContent input,
+body.pro-mode.pro-a11y-text-xlarge #mainContent select,
+body.pro-mode.pro-a11y-text-xlarge #mainContent textarea { font-size:18px !important; }
+body.pro-mode.pro-a11y-contrast #mainContent { color:#14252a !important; }
+body.pro-mode.pro-a11y-contrast #mainContent h1,
+body.pro-mode.pro-a11y-contrast #mainContent h2,
+body.pro-mode.pro-a11y-contrast #mainContent h3,
+body.pro-mode.pro-a11y-contrast #mainContent strong { color:#102b30 !important; }
+body.pro-mode.pro-a11y-contrast #mainContent p,
+body.pro-mode.pro-a11y-contrast #mainContent label,
+body.pro-mode.pro-a11y-contrast #mainContent .muted,
+body.pro-mode.pro-a11y-contrast #mainContent small,
+body.pro-mode.pro-a11y-contrast #mainContent li,
+body.pro-mode.pro-a11y-contrast #mainContent td,
+body.pro-mode.pro-a11y-contrast #mainContent th,
+body.pro-mode.pro-a11y-contrast #mainContent .pro-tool-copy { color:#172b30 !important; }
+body.pro-mode.pro-a11y-contrast #mainContent .card,
+body.pro-mode.pro-a11y-contrast #mainContent .item-card,
+body.pro-mode.pro-a11y-contrast #mainContent .notice,
+body.pro-mode.pro-a11y-contrast #mainContent .empty {
+  background:#fff !important;
+  border:2px solid #52666a !important;
+  box-shadow:none !important;
+}
+body.pro-mode.pro-a11y-contrast #mainContent .pro-welcome {
+  background:#e5eeea !important;
+  border:2px solid #405b57 !important;
+}
+body.pro-mode.pro-a11y-contrast #mainContent button:not(.danger) {
+  background:#16464b !important;
+  color:#fff !important;
+  border:2px solid #102f34 !important;
+  box-shadow:none !important;
+}
+body.pro-mode.pro-a11y-contrast #mainContent button.danger {
+  background:#7b1f2d !important;
+  color:#fff !important;
+  border:2px solid #50131c !important;
+}
+body.pro-mode.pro-a11y-contrast #mainContent input,
+body.pro-mode.pro-a11y-contrast #mainContent select,
+body.pro-mode.pro-a11y-contrast #mainContent textarea {
+  background:#fff !important;
+  color:#111 !important;
+  border:2px solid #40565b !important;
+}
+body.pro-mode.pro-a11y-contrast #mainContent input::placeholder,
+body.pro-mode.pro-a11y-contrast #mainContent textarea::placeholder { color:#4b5558 !important; opacity:1; }
+body.pro-mode.pro-a11y-contrast #mainContent a { color:#064d79 !important; text-decoration:underline; }
+body.pro-mode.pro-a11y-buttons #mainContent button {
+  min-height:56px !important;
+  border:2px solid #244b50 !important;
+  border-radius:13px !important;
+  font-weight:750 !important;
+}
+body.pro-mode.pro-a11y-buttons #mainContent .pro-shortcut-card {
+  border:3px solid #31565a !important;
+  box-shadow:0 0 0 2px rgba(49,86,90,.12) !important;
+}
+body.pro-mode.pro-a11y-buttons #mainContent button:focus-visible,
+body.pro-mode.pro-a11y-buttons #mainContent a:focus-visible,
+body.pro-mode.pro-a11y-buttons #mainContent input:focus-visible,
+body.pro-mode.pro-a11y-buttons #mainContent select:focus-visible,
+body.pro-mode.pro-a11y-buttons #mainContent textarea:focus-visible,
+body.pro-mode.pro-a11y-buttons #mainContent [tabindex]:focus-visible {
+  outline:4px solid #a35a00 !important;
+  outline-offset:3px !important;
+}
+@media (max-width:480px) {
+  body.pro-mode .app > header .pro-accessibility-trigger { font-size:12px; padding:9px 8px; }
+  body.pro-mode.pro-a11y-text-xlarge #mainContent .grid { grid-template-columns:1fr !important; }
+}
+</style>
+
+
+<style id="proAccessibilitySettingsStyles">
+body.pro-mode #mainContent .pro-a11y-settings { max-width:760px; margin:0 auto; }
+body.pro-mode #mainContent .pro-a11y-settings-heading { margin:4px 0 22px; }
+body.pro-mode #mainContent .pro-a11y-settings .card { background:#fff; border:1px solid #d8e0dc; box-shadow:0 3px 14px rgba(25,55,48,.05); }
+body.pro-mode #mainContent .pro-a11y-settings h2 { margin:0 0 8px; font-size:19px; }
+body.pro-mode #mainContent .pro-a11y-size-options { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:16px; }
+body.pro-mode #mainContent .pro-a11y-size-options button { min-height:76px; display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:5px; text-align:left; }
+body.pro-mode #mainContent .pro-a11y-choice-active { background:#16464b; color:#fff; border:3px solid #0e3438; box-shadow:0 0 0 2px #c0d8ce; }
+body.pro-mode #mainContent .pro-a11y-choice-description { display:block; font-size:12px; font-weight:500; opacity:.95; }
+body.pro-mode #mainContent .pro-a11y-toggle-row { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-top:16px; }
+body.pro-mode #mainContent .pro-a11y-toggle-row strong { flex:1; }
+body.pro-mode #mainContent .pro-a11y-settings-actions { display:flex; flex-wrap:wrap; gap:10px; margin:18px 0; }
+body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
+@media(max-width:520px) {
+  body.pro-mode #mainContent .pro-a11y-size-options { grid-template-columns:1fr; }
+  body.pro-mode #mainContent .pro-a11y-size-options button { min-height:58px; }
+  body.pro-mode #mainContent .pro-a11y-toggle-row { align-items:flex-start; flex-direction:column; }
+}
+</style>
+
 </head>
 
 <body>
@@ -1246,6 +1383,7 @@ body.pro-mode #mainContent .pro-shortcut-card.pro-shortcut-soon {
 <section id="appScreen" class="app hidden">
   <header>
     <div class="brand">221<span>Cloud</span></div>
+    <button class="secondary pro-accessibility-trigger" type="button" onclick="renderProAccessibilitySettings()" aria-label="Ouvrir les réglages d’accessibilité">◉ Accessibilité</button>
     <button class="secondary" onclick="logout()">Déconnexion</button>
   </header>
 
@@ -10407,6 +10545,70 @@ function formatDate(value) {
   if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleDateString("fr-FR");
 }
+
+
+const PRO_ACCESSIBILITY_STORAGE_KEY = "221cloudpro-accessibility-v1";
+function getProAccessibilityPreferences() {
+  const defaults = { textSize: "normal", contrast: false, easyButtons: false };
+  try {
+    const saved = JSON.parse(localStorage.getItem(PRO_ACCESSIBILITY_STORAGE_KEY) || "{}");
+    return {
+      textSize: ["normal", "large", "xlarge"].includes(saved.textSize) ? saved.textSize : defaults.textSize,
+      contrast: saved.contrast === true,
+      easyButtons: saved.easyButtons === true
+    };
+  } catch (error) {
+    return defaults;
+  }
+}
+function applyProAccessibilityPreferences() {
+  if (!document.body.classList.contains("pro-mode")) return;
+  const prefs = getProAccessibilityPreferences();
+  document.body.classList.toggle("pro-a11y-text-large", prefs.textSize === "large");
+  document.body.classList.toggle("pro-a11y-text-xlarge", prefs.textSize === "xlarge");
+  document.body.classList.toggle("pro-a11y-contrast", prefs.contrast);
+  document.body.classList.toggle("pro-a11y-buttons", prefs.easyButtons);
+}
+function setProAccessibilityPreference(key, value) {
+  const prefs = getProAccessibilityPreferences();
+  if (!["textSize", "contrast", "easyButtons"].includes(key)) return;
+  prefs[key] = value;
+  try {
+    localStorage.setItem(PRO_ACCESSIBILITY_STORAGE_KEY, JSON.stringify(prefs));
+  } catch (error) {
+    console.warn("Les préférences d’accessibilité ne peuvent pas être mémorisées sur cet appareil.", error);
+  }
+  applyProAccessibilityPreferences();
+  if (document.getElementById("proAccessibilitySettings")) renderProAccessibilitySettings();
+}
+function resetProAccessibilityPreferences() {
+  try { localStorage.removeItem(PRO_ACCESSIBILITY_STORAGE_KEY); } catch (error) {}
+  applyProAccessibilityPreferences();
+  renderProAccessibilitySettings();
+}
+function renderProAccessibilitySettings() {
+  const main = document.getElementById("mainContent");
+  if (!main) return;
+  const prefs = getProAccessibilityPreferences();
+  const sizeButton = (value, label, description) =>
+    '<button type="button" class="' + (prefs.textSize === value ? 'pro-a11y-choice-active' : 'secondary') + '" aria-pressed="' + (prefs.textSize === value ? 'true' : 'false') + '" onclick="setProAccessibilityPreference(\'textSize\',\'' + value + '\')">' + label + '<span class="pro-a11y-choice-description">' + description + '</span></button>';
+  main.innerHTML = [
+    '<section id="proAccessibilitySettings" class="pro-a11y-settings">',
+    '<div class="pro-a11y-settings-heading"><span class="pro-eyebrow">CONFORT DE LECTURE</span><h1 class="page-title">Accessibilité</h1><p class="page-subtitle">Adaptez l’affichage à votre confort visuel. Vos choix sont conservés sur cet appareil.</p></div>',
+    '<section class="card"><h2>Taille du texte</h2><p class="muted">Choisissez une taille plus facile à lire.</p><div class="pro-a11y-size-options">',
+    sizeButton("normal", "Standard", "Taille habituelle"),
+    sizeButton("large", "Grand", "Texte agrandi"),
+    sizeButton("xlarge", "Très grand", "Agrandissement renforcé"),
+    '</div></section>',
+    '<section class="card"><h2>Contraste renforcé</h2><p class="muted">Renforce les couleurs du texte, des cartes et des champs pour mieux les distinguer.</p><div class="pro-a11y-toggle-row"><strong>Activer le contraste renforcé</strong><button type="button" class="' + (prefs.contrast ? 'pro-a11y-choice-active' : 'secondary') + '" aria-pressed="' + (prefs.contrast ? 'true' : 'false') + '" onclick="setProAccessibilityPreference(\'contrast\',' + (!prefs.contrast) + ')">' + (prefs.contrast ? 'Activé' : 'Désactivé') + '</button></div></section>',
+    '<section class="card"><h2>Boutons plus visibles</h2><p class="muted">Agrandit les zones tactiles et accentue les contours et le repérage au clavier.</p><div class="pro-a11y-toggle-row"><strong>Faciliter le repérage des boutons</strong><button type="button" class="' + (prefs.easyButtons ? 'pro-a11y-choice-active' : 'secondary') + '" aria-pressed="' + (prefs.easyButtons ? 'true' : 'false') + '" onclick="setProAccessibilityPreference(\'easyButtons\',' + (!prefs.easyButtons) + ')">' + (prefs.easyButtons ? 'Activé' : 'Désactivé') + '</button></div></section>',
+    '<div class="pro-a11y-settings-actions"><button type="button" class="secondary" onclick="resetProAccessibilityPreferences()">Réinitialiser</button><button type="button" onclick="renderProPage()">Retour à l’accueil</button></div>',
+    '<p class="muted pro-a11y-note">Ces réglages améliorent le confort visuel. Ils ne remplacent pas les fonctions d’assistance du téléphone, comme VoiceOver ou le zoom de l’écran.</p>',
+    '</section>'
+  ].join("");
+}
+
+applyProAccessibilityPreferences();
 
 checkSession();
 
