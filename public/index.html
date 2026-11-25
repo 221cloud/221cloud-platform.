@@ -9627,6 +9627,56 @@ body.pro-mode #mainContent .storage-thumbnail {
 body.pro-mode #mainContent .storage-thumbnail-fallback {
   color:#667873;
 }
+
+/* 221CloudPro — états interactifs et accessibilité */
+body.pro-mode #mainContent button:disabled,
+body.pro-mode #mainContent button[aria-disabled="true"],
+body.pro-mode #authScreen button:disabled,
+body.pro-mode #authScreen button[aria-disabled="true"] {
+  opacity:.58;
+  cursor:not-allowed;
+  filter:none;
+  transform:none;
+  box-shadow:none;
+}
+body.pro-mode #mainContent .pro-primary-action:hover {
+  background:#285c60 !important;
+  filter:none;
+}
+body.pro-mode #mainContent .pro-primary-action:active {
+  background:#173f43 !important;
+  transform:translateY(1px);
+}
+body.pro-mode #mainContent .pro-voice-preview:hover {
+  border-color:#cbd9d0;
+  background:#f8faf8;
+  box-shadow:0 3px 10px rgba(28,48,48,.06);
+}
+body.pro-mode #mainContent .pro-shortcut-card:hover {
+  border-color:#cbd9d0;
+  background:#fafbf9;
+  box-shadow:0 3px 10px rgba(28,48,48,.05);
+}
+body.pro-mode #mainContent .pro-shortcut-card:active,
+body.pro-mode #mainContent .pro-voice-preview:active {
+  transform:translateY(1px);
+}
+body.pro-mode #mainContent button:focus-visible,
+body.pro-mode #authScreen button:focus-visible,
+body.pro-mode #mainContent a:focus-visible,
+body.pro-mode #authScreen a:focus-visible {
+  outline:3px solid rgba(55,111,96,.28);
+  outline-offset:2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  body.pro-mode #mainContent *,
+  body.pro-mode #authScreen * {
+    scroll-behavior:auto !important;
+    animation-duration:.01ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:.01ms !important;
+  }
+}
 </style>";
   const scriptTag = "<script>" + js + "<\/script>";
   if (/<\/head>/i.test(html)) html = html.replace(/<\/head>/i, styleTag + "</head>");
