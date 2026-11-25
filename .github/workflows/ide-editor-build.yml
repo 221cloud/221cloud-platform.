@@ -30,6 +30,8 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Build CodeMirror bundle
         run: npm run build:ide
+      - name: Check embedded application scripts and bundle size
+        run: npm run check:inline-scripts
       - name: Commit reproducible lockfile and browser bundle
         run: |
           git config user.name "github-actions[bot]"
