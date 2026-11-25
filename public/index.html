@@ -1078,6 +1078,10 @@ const IS_PRO_MODE = window.location.pathname === "/pro" || window.location.pathn
 if (IS_PRO_MODE) {
   document.body.classList.add("pro-mode");
   document.title = "221Cloud Pro";
+  const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+  if (themeColorMeta) themeColorMeta.setAttribute("content", "#edf1ed");
+  const statusBarMeta = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+  if (statusBarMeta) statusBarMeta.setAttribute("content", "default");
   document.querySelectorAll(".auth-card .brand, #appScreen header .brand").forEach(el => {
     el.innerHTML = '<img class="brand-mark" src="/icons/221cloud-pro.svg" alt="" width="38" height="38"><span>221Cloud</span><small>Pro</small>';
   });
