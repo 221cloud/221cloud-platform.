@@ -9900,7 +9900,7 @@ async function toggleApplicationCodeMirror(forceEnabled) {
       if (!applicationCodeMirrorLoader) {
         applicationCodeMirrorLoader = new Promise((resolve, reject) => {
           const script = document.createElement("script");
-          script.src = "/assets/ide-editor.js";
+          script.src = "/assets/ide-editor.js?v=20261125-1";
           script.async = true;
           script.onload = () => window.CloudIDE221 ? resolve(window.CloudIDE221) : reject(new Error("Le module CodeMirror n’a pas été initialisé."));
           script.onerror = () => reject(new Error("Impossible de charger CodeMirror. Vérifiez votre connexion puis réessayez."));
@@ -9922,6 +9922,7 @@ async function toggleApplicationCodeMirror(forceEnabled) {
     const status = document.getElementById("applicationSaveStatus");
     if (status) status.textContent = "CodeMirror activé. Les modifications restent synchronisées avec la sauvegarde habituelle.";
   } catch (error) {
+    applicationCodeMirrorLoader = null;
     applicationCodeMirrorEnabled = false;
     host.hidden = true;
     editor.hidden = false;
