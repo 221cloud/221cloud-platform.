@@ -1,14 +1,6 @@
 import { basicSetup } from "codemirror";
 import { EditorView } from "@codemirror/view";
 import { Compartment, EditorState } from "@codemirror/state";
-import { javascript } from "@codemirror/lang-javascript";
-import { html } from "@codemirror/lang-html";
-import { css } from "@codemirror/lang-css";
-import { python } from "@codemirror/lang-python";
-import { json } from "@codemirror/lang-json";
-import { markdown } from "@codemirror/lang-markdown";
-import { sql } from "@codemirror/lang-sql";
-import { xml } from "@codemirror/lang-xml";
 import { oneDark } from "@codemirror/theme-one-dark";
 
 const editorTheme = EditorView.theme({
@@ -45,24 +37,28 @@ const editorTheme = EditorView.theme({
   }
 }, { dark: true });
 
-function languageForFile(fileName = "") {
+async function languageForFile(fileName = "") {
   const extension = String(fileName).split(".").pop().toLowerCase();
-  if (["html", "htm"].includes(extension)) return html();
-  if (extension === "css") return css();
+  if (["html", "htm"].includes(extension)) return (await import("@codemirror/lang-html")).html();
+  if (extension === "css") return (await import("@codemirror/lang-css")).css();
   if (["js", "mjs", "cjs", "ts", "tsx", "jsx"].includes(extension)) {
-    return javascript({ typescript: ["ts", "tsx"].includes(extension), jsx: ["jsx", "tsx"].includes(extension) });
+    return (await import("@codemirror/lang-javascript")).javascript({
+      typescript: ["ts", "tsx"].includes(extension),
+      jsx: ["jsx", "tsx"].includes(extension)
+    });
   }
-  if (["py", "pyw"].includes(extension)) return python();
-  if (["json", "jsonc"].includes(extension)) return json();
-  if (["md", "markdown", "mdx"].includes(extension)) return markdown();
-  if (["sql"].includes(extension)) return sql();
-  if (["xml", "svg"].includes(extension)) return xml();
+  if (["py", "pyw"].includes(extension)) return (await import("@codemirror/lang-python")).python();
+  if (["json", "jsonc"].includes(extension)) return (await import("@codemirror/lang-json")).json();
+  if (["md", "markdown", "mdx"].includes(extension)) return (await import("@codemirror/lang-markdown")).markdown();
+  if (extension === "sql") return (await import("@codemirror/lang-sql")).sql();
+  if (["xml", "svg"].includes(extension)) return (await import("@codemirror/lang-xml")).xml();
   return [];
 }
 
-export function mountEditor({ host, value = "", fileName = "", onChange = () => {}, readOnly = false } = {}) {
+async function mountEditor({ host, value = "", fileName = "", onChange = () => {}, readOnly = false } = {}) {
   if (!(host instanceof HTMLElement)) throw new TypeError("Un conteneur HTML est requis pour l’éditeur.");
   if (host.__cloudIDEView) host.__cloudIDEView.destroy();
+  const languageExtension = await languageForFile(fileName);
 
   const editableCompartment = new Compartment();
   const readOnlyCompartment = new Compartment();
@@ -72,7 +68,7 @@ export function mountEditor({ host, value = "", fileName = "", onChange = () => 
       basicSetup,
       oneDark,
       editorTheme,
-      languageForFile(fileName),
+      languageExtension,
       EditorView.lineWrapping,
       EditorView.contentAttributes.of({ "aria-label": "Éditeur de code", spellcheck: "false" }),
       readOnlyCompartment.of(EditorState.readOnly.of(Boolean(readOnly))),
@@ -107,3 +103,6 @@ export function mountEditor({ host, value = "", fileName = "", onChange = () => 
     view
   };
 }
+
+
+globalThis.CloudIDE221 = { mountEditor };
