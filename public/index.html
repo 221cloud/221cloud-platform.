@@ -1432,10 +1432,10 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
       <input id="loginEmail" type="email" placeholder="nom@exemple.com">
       <label>Mot de passe</label>
       <input id="loginPassword" type="password" placeholder="Votre mot de passe">
-      <button id="loginButton" onclick="login()">Se connecter</button>
+      <button id="loginButton" type="button" onclick="login()">Se connecter</button>
       <div class="auth-switch">
         Pas encore de compte ?
-        <button class="link" onclick="showAuthForm('register')">Créer un compte</button>
+        <button id="showRegisterButton" class="link" type="button" onclick="showAuthForm('register')">Créer un compte</button>
       </div>
     </div>
 
@@ -1450,10 +1450,10 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
       <input id="registerPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" placeholder="12 à 128 caractères" required>
       <label>Confirmer le mot de passe</label>
       <input id="registerConfirmPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" placeholder="Saisissez à nouveau le mot de passe" required>
-      <button id="registerButton" onclick="register()">Créer mon compte</button>
+      <button id="registerButton" type="button" onclick="register()">Créer mon compte</button>
       <div class="auth-switch">
         Déjà inscrit ?
-        <button class="link" onclick="showAuthForm('login')">Se connecter</button>
+        <button id="showLoginButton" class="link" type="button" onclick="showAuthForm('login')">Se connecter</button>
       </div>
     </div>
     <div id="authMessage" class="notice hidden"></div>
@@ -1487,8 +1487,155 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
   <footer>221Cloud — Votre espace numérique · <button class="link" type="button" onclick="showPage('about')">À propos</button></footer>
 </section>
 
+<div id="221cloud-static-preview-check" style="position:fixed;z-index:2147483646;top:8px;left:8px;right:8px;padding:10px;border:2px solid #16a34a;border-radius:8px;background:#052e16;color:#fff;font:13px Arial,sans-serif;text-align:center">TEST HTML 221CLOUD — VERSION DE PRÉVISUALISATION</div>
+
 <script>
+// DIAGNOSTIC TEMPORAIRE — vérification précise du chargement du script principal
+(function () {
+  const BUILD = "AUTH-DIAG-2026-11-25-H";
+  let panel;
+  let firstRuntimeError = "";
+  let policyError = "";
+
+  function showDiagnostic(message) {
+    try {
+      if (!panel) {
+        panel = document.createElement("div");
+        panel.id = "authRuntimeDiagnostic";
+        panel.style.cssText = "position:fixed;z-index:2147483647;left:8px;right:8px;bottom:8px;padding:12px;border:2px solid #f0b429;border-radius:10px;background:#101827;color:#fff;font:13px/1.45 Arial,sans-serif;white-space:pre-wrap;max-height:42vh;overflow:auto";
+        document.body.appendChild(panel);
+      }
+      panel.textContent = "Diagnostic temporaire 221Cloud [" + BUILD + "] : " + message;
+    } catch (e) {}
+  }
+
+  window.__221cloudAuthDiagnostic = showDiagnostic;
+
+  window.showAuthForm = function (form) {
+    const loginForm = document.getElementById("loginForm");
+    const registerForm = document.getElementById("registerForm");
+    const authMessage = document.getElementById("authMessage");
+    if (loginForm) loginForm.classList.toggle("hidden", form !== "login");
+    if (registerForm) registerForm.classList.toggle("hidden", form !== "register");
+    if (authMessage) authMessage.classList.add("hidden");
+  };
+
+  document.addEventListener("click", function (event) {
+    const target = event.target && event.target.closest
+      ? event.target.closest("button, a, [role='button'], input[type='submit'], [onclick]")
+      : event.target;
+    const label = target
+      ? (target.innerText || target.textContent || target.getAttribute("aria-label") || target.tagName || "élément").trim().slice(0, 100)
+      : "zone inconnue";
+    showDiagnostic("CLIC DÉTECTÉ : " + label);
+  }, true);
+
+  window.addEventListener("error", function (event) {
+    if (event.target && event.target !== window) {
+      firstRuntimeError = "ERREUR DE RESSOURCE : " +
+        (event.target.src || event.target.href || event.target.tagName || "ressource inconnue");
+    } else {
+      firstRuntimeError = "ERREUR JAVASCRIPT : " +
+        (event.message || "message indisponible") +
+        (event.filename ? " ; fichier : " + event.filename : "") +
+        (event.lineno ? " ; ligne : " + event.lineno : "") +
+        (event.colno ? " ; colonne : " + event.colno : "");
+    }
+    showDiagnostic(firstRuntimeError);
+  }, true);
+
+  window.addEventListener("unhandledrejection", function (event) {
+    const reason = event.reason;
+    firstRuntimeError = "PROMESSE NON GÉRÉE : " +
+      (reason && reason.message ? reason.message : String(reason));
+    showDiagnostic(firstRuntimeError);
+  });
+
+  function reportPolicyBlock(event) {
+    policyError = (event.violatedDirective || "directive inconnue") +
+      " ; source bloquée : " + (event.blockedURI || "non précisée");
+    showDiagnostic("SCRIPT/POLITIQUE BLOQUÉE : " + policyError);
+  }
+  document.addEventListener("securitypolicyviolation", reportPolicyBlock, true);
+  window.addEventListener("securitypolicyviolation", reportPolicyBlock, true);
+
+  window.addEventListener("load", function () {
+    setTimeout(function () {
+      const scripts = Array.from(document.scripts);
+      const mainScript = scripts.find(script =>
+        /(?:^|\n)\s*window\.__221cloudMainStarted\s*=\s*true\s*;/.test(script.textContent)
+      );
+      const started = window.__221cloudMainStarted === true;
+      let parserCheck = "script principal absent";
+      if (mainScript) {
+        try {
+          new Function(mainScript.textContent);
+          parserCheck = "syntaxe acceptée par le moteur JavaScript";
+        } catch (error) {
+          const errorLine = Number.isFinite(error.lineNumber) ? error.lineNumber : "inconnue";
+          const errorColumn = Number.isFinite(error.columnNumber) ? error.columnNumber : "inconnue";
+          const errorStack = String(error.stack || "").split("\\n").slice(0, 2).join(" | ");
+          let tokenLocation = "localisation introuvable";
+          const sourceLines = mainScript.textContent.split("\n");
+          const sourceTail = sourceLines.slice(-6).map((line, index) =>
+            (sourceLines.length - 5 + index) + ": " + line
+          ).join(" | ");
+          const selectedScriptIndex = scripts.indexOf(mainScript);
+          const sourceHead = sourceLines.slice(0, 4).map((line, index) =>
+            (index + 1) + ": " + line
+          ).join(" | ");
+          const scriptOuterTail = String(mainScript.outerHTML || "").slice(-500);
+          const nextNode = mainScript.nextSibling;
+          const nextNodeInfo = nextNode
+            ? nextNode.nodeName + ":" + String(nextNode.textContent || "").slice(0, 100)
+            : "aucun";
+          tokenLocation = "script sélectionné=" + selectedScriptIndex +
+            " ; lignes source=" + sourceLines.length +
+            " ; début=" + sourceHead +
+            " ; fin=" + sourceTail +
+            " ; parent=" + (mainScript.parentNode && mainScript.parentNode.nodeName) +
+            " ; nœud suivant=" + nextNodeInfo +
+            " ; outerHTML fin=" + scriptOuterTail;
+          parserCheck = error.name + ": " + error.message +
+            " ; ligne=" + errorLine +
+            " ; colonne=" + errorColumn +
+            " ; " + tokenLocation +
+            " ; stack=" + errorStack;
+        }
+      }
+      const details = [
+        "HTML diagnostic=" + BUILD,
+        "balises script=" + scripts.length,
+        "scripts DOM=" + scripts.map((script, index) => index + ":" + script.textContent.length + " caractères").join(", "),
+        "test indépendant avant script principal=" + (window.__221cloudPreMainProbe === true),
+        "script principal=" + (mainScript ? "présent (" + mainScript.textContent.length + " caractères)" : "ABSENT"),
+        "compilation du script principal=" + parserCheck,
+        "script principal démarré=" + started,
+        "register=" + typeof window.register,
+        "login=" + typeof window.login,
+        "erreur=" + (firstRuntimeError || "aucune capturée"),
+        "violation CSP=" + (policyError || "aucune capturée")
+      ];
+      showDiagnostic(details.join(" ; "));
+    }, 1500);
+  });
+
+  showDiagnostic("script de diagnostic exécuté ; attente du script principal…");
+})();
+</script>
+
+<script>
+// TEST INDÉPENDANT — doit s'exécuter avant le script principal
+window.__221cloudPreMainProbe = true;
+if (window.__221cloudAuthDiagnostic) {
+  window.__221cloudAuthDiagnostic("TEST INDÉPENDANT AVANT SCRIPT PRINCIPAL : exécuté");
+}
+</script>
+
+<script>
+window.__221cloudMainStarted = true;
 const API = "/api";
+if (window.__221cloudAuthDiagnostic) window.__221cloudAuthDiagnostic("script principal démarré ; diagnostic en cours…");
 const IS_PRO_MODE = window.location.pathname === "/pro" || window.location.pathname === "/pro/";
 if (IS_PRO_MODE) {
   document.body.classList.add("pro-mode");
@@ -1904,6 +2051,26 @@ async function login() {
   }
 }
 
+// Exposer explicitement les fonctions appelées par les attributs onclick HTML.
+window.showAuthForm = showAuthForm;
+window.login = login;
+window.register = register;
+
+if (window.__221cloudAuthDiagnostic) {
+  const ids = ["loginButton", "registerButton", "showRegisterButton", "showLoginButton"];
+  const states = ids.map(id => {
+    const element = document.getElementById(id);
+    return id + "=" + (element ? "présent" : "ABSENT");
+  });
+  window.__221cloudAuthDiagnostic("script exécuté ; " + states.join(" ; ") +
+    ". Touchez ensuite un bouton pour vérifier la réaction.");
+}
+document.addEventListener("click", function (event) {
+  const button = event.target.closest("#loginButton, #registerButton, #showRegisterButton, #showLoginButton");
+  if (button && window.__221cloudAuthDiagnostic) {
+    window.__221cloudAuthDiagnostic("toucher détecté sur " + button.id + " ; le navigateur reçoit bien le clic.");
+  }
+}, true);
 async function logout() {
   if (!confirmLeaveApplicationEditor()) return;
   try {
@@ -10895,6 +11062,16 @@ if ("serviceWorker" in navigator) {
     });
   });
 }
+</script>
+<script>
+(function () {
+  const started = window.__221cloudMainStarted === true;
+  const registerType = typeof window.register;
+  const loginType = typeof window.login;
+  const message = "TEST APRÈS SCRIPT PRINCIPAL : démarré=" + started +
+    " ; register=" + registerType + " ; login=" + loginType;
+  if (window.__221cloudAuthDiagnostic) window.__221cloudAuthDiagnostic(message);
+})();
 </script>
 </body>
 </html>
