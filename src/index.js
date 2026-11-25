@@ -180,8 +180,6 @@ async function verifyPassword(password, stored) {
       iterationCount > ITERATIONS
     ) return false;
 
-    if (!Number.isSafeInteger(iterationCount) || iterationCount < 1 || iterationCount > ITERATIONS) return false;
-
     const key = await crypto.subtle.importKey(
       "raw",
       new TextEncoder().encode(password),
