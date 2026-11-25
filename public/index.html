@@ -1213,6 +1213,41 @@ body.pro-mode #mainContent .pro-shortcut-card.pro-shortcut-soon {
 .ide-completions button:hover,.ide-completions button:focus{background:#edf4ef!important;outline:2px solid #527c78}
 @media(max-width:600px){.ide-editor-shell{max-height:55vh}}
 
+@media(max-width:600px){
+  .ide-editor-toolbar{align-items:stretch}
+  .ide-editor-toolbar .ide-language-chip{align-self:flex-start}
+  .ide-editor-toolbar button{min-height:44px;flex:1 1 100%}
+  .ide-editor-shell{min-height:260px;max-height:58vh;border-radius:8px}
+  .ide-line-numbers{flex-basis:36px;padding-left:5px;padding-right:6px;font-size:12px}
+  .ide-highlight{inset-inline-start:36px;padding-left:12px;font-size:14px}
+  .ide-editor-shell textarea#applicationCodeEditor{font-size:14px!important;min-height:260px;padding-left:12px;padding-right:12px}
+  .ide-completions{left:42px;right:8px;max-width:none;max-height:35vh}
+  .ide-completions button{min-height:42px;font-size:14px}
+}
+.ide-editor-shell:focus-within{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.18)}
+.ide-editor-shell textarea#applicationCodeEditor:focus{outline:none}
+.ide-editor-toolbar button:focus-visible,
+.ide-completions button:focus-visible,
+#mainContent button:focus-visible,
+#mainContent input:focus-visible,
+#mainContent select:focus-visible{
+  outline:3px solid #f0b429!important;
+  outline-offset:2px!important;
+}
+body.pro-a11y-contrast .ide-editor-shell{border:2px solid #111827;background:#fff}
+body.pro-a11y-contrast .ide-line-numbers{color:#263238;background:#e5e7eb;border-right:2px solid #374151}
+body.pro-a11y-contrast .ide-highlight{color:#111827}
+body.pro-a11y-contrast .ide-token-keyword{color:#4c1d95;font-weight:800}
+body.pro-a11y-contrast .ide-token-string{color:#14532d;font-weight:700}
+body.pro-a11y-contrast .ide-token-comment{color:#475569;font-weight:600}
+body.pro-a11y-contrast .ide-token-number{color:#9a3412;font-weight:700}
+body.pro-a11y-contrast .ide-token-tag{color:#075985;font-weight:800}
+body.pro-a11y-contrast .ide-token-attribute{color:#854d0e;font-weight:800}
+body.pro-a11y-buttons .ide-editor-toolbar button,
+body.pro-a11y-buttons .ide-completions button{min-height:48px;border:2px solid #183d42!important}
+@media(prefers-reduced-motion:reduce){
+  .ide-editor-shell,.ide-editor-toolbar button{transition:none!important}
+}
 </style>
 
 <style id="proAccessibilityModeStyles">
