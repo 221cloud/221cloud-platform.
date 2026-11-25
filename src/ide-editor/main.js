@@ -1,6 +1,6 @@
 import { basicSetup } from "codemirror";
 import { EditorView } from "@codemirror/view";
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import { javascript } from "@codemirror/lang-javascript";
 import { html } from "@codemirror/lang-html";
 import { css } from "@codemirror/lang-css";
@@ -64,6 +64,8 @@ export function mountEditor({ host, value = "", fileName = "", onChange = () => 
   if (!(host instanceof HTMLElement)) throw new TypeError("Un conteneur HTML est requis pour l’éditeur.");
   if (host.__cloudIDEView) host.__cloudIDEView.destroy();
 
+  const editableCompartment = new Compartment();
+  const readOnlyCompartment = new Compartment();
   const state = EditorState.create({
     doc: String(value),
     extensions: [
@@ -72,8 +74,8 @@ export function mountEditor({ host, value = "", fileName = "", onChange = () => 
       editorTheme,
       languageForFile(fileName),
       EditorView.lineWrapping,
-      EditorState.readOnly.of(Boolean(readOnly)),
-      EditorView.editable.of(!readOnly),
+      readOnlyCompartment.of(EditorState.readOnly.of(Boolean(readOnly))),
+      editableCompartment.of(EditorView.editable.of(!readOnly)),
       EditorView.updateListener.of(update => {
         if (update.docChanged) onChange(update.state.doc.toString());
       })
@@ -92,7 +94,10 @@ export function mountEditor({ host, value = "", fileName = "", onChange = () => 
     },
     focus: () => view.focus(),
     setReadOnly: nextReadOnly => view.dispatch({
-      effects: EditorView.editable.of(!nextReadOnly)
+      effects: [
+        readOnlyCompartment.reconfigure(EditorState.readOnly.of(Boolean(nextReadOnly))),
+        editableCompartment.reconfigure(EditorView.editable.of(!nextReadOnly))
+      ]
     }),
     destroy: () => {
       view.destroy();
