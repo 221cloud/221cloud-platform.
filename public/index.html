@@ -1493,6 +1493,7 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
 // DIAGNOSTIC TEMPORAIRE — script indépendant pour tester l’exécution JavaScript
 (function () {
   let panel;
+  let firstRuntimeError = "";
   function showDiagnostic(message) {
     try {
       if (!panel) {
@@ -1527,8 +1528,9 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
     showDiagnostic("CLIC DÉTECTÉ : " + label);
   }, true);
   window.addEventListener("error", function (event) {
-    showDiagnostic("ERREUR JavaScript : " + (event.message || "message indisponible") +
-      (event.lineno ? " (ligne " + event.lineno + ")" : ""));
+    firstRuntimeError = "ERREUR JavaScript : " + (event.message || "message indisponible") +
+      (event.lineno ? " (ligne " + event.lineno + ")" : "");
+    showDiagnostic(firstRuntimeError);
   });
   window.addEventListener("unhandledrejection", function (event) {
     const reason = event.reason;
@@ -1544,9 +1546,9 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
   window.addEventListener("load", function () {
     setTimeout(function () {
       if (panel && panel.textContent.indexOf("script indépendant exécuté") !== -1) {
-        showDiagnostic("PAGE CHARGÉE ; fonction register disponible : " +
+        showDiagnostic(firstRuntimeError || ("PAGE CHARGÉE ; fonction register disponible : " +
           (typeof window.register) + " ; fonction login disponible : " +
-          (typeof window.login));
+          (typeof window.login)));
       }
     }, 1000);
   });
