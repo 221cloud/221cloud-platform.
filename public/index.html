@@ -1492,7 +1492,7 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
 <script>
 // DIAGNOSTIC TEMPORAIRE — vérification précise du chargement du script principal
 (function () {
-  const BUILD = "AUTH-DIAG-2026-11-25-C";
+  const BUILD = "AUTH-DIAG-2026-11-25-D";
   let panel;
   let firstRuntimeError = "";
   let policyError = "";
@@ -1566,11 +1566,21 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
         /(?:^|\n)\s*window\.__221cloudMainStarted\s*=\s*true\s*;/.test(script.textContent)
       );
       const started = window.__221cloudMainStarted === true;
+      let parserCheck = "script principal absent";
+      if (mainScript) {
+        try {
+          new Function(mainScript.textContent);
+          parserCheck = "syntaxe acceptée par le moteur JavaScript";
+        } catch (error) {
+          parserCheck = error.name + ": " + error.message;
+        }
+      }
       const details = [
         "HTML diagnostic=" + BUILD,
         "balises script=" + scripts.length,
         "test indépendant avant script principal=" + (window.__221cloudPreMainProbe === true),
         "script principal=" + (mainScript ? "présent (" + mainScript.textContent.length + " caractères)" : "ABSENT"),
+        "compilation du script principal=" + parserCheck,
         "script principal démarré=" + started,
         "register=" + typeof window.register,
         "login=" + typeof window.login,
