@@ -1534,11 +1534,13 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
     const reason = event.reason;
     showDiagnostic("PROMESSE NON GÉRÉE : " + (reason && reason.message ? reason.message : String(reason)));
   });
-  window.addEventListener("securitypolicyviolation", function (event) {
+  function reportPolicyBlock(event) {
     showDiagnostic("SCRIPT BLOQUÉ PAR LA POLITIQUE DU NAVIGATEUR : " +
       (event.violatedDirective || "directive inconnue") + " ; source : " +
       (event.blockedURI || "non précisée"));
-  });
+  }
+  document.addEventListener("securitypolicyviolation", reportPolicyBlock);
+  window.addEventListener("securitypolicyviolation", reportPolicyBlock);
   window.addEventListener("load", function () {
     setTimeout(function () {
       if (panel && panel.textContent.indexOf("script indépendant exécuté") !== -1) {
