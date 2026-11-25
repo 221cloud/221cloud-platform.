@@ -11,7 +11,7 @@ for (const [, attributes, code] of blocks) {
     new Function(code);
     checked++;
   } catch (error) {
-    console.error(\`Inline script \${checked + 1}: \${error.message}\`);
+    console.error("Inline script " + (checked + 1) + ": " + error.message);
     process.exitCode = 1;
   }
 }
@@ -19,5 +19,5 @@ for (const [, attributes, code] of blocks) {
 if (process.exitCode) process.exit(process.exitCode);
 const bundlePath = "public/assets/ide-editor.js";
 const bundle = readFileSync(bundlePath);
-console.log(\`Syntaxe HTML/JavaScript : \${checked} bloc(s) intégré(s) vérifié(s).\`);
-console.log(\`Bundle CodeMirror : \${statSync(bundlePath).size} octets ; gzip : \${gzipSync(bundle).length} octets.\`);
+console.log("Syntaxe HTML/JavaScript : " + checked + " bloc(s) intégré(s) vérifié(s).");
+console.log("Bundle CodeMirror : " + statSync(bundlePath).size + " octets ; gzip : " + gzipSync(bundle).length + " octets.");
