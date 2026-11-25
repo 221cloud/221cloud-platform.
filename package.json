@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Build tooling for the 221Cloud web platform",
   "scripts": {
-    "build:ide": "esbuild src/ide-editor/main.js --bundle --format=iife --global-name=CloudIDE221 --target=es2022 --minify --outfile=public/assets/ide-editor.js",
+    "build:ide": "node scripts/build-ide.mjs",
     "check:inline-scripts": "node scripts/check-inline-scripts.mjs"
   },
   "devDependencies": {
