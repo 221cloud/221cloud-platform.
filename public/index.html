@@ -1505,6 +1505,15 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
     } catch (e) {}
   }
   window.__221cloudAuthDiagnostic = showDiagnostic;
+  document.addEventListener("click", function (event) {
+    const target = event.target && event.target.closest
+      ? event.target.closest("button, a, [role='button'], input[type='submit'], [onclick]")
+      : event.target;
+    const label = target
+      ? (target.innerText || target.textContent || target.getAttribute("aria-label") || target.tagName || "élément").trim().slice(0, 100)
+      : "zone inconnue";
+    showDiagnostic("CLIC DÉTECTÉ : " + label);
+  }, true);
   window.addEventListener("error", function (event) {
     showDiagnostic("ERREUR JavaScript : " + (event.message || "message indisponible") +
       (event.lineno ? " (ligne " + event.lineno + ")" : ""));
