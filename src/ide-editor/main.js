@@ -74,6 +74,7 @@ export function mountEditor({ host, value = "", fileName = "", onChange = () => 
       editorTheme,
       languageForFile(fileName),
       EditorView.lineWrapping,
+      EditorView.contentAttributes.of({ "aria-label": "Éditeur de code", spellcheck: "false" }),
       readOnlyCompartment.of(EditorState.readOnly.of(Boolean(readOnly))),
       editableCompartment.of(EditorView.editable.of(!readOnly)),
       EditorView.updateListener.of(update => {
