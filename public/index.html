@@ -1527,31 +1527,6 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
 </script>
 
 <script>
-(function () {
-  let panel;
-  function showDiagnostic(message) {
-    try {
-      if (!panel) {
-        panel = document.createElement("div");
-        panel.id = "authRuntimeDiagnostic";
-        panel.style.cssText = "position:fixed;z-index:2147483647;left:8px;right:8px;bottom:8px;padding:12px;border:2px solid #f0b429;border-radius:10px;background:#101827;color:#fff;font:13px/1.45 Arial,sans-serif;white-space:pre-wrap";
-        document.body.appendChild(panel);
-      }
-      panel.textContent = "Diagnostic temporaire 221Cloud : " + message;
-    } catch (e) {}
-  }
-  window.__221cloudAuthDiagnostic = showDiagnostic;
-  window.addEventListener("error", function (event) {
-    showDiagnostic("ERREUR JavaScript : " + (event.message || "message indisponible") +
-      (event.lineno ? " (ligne " + event.lineno + ")" : ""));
-  });
-  window.addEventListener("unhandledrejection", function (event) {
-    const reason = event.reason;
-    showDiagnostic("PROMESSE NON GÉRÉE : " + (reason && reason.message ? reason.message : String(reason)));
-  });
-  showDiagnostic("script démarré ; vérification des boutons en cours…");
-})();
-
 const API = "/api";
 const IS_PRO_MODE = window.location.pathname === "/pro" || window.location.pathname === "/pro/";
 if (IS_PRO_MODE) {
