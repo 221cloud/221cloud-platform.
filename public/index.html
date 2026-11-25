@@ -1492,7 +1492,7 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
 <script>
 // DIAGNOSTIC TEMPORAIRE — vérification précise du chargement du script principal
 (function () {
-  const BUILD = "AUTH-DIAG-2026-11-25-B";
+  const BUILD = "AUTH-DIAG-2026-11-25-C";
   let panel;
   let firstRuntimeError = "";
   let policyError = "";
@@ -1569,6 +1569,7 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
       const details = [
         "HTML diagnostic=" + BUILD,
         "balises script=" + scripts.length,
+        "test indépendant avant script principal=" + (window.__221cloudPreMainProbe === true),
         "script principal=" + (mainScript ? "présent (" + mainScript.textContent.length + " caractères)" : "ABSENT"),
         "script principal démarré=" + started,
         "register=" + typeof window.register,
@@ -1582,6 +1583,14 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
 
   showDiagnostic("script de diagnostic exécuté ; attente du script principal…");
 })();
+</script>
+
+<script>
+// TEST INDÉPENDANT — doit s'exécuter avant le script principal
+window.__221cloudPreMainProbe = true;
+if (window.__221cloudAuthDiagnostic) {
+  window.__221cloudAuthDiagnostic("TEST INDÉPENDANT AVANT SCRIPT PRINCIPAL : exécuté");
+}
 </script>
 
 <script>
