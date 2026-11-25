@@ -9912,6 +9912,26 @@ body.pro-mode #mainContent .error-text {
     grid-template-columns:minmax(0,1fr);
   }
 }
+
+/* 221CloudPro — contraste renforcé pour les textes secondaires */
+body.pro-mode footer,
+body.pro-mode #mainContent .muted,
+body.pro-mode #mainContent .page-subtitle,
+body.pro-mode #mainContent .item-card .muted,
+body.pro-mode #mainContent .empty,
+body.pro-mode #mainContent .pro-welcome-copy p,
+body.pro-mode #mainContent .pro-section-note,
+body.pro-mode #mainContent .pro-tool-copy small,
+body.pro-mode #mainContent .pro-voice-copy span,
+body.pro-mode #mainContent .pro-arrow,
+body.pro-mode #mainContent .pro-welcome-label,
+body.pro-mode #mainContent .pro-eyebrow {
+  color:#5f716a;
+}
+body.pro-mode #mainContent input::placeholder,
+body.pro-mode #mainContent textarea::placeholder {
+  color:#667873;
+}
 </style>";
   const scriptTag = "<script>" + js + "<\/script>";
   if (/<\/head>/i.test(html)) html = html.replace(/<\/head>/i, styleTag + "</head>");
