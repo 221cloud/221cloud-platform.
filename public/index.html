@@ -1488,6 +1488,33 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
 </section>
 
 <script>
+
+// DIAGNOSTIC TEMPORAIRE — branche de test uniquement
+(function () {
+  let panel;
+  function showDiagnostic(message) {
+    try {
+      if (!panel) {
+        panel = document.createElement("div");
+        panel.id = "authRuntimeDiagnostic";
+        panel.style.cssText = "position:fixed;z-index:2147483647;left:8px;right:8px;bottom:8px;padding:12px;border:2px solid #f0b429;border-radius:10px;background:#101827;color:#fff;font:13px/1.45 Arial,sans-serif;white-space:pre-wrap";
+        document.body.appendChild(panel);
+      }
+      panel.textContent = "Diagnostic temporaire 221Cloud : " + message;
+    } catch (e) {}
+  }
+  window.__221cloudAuthDiagnostic = showDiagnostic;
+  window.addEventListener("error", function (event) {
+    showDiagnostic("ERREUR JavaScript : " + (event.message || "message indisponible") +
+      (event.lineno ? " (ligne " + event.lineno + ")" : ""));
+  });
+  window.addEventListener("unhandledrejection", function (event) {
+    const reason = event.reason;
+    showDiagnostic("PROMESSE NON GÉRÉE : " + (reason && reason.message ? reason.message : String(reason)));
+  });
+  showDiagnostic("script démarré ; vérification des boutons en cours…");
+})();
+
 const API = "/api";
 const IS_PRO_MODE = window.location.pathname === "/pro" || window.location.pathname === "/pro/";
 if (IS_PRO_MODE) {
@@ -1907,6 +1934,21 @@ async function login() {
 // Les actions d’authentification sont attachées en JavaScript plutôt que via onclick HTML.
 document.getElementById("loginButton")?.addEventListener("click", login);
 document.getElementById("registerButton")?.addEventListener("click", register);
+if (window.__221cloudAuthDiagnostic) {
+  const ids = ["loginButton", "registerButton", "showRegisterButton", "showLoginButton"];
+  const states = ids.map(id => {
+    const element = document.getElementById(id);
+    return id + "=" + (element ? "présent" : "ABSENT");
+  });
+  window.__221cloudAuthDiagnostic("script exécuté ; " + states.join(" ; ") +
+    ". Touchez ensuite un bouton pour vérifier la réaction.");
+}
+document.addEventListener("click", function (event) {
+  const button = event.target.closest("#loginButton, #registerButton, #showRegisterButton, #showLoginButton");
+  if (button && window.__221cloudAuthDiagnostic) {
+    window.__221cloudAuthDiagnostic("toucher détecté sur " + button.id + " ; le navigateur reçoit bien le clic.");
+  }
+}, true);
 document.getElementById("showRegisterButton")?.addEventListener("click", () => showAuthForm("register"));
 document.getElementById("showLoginButton")?.addEventListener("click", () => showAuthForm("login"));
 async function logout() {
