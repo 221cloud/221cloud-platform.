@@ -9406,6 +9406,7 @@ function replaceApplicationEditorMatch() {
     return;
   }
   editor.setRangeText(replacement.value, editor.selectionStart, editor.selectionEnd, "end");
+  updateApplicationEditorDecorations();
   if (applicationEditorState && applicationEditorState.activeFile) {
     applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
   }
@@ -9439,6 +9440,7 @@ function replaceAllApplicationEditorMatches() {
   }
   editor.value = output + source.slice(cursor);
   editor.setSelectionRange(0, 0);
+  updateApplicationEditorDecorations();
   if (applicationEditorState && applicationEditorState.activeFile) {
     applicationEditorState.files[applicationEditorState.activeFile] = editor.value;
   }
@@ -9512,6 +9514,7 @@ function handleApplicationEditorKeydown(event) {
 
     if (start === end && !event.shiftKey) {
       editor.setRangeText("    ", start, end, "end");
+      updateApplicationEditorDecorations();
       return;
     }
 
@@ -9545,6 +9548,7 @@ function handleApplicationEditorKeydown(event) {
       Math.max(firstLineStart, start + (event.shiftKey ? -startAdjustment : startAdjustment)),
       Math.max(firstLineStart, end + (event.shiftKey ? -endAdjustment : endAdjustment))
     );
+    updateApplicationEditorDecorations();
     return;
   }
 
@@ -9559,6 +9563,7 @@ function handleApplicationEditorKeydown(event) {
     const trimmedPrefix = linePrefix.trimEnd();
     const extraIndentation = /[\{\[\(]$/.test(trimmedPrefix) ? "    " : "";
     editor.setRangeText("\n" + indentation + extraIndentation, start, end, "end");
+    updateApplicationEditorDecorations();
   }
 }
 
