@@ -1576,9 +1576,10 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
           const errorColumn = Number.isFinite(error.columnNumber) ? error.columnNumber : "inconnue";
           const errorStack = String(error.stack || "").split("\\n").slice(0, 2).join(" | ");
           let tokenLocation = "localisation introuvable";
+          let captureSyntaxError = null;
           try {
             let nativeLocation = null;
-            const captureSyntaxError = event => {
+            captureSyntaxError = event => {
               if (event && event.message && String(event.message).includes("Unexpected token")) {
                 nativeLocation = {
                   line: event.lineno || "inconnue",
@@ -1602,7 +1603,7 @@ body.pro-mode #mainContent .pro-a11y-note { line-height:1.6; }
               tokenLocation = "le navigateur n'a pas fourni de position native";
             }
           } catch (diagnosticError) {
-            window.removeEventListener("error", captureSyntaxError, true);
+            if (captureSyntaxError) window.removeEventListener("error", captureSyntaxError, true);
             tokenLocation = "diagnostic natif impossible=" + diagnosticError.message;
           }
           parserCheck = error.name + ": " + error.message +
