@@ -6873,170 +6873,144 @@ async function renderHostingPage() {
   const main = document.getElementById("mainContent");
 
   main.innerHTML = `
-    <h1 class="page-title">Hébergement web</h1>
-    <p class="page-subtitle">Gérez vos sites web et leurs déploiements.</p>
-    <div class="card">
-      <p>Chargement de vos hébergements...</p>
-    </div>
+    <h1 class="page-title">Hébergement et publications</h1>
+    <p class="page-subtitle">Retrouvez vos sites web hébergés et vos applications publiées depuis un seul espace.</p>
+    <div class="card"><p>Chargement de vos projets...</p></div>
   `;
 
   try {
     const data = await api("/projects");
+    const projects = Array.isArray(data.projects) ? data.projects : [];
+    const websiteProjects = projects.filter(project => project.type === "website");
+    const applicationProjects = projects.filter(project => project.type === "application");
 
-    const websiteProjects = (data.projects || []).filter(
-      project => project.type === "website"
-    );
-
-    if (!websiteProjects.length) {
-      main.innerHTML = `
-        <h1 class="page-title">Hébergement web</h1>
-        <p class="page-subtitle">Gérez vos sites web et leurs déploiements.</p>
-        <div class="card">
-          <h3>Aucun site web</h3>
-          <p class="muted">Créez d'abord un projet de type Site web dans la rubrique Mes projets.</p>
-        </div>
-      `;
-      return;
-    }
-
-    const hostingResults = await Promise.all(
-      websiteProjects.map(async project => {
+    const [hostingResults, applicationResults] = await Promise.all([
+      Promise.all(websiteProjects.map(async project => {
         try {
-          const result = await api(
-            `/projects/${encodeURIComponent(project.id)}/hosting`
-          );
-
+          const result = await api(`/projects/${encodeURIComponent(project.id)}/hosting`);
           return { project, result, error: null };
         } catch (error) {
           return { project, result: null, error: error.message };
         }
-      })
-    );
+      })),
+      Promise.all(applicationProjects.map(async project => {
+        try {
+          const result = await api(`/projects/${encodeURIComponent(project.id)}/application-publication`);
+          return { project, publication: result.publication || null, error: null };
+        } catch (error) {
+          return { project, publication: null, error: error.message };
+        }
+      }))
+    ]);
 
-    main.innerHTML = `
-      <h1 class="page-title">Hébergement web</h1>
-      <p class="page-subtitle">Gérez vos sites web et leurs déploiements.</p>
+    const websiteSection = hostingResults.length
+      ? hostingResults.map(({ project, result, error }) => {
+          if (error) {
+            return `
+              <div class="card">
+                <h3>${escapeHTML(project.name)}</h3>
+                <p class="error-text">${escapeHTML(error)}</p>
+              </div>
+            `;
+          }
 
-      ${hostingResults.map(({ project, result, error }) => {
-        if (error) {
+          const hosting = result.hosting;
+          const deployments = result.deployments || [];
+          const websiteFiles = result.files || [];
           return `
             <div class="card">
               <h3>${escapeHTML(project.name)}</h3>
-              <p class="error-text">${escapeHTML(error)}</p>
-            </div>
-          `;
-        }
-
-        const hosting = result.hosting;
-        const deployments = result.deployments || [];
-        const websiteFiles = result.files || [];
-        return `
-          <div class="card">
-            <h3>${escapeHTML(project.name)}</h3>
-            <div style="margin:16px 0">
-  <label for="websiteFiles-${escapeHTML(project.id)}">
-    Sélectionner les fichiers du site
-  </label>
-
-  <input
-    type="file"
-    id="websiteFiles-${escapeHTML(project.id)}"
-    multiple
-    accept=".html,.css,.js,.json,.png,.jpg,.jpeg,.gif,.svg,.webp,.ico,.woff,.woff2,.ttf"
-    style="display:block;margin-top:10px"
-  />
-  <label for="websiteFolder-${escapeHTML(project.id)}" style="display:block;margin-top:16px">
-  Ou sélectionner un dossier complet
-</label>
-
-<input
-  type="file"
-  id="websiteFolder-${escapeHTML(project.id)}"
-  webkitdirectory
-  multiple
-  style="display:block;margin-top:10px"
-/>
-</div>
-
-<button
-  class="primary-btn"
-  onclick="startWebsiteDeployment(${escapeJSAttribute(project.id)})"
->
-  Envoyer et publier le site
-</button>
-
-            ${
-              hosting
-                ? `
-                  <p>
-                    <span class="muted">État de l'hébergement :</span>
-                    <span class="status">${escapeHTML(hosting.status)}</span>
-                  </p>
-
-                  <p class="muted">Adresse du site :</p>
-                  ${
-                    hosting.status === "active"
-                      ? `<p><a href="${escapeHTML(hosting.url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(hosting.url)}</a></p>`
-                      : `<p class="muted">L'adresse sera accessible après publication du site.</p>`
-                  }
-                `
-                : `
-                  <p class="muted">L'hébergement n'est pas encore associé à ce projet.</p>
-                `
-            }
-<div class="section-head">
-  <h3>Explorateur de fichiers</h3>
-  <span class="muted">${websiteFiles.length} fichier(s)</span>
-</div>
-
-${
-  websiteFiles.length
-    ? renderWebsiteFileTree(
-    websiteFiles,
-    hosting?.url || "",
-    project.id
-  )
-    : `<p class="muted">Aucun fichier dans le déploiement actif.</p>`
-}
-            <div class="section-head">
-              <h3>Déploiements</h3>
-              <span class="muted">${deployments.length} au total</span>
-            </div>
-
-            ${
-              deployments.length
+              <div style="margin:16px 0">
+                <label for="websiteFiles-${escapeHTML(project.id)}">Sélectionner les fichiers du site</label>
+                <input type="file" id="websiteFiles-${escapeHTML(project.id)}" multiple
+                  accept=".html,.css,.js,.json,.png,.jpg,.jpeg,.gif,.svg,.webp,.ico,.woff,.woff2,.ttf"
+                  style="display:block;margin-top:10px" />
+                <label for="websiteFolder-${escapeHTML(project.id)}" style="display:block;margin-top:16px">Ou sélectionner un dossier complet</label>
+                <input type="file" id="websiteFolder-${escapeHTML(project.id)}" webkitdirectory multiple
+                  style="display:block;margin-top:10px" />
+              </div>
+              <button class="primary-btn" type="button" onclick="startWebsiteDeployment(${escapeJSAttribute(project.id)})">
+                Envoyer et publier le site
+              </button>
+              ${hosting ? `
+                <p><span class="muted">État de l'hébergement :</span> <span class="status">${escapeHTML(hosting.status)}</span></p>
+                <p class="muted">Adresse du site :</p>
+                ${hosting.status === "active"
+                  ? `<p><a href="${escapeHTML(hosting.url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(hosting.url)}</a></p>`
+                  : `<p class="muted">L'adresse sera accessible après publication du site.</p>`}
+              ` : `<p class="muted">L'hébergement n'est pas encore associé à ce projet.</p>`}
+              <div class="section-head">
+                <h3>Explorateur de fichiers</h3>
+                <span class="muted">${websiteFiles.length} fichier(s)</span>
+              </div>
+              ${websiteFiles.length
+                ? renderWebsiteFileTree(websiteFiles, hosting?.url || "", project.id)
+                : `<p class="muted">Aucun fichier dans le déploiement actif.</p>`}
+              <div class="section-head">
+                <h3>Déploiements</h3>
+                <span class="muted">${deployments.length} au total</span>
+              </div>
+              ${deployments.length
                 ? deployments.map(deployment => `
                     <div class="item-card">
-                      <p>
-                        <strong>Déploiement</strong>
-                        <span class="status">${escapeHTML(deployment.status)}</span>
-                      </p>
-                      <p class="muted">
-                        Fichiers : ${Number(deployment.file_count || 0)}
-                      </p>
-                      <p class="muted">
-                        Créé le : ${escapeHTML(formatDate(deployment.created_at))}
-                      </p>
+                      <p><strong>Déploiement</strong> <span class="status">${escapeHTML(deployment.status)}</span></p>
+                      <p class="muted">Fichiers : ${Number(deployment.file_count || 0)}</p>
+                      <p class="muted">Créé le : ${escapeHTML(formatDate(deployment.created_at))}</p>
                       ${deployment.status === "published" && deployment.id !== hosting?.active_deployment_id
-                        ? `<button class="primary-btn" onclick="restoreWebsiteDeployment(${escapeJSAttribute(project.id)},${escapeJSAttribute(deployment.id)})">Restaurer cette version</button>`
+                        ? `<button class="primary-btn" type="button" onclick="restoreWebsiteDeployment(${escapeJSAttribute(project.id)},${escapeJSAttribute(deployment.id)})">Restaurer cette version</button>`
                         : deployment.id === hosting?.active_deployment_id
                           ? `<p class="muted">Version actuellement publiée</p>`
                           : ""}
                     </div>
                   `).join("")
-                : `<p class="muted">Aucun déploiement pour le moment.</p>`
-            }
-          </div>
-        `;
-      }).join("")}
-    `;
+                : `<p class="muted">Aucun déploiement pour le moment.</p>`}
+            </div>
+          `;
+        }).join("")
+      : `<div class="empty"><p>Aucun projet de type Site web.</p><p>Créez un site dans Mes projets pour utiliser l'hébergement web.</p></div>`;
 
+    const applicationSection = applicationResults.length
+      ? applicationResults.map(({ project, publication, error }) => {
+          const isFutPulse = String(project.name || "").trim().toLowerCase() === "futpulse";
+          if (error) {
+            return `<div class="card"><h3>${escapeHTML(project.name)}</h3><p class="error-text">${escapeHTML(error)}</p></div>`;
+          }
+          return `
+            <div class="item-card">
+              <div class="storage-file-heading">
+                <div class="storage-file-icon">▦</div>
+                <div class="storage-file-details">
+                  <h3>${escapeHTML(project.name)}</h3>
+                  <div class="muted">Application 221Cloud</div>
+                </div>
+              </div>
+              <p><span class="status">${publication ? "En ligne" : "Non publiée"}</span></p>
+              ${publication
+                ? `
+                  <p class="muted">Version publiée : ${Number(publication.version_number || 1)} · ${escapeHTML(formatDate(publication.published_at || publication.updated_at))}</p>
+                  <p><a href="${escapeHTML(publication.url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(publication.url)}</a></p>
+                  ${isFutPulse ? `<button class="secondary" type="button" onclick="window.location.href='/manage/${encodeURIComponent(publication.slug)}/'">Administrer FutPulse</button>` : ""}
+                `
+                : `<p class="muted">Cette application n'a pas encore de version publiée.</p>`}
+              <button class="secondary" type="button" onclick="renderApplicationsPage()">Gérer dans Applications</button>
+            </div>
+          `;
+        }).join("")
+      : `<div class="empty"><p>Aucune application pour le moment.</p></div>`;
+
+    main.innerHTML = `
+      <h1 class="page-title">Hébergement et publications</h1>
+      <p class="page-subtitle">Retrouvez vos sites web hébergés et vos applications publiées depuis un seul espace.</p>
+      <div class="section-head"><h2>Sites web hébergés</h2><span class="muted">${websiteProjects.length} projet(s)</span></div>
+      ${websiteSection}
+      <div class="section-head" style="margin-top:28px"><h2>Applications publiées</h2><span class="muted">${applicationProjects.length} application(s)</span></div>
+      <div class="notice">Les applications sont suivies ici à partir de leur publication actuelle. Elles conservent leur système de publication et leurs données propres ; elles ne sont pas converties en sites statiques.</div>
+      ${applicationSection}
+    `;
   } catch (error) {
     main.innerHTML = `
-      <h1 class="page-title">Hébergement web</h1>
-      <div class="card">
-        <p class="error-text">${escapeHTML(error.message)}</p>
-      </div>
+      <h1 class="page-title">Hébergement et publications</h1>
+      <div class="card"><p class="error-text">${escapeHTML(error.message)}</p></div>
     `;
   }
 }
