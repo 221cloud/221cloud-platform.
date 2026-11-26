@@ -9080,7 +9080,7 @@ async function renderEditorialAgentPage(projectId) {
   if (!confirmLeaveApplicationEditor()) return;
   document.getElementById("mainContent").innerHTML =
     '<div class="section-head"><div><h1 class="page-title">Agent éditorial · FutPulse</h1><p class="page-subtitle">Brouillons privés, vérification et validation avant toute publication.</p></div><button class="secondary" type="button" onclick="renderApplicationsPage()">← Applications</button></div>' +
-    '<div class="notice">Les flux RSS servent à repérer des sujets et à consulter les sources. Leur contenu n’est pas automatiquement vérifié ni publié. Toute publication exigera une validation humaine.</div><div class="card"><div class="section-head"><div><h2>Sources d’actualité</h2><p class="muted">Six médias · collecte à la demande</p></div><button type="button" onclick="syncEditorialFeeds()">Collecter les actualités</button></div><div id="editorialFeedMessage" class="muted" aria-live="polite"></div><div id="editorialFeedList"><p class="muted">Chargement des articles collectés...</p></div></div>' +'<div class="card"><div class="section-head"><div><h2>Actualités regroupées</h2><p class="muted">Regroupement automatique par similarité des titres et proximité des dates.</p></div><button class="secondary" type="button" onclick="loadEditorialStoryClusters()">Actualiser les groupes</button></div><div class="notice">Attention : plusieurs médias qui rapportent un même sujet ne constituent pas une vérification indépendante. Chaque information reste à vérifier avant rédaction ou publication.</div><div id="editorialClusterTotals" class="muted" aria-live="polite">Chargement des groupes...</div><div id="editorialClusterList"><p class="muted">Analyse des articles collectés...</p></div></div>' +
+    '<div class="notice">Les flux RSS servent à repérer des sujets et à consulter les sources. Leur contenu n’est pas automatiquement vérifié ni publié. Toute publication exigera une validation humaine.</div><div class="card"><div class="section-head"><div><h2>Sources d’actualité</h2><p class="muted">Six médias · collecte à la demande</p></div><button type="button" onclick="syncEditorialFeeds()">Collecter les actualités</button></div><div id="editorialFeedMessage" class="muted" aria-live="polite"></div><div id="editorialFeedList"><p class="muted">Chargement des articles collectés...</p></div></div>' +'<div class="card"><div class="section-head"><div><h2>Actualités regroupées</h2><p class="muted">Regroupement automatique par similarité des titres et proximité des dates.</p></div><button class="secondary" type="button" onclick="loadEditorialStoryClusters()">Actualiser les groupes</button></div><div class="notice">Attention : plusieurs médias qui rapportent un même sujet ne constituent pas une vérification indépendante. Chaque information reste à vérifier avant rédaction ou publication.</div><div id="editorialClusterTotals" class="muted" aria-live="polite">Chargement des groupes...</div><div id="editorialClusterDiagnostics" class="notice"></div><div id="editorialClusterList"><p class="muted">Analyse des articles collectés...</p></div></div>' +
     '<div class="card"><div class="section-head"><h2>Brouillons à examiner</h2><button class="secondary" type="button" onclick="loadEditorialDrafts()">Actualiser</button></div><div id="editorialDraftList"><p class="muted">Chargement des brouillons...</p></div></div>' +
     '<div class="card"><h2>Ajouter un brouillon de test</h2><p class="muted">Ce formulaire vérifie le circuit de validation avant le collecteur et l’IA. Il n’ajoute rien aux articles publics.</p><label for="editorialDraftTitle">Titre</label><input id="editorialDraftTitle" maxlength="300" placeholder="Titre de l’article"><label for="editorialDraftArticle">Article</label><textarea id="editorialDraftArticle" maxlength="30000" rows="7" placeholder="Contenu du brouillon"></textarea><label for="editorialDraftSummary">Résumé</label><textarea id="editorialDraftSummary" maxlength="2000" rows="3" placeholder="Résumé court"></textarea><div class="item-actions"><button id="saveEditorialDraftButton" type="button" onclick="createEditorialTestDraft(\'' + escapeJSAttribute(projectId) + '\')">Enregistrer le brouillon</button><span id="editorialDraftMessage" class="muted" aria-live="polite"></span></div></div>';
   await loadEditorialFeedItems();
@@ -9127,12 +9127,28 @@ async function loadEditorialFeedItems() {
 async function loadEditorialStoryClusters() {
   const host = document.getElementById("editorialClusterList");
   const totalsHost = document.getElementById("editorialClusterTotals");
+  const diagnosticsHost = document.getElementById("editorialClusterDiagnostics");
   if (!host || !window.editorialAgentProjectId) return;
   host.innerHTML = '<p class="muted">Analyse des articles collectés...</p>';
   try {
     const data = await api("/projects/" + encodeURIComponent(window.editorialAgentProjectId) + "/editorial-agent/clusters");
     const clusters = Array.isArray(data.clusters) ? data.clusters : [];
     const totals = data.totals || {};
+    const diagnostics = data.diagnostics || {};
+    if (diagnosticsHost) {
+      const candidates = Array.isArray(diagnostics.best_cross_source_matches) ? diagnostics.best_cross_source_matches : [];
+      diagnosticsHost.innerHTML = '<h3>Diagnostic du regroupement</h3><p class="muted">' +
+        Number(diagnostics.descriptions_present || 0) + ' articles avec description exploitable · ' +
+        Number(diagnostics.descriptions_missing_or_short || 0) + ' descriptions absentes ou courtes · ' +
+        Number(diagnostics.dated_articles || 0) + ' articles datés · ' +
+        Number(diagnostics.cross_source_pairs_within_72h || 0) + ' paires de médias différents dans la fenêtre de 72 h.</p>' +
+        (candidates.length ? '<p class="muted">Paires les plus proches selon le calcul actuel (score indicatif, pas une validation) :</p><ul>' +
+          candidates.map(pair => '<li><strong>' + Math.round(pair.score * 100) + '%</strong> · ' +
+            escapeHTML(pair.left.source || 'Média') + ' : ' + escapeHTML(pair.left.title || '') +
+            ' <span class="muted">↔</span> ' + escapeHTML(pair.right.source || 'Média') + ' : ' +
+            escapeHTML(pair.right.title || '') + ' <span class="muted">· ' + Number(pair.hours_apart || 0) + ' h</span></li>').join('') +
+          '</ul>' : '<p class="muted">Aucune paire inter-médias candidate trouvée dans la fenêtre étudiée.</p>');
+    }
     if (totalsHost) totalsHost.textContent =
       Number(totals.collected_items || 0) + " articles analysés · " +
       Number(totals.story_groups || 0) + " groupes · " +
