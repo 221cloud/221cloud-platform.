@@ -283,7 +283,9 @@ function classifyEditorialDossier(title) {
     else if (/appel|appeal|recours|procedure|procedural/.test(value)) subtopic = "Recours et procédure";
     else if (/classement fifa|fifa ranking|points fifa|ranking points/.test(value)) subtopic = "Conséquences sur le classement FIFA";
     else if (/caisse|amende|financ|payer|paiement|indemnit|compensation|costs/.test(value)) subtopic = "Conséquences financières";
-    else if (/reattribu|re-attribu|victoire|resultat|result|en joie|fataliste|reactions?/.test(value)) subtopic = "Réattribution du résultat et réactions";
+    else if (/reaction.*caf|caf.*reaction/.test(value)) subtopic = "Réaction officielle de la CAF";
+    else if (/rend sa decision|date de la decision|calendrier.*decision|decision.*mardi|decision.*24 novembre|verdict.*mardi/.test(value)) subtopic = "Annonce et calendrier de la décision";
+    else if (/reattribu|re-attribu|victoire|resultat|result|en joie|fataliste|reactions?/.test(value)) subtopic = "Réactions après la réattribution du résultat";
     else if (/senti le coup venir|avant la decision|avant le verdict|anticip|pressenti|prevoir|predire/.test(value)) subtopic = "Éléments précédant la décision";
     return { key: "senegal-maroc-tas", title: "Sénégal–Maroc · Dossier du TAS", subtopic };
   }
