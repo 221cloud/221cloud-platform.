@@ -1,0 +1,31 @@
+name: Check 221Cloud Hosting UI
+
+on:
+  push:
+    branches:
+      - feature/hosting-applications-overview
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-hosting-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out hosting feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/hosting-applications-overview
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate inline scripts and editor bundle
+        run: npm run check:inline-scripts
