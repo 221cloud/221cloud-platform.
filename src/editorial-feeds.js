@@ -256,9 +256,36 @@ export async function handleEditorialFeedsRequest(request, env, path, user) {
       FROM editorial_items WHERE user_id = ? AND project_id = ?
       ORDER BY COALESCE(published_at, fetched_at) DESC LIMIT 100
     `).bind(user.id, projectId).all();
-    const clusters = buildStoryClusters(rows.results || []);
+    const editorialRows = rows.results || [];
+    const clusters = buildStoryClusters(editorialRows);
+    const crossSourceCandidates = [];
+    let crossSourcePairsInWindow = 0;
+    for (let i = 0; i < editorialRows.length; i++) {
+      for (let j = i + 1; j < editorialRows.length; j++) {
+        const left = editorialRows[i], right = editorialRows[j];
+        if (left.source_domain === right.source_domain || !withinStoryWindow(left, right)) continue;
+        crossSourcePairsInWindow++;
+        const score = storySimilarity(left, right);
+        if (score >= 0.12) crossSourceCandidates.push({
+          score: Number(score.toFixed(3)),
+          hours_apart: Math.round(Math.abs(Date.parse(left.published_at || left.fetched_at || "") - Date.parse(right.published_at || right.fetched_at || "")) / 3600000),
+          left: { title: left.title, source: left.source_name },
+          right: { title: right.title, source: right.source_name }
+        });
+      }
+    }
+    crossSourceCandidates.sort((a, b) => b.score - a.score);
+    const descriptionsPresent = editorialRows.filter(row => String(row.description || "").trim().length >= 40).length;
+    const datedRows = editorialRows.filter(row => Number.isFinite(Date.parse(row.published_at || row.fetched_at || ""))).length;
     return Response.json({
       clusters,
+      diagnostics: {
+        descriptions_present: descriptionsPresent,
+        descriptions_missing_or_short: editorialRows.length - descriptionsPresent,
+        dated_articles: datedRows,
+        cross_source_pairs_within_72h: crossSourcePairsInWindow,
+        best_cross_source_matches: crossSourceCandidates.slice(0, 8)
+      },
       totals: {
         collected_items: (rows.results || []).length,
         story_groups: clusters.length,
