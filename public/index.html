@@ -9190,7 +9190,7 @@ async function loadEditorialStoryClusters() {
         (group.matching_score != null ? ' · score minimal ' + Math.round(Number(group.matching_score) * 100) + '%' : '') +
         '</p><p class="notice">Statut : non vérifié. Le regroupement est une aide au tri, pas une confirmation des faits.</p>' +
         '<details><summary>Consulter les ' + items.length + ' source(s)</summary><ul>' + articleLinks + '</ul></details>' +
-        '<div class="item-actions"><button class="editorial-ai-generate" type="button" onclick="generateEditorialDraftFromCluster(\'' + escapeJSAttribute(window.editorialAgentProjectId) + '\',\'' + sourceIds + '\')">Générer un brouillon IA (' + Math.min(items.length, 5) + ' source(s))</button></div></article>';
+        '<div class="item-actions"><button class="editorial-ai-generate" type="button" onclick="generateEditorialDraftFromCluster(\'' + sourceIds + '\')">Générer un brouillon IA (' + Math.min(items.length, 5) + ' source(s))</button></div></article>';
     }).join("");
   } catch (error) {
     host.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message) + '</div>';
@@ -9198,7 +9198,8 @@ async function loadEditorialStoryClusters() {
   }
 }
 
-async function generateEditorialDraftFromCluster(projectId, encodedItemIds) {
+async function generateEditorialDraftFromCluster(encodedItemIds) {
+  const projectId = window.editorialAgentProjectId;
   const message = document.getElementById("editorialAiMessage");
   const buttons = Array.from(document.querySelectorAll(".editorial-ai-generate"));
   buttons.forEach(button => { button.disabled = true; });
