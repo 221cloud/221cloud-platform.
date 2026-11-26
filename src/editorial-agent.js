@@ -358,6 +358,50 @@ async function generateEditorialDraft(request, env, projectId, user) {
 }
 
 
+export async function runScheduledEditorialGeneration(env, projectId, user) {
+  await ensureEditorialAgentSchema(env);
+  const cutoff = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
+  const result = await env.DB.prepare(`
+    SELECT items.id, items.source_domain, items.published_at, items.fetched_at
+    FROM editorial_items AS items
+    WHERE items.user_id = ? AND items.project_id = ?
+      AND COALESCE(items.published_at, items.fetched_at) >= ?
+      AND NOT EXISTS (
+        SELECT 1 FROM editorial_drafts AS drafts
+        WHERE drafts.user_id = items.user_id AND drafts.project_id = items.project_id
+          AND drafts.created_at >= datetime('now', '-7 days')
+          AND drafts.sources_json LIKE '%' || items.url || '%'
+      )
+    ORDER BY COALESCE(items.published_at, items.fetched_at) DESC
+    LIMIT 40
+  `).bind(user.id, projectId, cutoff).all();
+  const selected = [];
+  const domains = new Set();
+  for (const item of result.results || []) {
+    if (domains.has(item.source_domain)) continue;
+    domains.add(item.source_domain);
+    selected.push(item.id);
+    if (selected.length >= EDITORIAL_AI_MAX_SOURCES) break;
+  }
+  if (!selected.length) {
+    return { status: "skipped", reason: "Aucune nouvelle source récente et exploitable." };
+  }
+  const request = new Request("https://internal.futpulse/editorial-agent/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_ids: selected })
+  });
+  const response = await generateEditorialDraft(request, env, projectId, user);
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || "La génération éditoriale automatique a échoué.");
+  return {
+    status: payload.draft?.transferred ? "transferred" : "generated_transfer_failed",
+    title: payload.draft?.title || "",
+    message: payload.message || ""
+  };
+}
+
+
 async function transferEditorialDraftToApplicationNews(env, projectId, user, draft) {
   if (draft.published_row_id) return draft.published_row_id;
   const tableId = "ddf4f9ce-ffc1-4361-be6b-00b7a129aeb8";
