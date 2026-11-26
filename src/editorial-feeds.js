@@ -186,7 +186,7 @@ function storySimilarity(left, right) {
   // Avec seulement deux mots communs dans les titres, la description doit
   // apporter au moins trois termes supplémentaires concordants.
   const additionalDescriptionOverlap = sharedDescription.filter(token => !sharedTitle.includes(token));
-  const corroboratedMatch = sharedTitle.length >= 2 &&
+  const corroboratedMatch = distinctiveSharedTitle.length >= 3 &&
     additionalDescriptionOverlap.length >= 3 && descriptionJaccard >= 0.06;
   if (!strongTitleMatch && !corroboratedMatch) return 0;
 
