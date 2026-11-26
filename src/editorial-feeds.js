@@ -254,6 +254,52 @@ function buildStoryClusters(rows) {
   }).sort((a, b) => (b.latest_at || "").localeCompare(a.latest_at || ""));
 }
 
+
+function classifyEditorialDossier(title) {
+  const value = String(title || "").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "");
+  if (/caf[\\s-]*awards?/.test(value)) {
+    let subtopic = "Autres nominations";
+    if (/but de l.?annee|goal of the year/.test(value)) subtopic = "But de l’année";
+    else if (/meilleur gardien|best goalkeeper|goalkeeper/.test(value)) subtopic = "Meilleur gardien";
+    else if (/joueur africain|african player|player of the year/.test(value)) subtopic = "Joueur africain de l’année";
+    else if (/pape thiaw|entraineur|coach of the year|national team|equipe nationale/.test(value)) subtopic = "Entraîneur et équipe nationale";
+    return { key: "caf-awards-2026", title: "CAF Awards 2026", subtopic };
+  }
+  if (/\\b(tas|cas)\\b/.test(value) && /(senegal|maroc|morocco|amrabat|abdoulaye fall)/.test(value)) {
+    let subtopic = "Décision et conséquences du TAS";
+    if (/amrabat/.test(value)) subtopic = "Réaction de Sofyan Amrabat";
+    else if (/abdoulaye fall|president|president.*federation|juge|judge|contact/.test(value)) subtopic = "Déclarations sur le dossier du TAS";
+    else if (/appel|appeal|recours/.test(value)) subtopic = "Recours et procédure";
+    return { key: "senegal-maroc-tas", title: "Sénégal–Maroc · Dossier du TAS", subtopic };
+  }
+  return null;
+}
+function buildStoryDossiers(clusters) {
+  const parents = new Map();
+  for (const cluster of clusters) {
+    const titles = (cluster.items || []).map(item => item.title).filter(Boolean);
+    if (!titles.length) continue;
+    const labels = titles.map(classifyEditorialDossier);
+    if (labels.some(label => !label)) continue;
+    const parentKeys = new Set(labels.map(label => label.key));
+    const subtopics = new Set(labels.map(label => label.subtopic));
+    if (parentKeys.size !== 1 || subtopics.size !== 1) continue;
+    const label = labels[0];
+    if (!parents.has(label.key)) parents.set(label.key, { key: label.key, title: label.title, children: [] });
+    parents.get(label.key).children.push({
+      cluster_id: cluster.id,
+      headline: cluster.headline,
+      subtopic: label.subtopic,
+      item_count: cluster.item_count,
+      distinct_sources: cluster.distinct_sources
+    });
+  }
+  return [...parents.values()]
+    .filter(parent => parent.children.length >= 2)
+    .map(parent => ({ ...parent, children: parent.children.sort((a, b) => a.subtopic.localeCompare(b.subtopic, "fr")) }))
+    .sort((a, b) => a.title.localeCompare(b.title, "fr"));
+}
+
 export async function handleEditorialFeedsRequest(request, env, path, user) {
   const match = path.match(/^\/api\/projects\/([^/]+)\/editorial-agent\/(items|clusters|sources\/sync)$/);
   if (!match || !["GET", "POST"].includes(request.method)) return null;
@@ -290,6 +336,7 @@ export async function handleEditorialFeedsRequest(request, env, path, user) {
     `).bind(user.id, projectId).all();
     const editorialRows = rows.results || [];
     const clusters = buildStoryClusters(editorialRows);
+    const dossiers = buildStoryDossiers(clusters);
     const crossSourceCandidates = [];
     let crossSourcePairsInWindow = 0;
     for (let i = 0; i < editorialRows.length; i++) {
@@ -311,6 +358,7 @@ export async function handleEditorialFeedsRequest(request, env, path, user) {
     const datedRows = editorialRows.filter(row => Number.isFinite(Date.parse(row.published_at || row.fetched_at || ""))).length;
     return Response.json({
       clusters,
+      dossiers,
       diagnostics: {
         descriptions_present: descriptionsPresent,
         descriptions_missing_or_short: editorialRows.length - descriptionsPresent,
