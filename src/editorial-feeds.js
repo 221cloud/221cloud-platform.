@@ -88,12 +88,12 @@ async function fetchFeed(source) {
   const xml = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
   if (!/<(?:rss|feed|rdf:RDF)\b/i.test(xml)) throw new Error("Format RSS/Atom non reconnu.");
   const items = parseFeed(xml, source);
-  const itemTagMatches = [...xml.matchAll(/<(?:[\\w.-]+:)?(?:item|entry)\\b/gi)];
-  const firstBlockMatch = xml.match(/<(?:[\\w.-]+:)?(?:item|entry)\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?(?:item|entry)\\s*>/i);
+  const itemTagMatches = [...xml.matchAll(/<(?:[\w.-]+:)?(?:item|entry)\b/gi)];
+  const firstBlockMatch = xml.match(/<(?:[\w.-]+:)?(?:item|entry)\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?(?:item|entry)\s*>/i);
   const firstBlock = firstBlockMatch ? firstBlockMatch[1] : "";
-  const firstBlockTags = [...firstBlock.matchAll(/<([\\w.-]+)(?:\\s[^>]*)?>/g)].slice(0, 12).map(match => match[1]);
+  const firstBlockTags = [...firstBlock.matchAll(/<([\w.-]+)(?:\s[^>]*)?>/g)].slice(0, 12).map(match => match[1]);
   const diagnostics = {
-    root: (xml.match(/<\\?xml[^>]*\\?>\\s*<([^\\s>!?]+)/i) || xml.match(/<([^\\s>!?]+)/))?.[1] || "inconnu",
+    root: (xml.match(/<\?xml[^>]*\?>\s*<([^\s>!?]+)/i) || xml.match(/<([^\s>!?]+)/))?.[1] || "inconnu",
     item_entry_tags: itemTagMatches.length,
     first_item_tags: firstBlockTags,
     parsed_items: items.length
