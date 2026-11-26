@@ -18,10 +18,10 @@ function decodeXml(value) {
     .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(Math.min(0x10ffff, parseInt(n, 16))));
 }
 function tagValue(xml, tag) {
-  // Recherche directement la balise demandée, y compris à l'intérieur de item/entry.
+  // Recherche directement la balise demandée, même imbriquée dans item/entry.
   const name = String(tag || "").replace(/[^a-z0-9_-]/gi, "");
   if (!name) return "";
-  const pattern = new RegExp("<(?:[\w.-]+:)?".replace(")?", ")?") + name + "\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?".replace(")?", ")?") + name + "\s*>", "i");
+  const pattern = new RegExp("<(?:[\\w.-]+:)?" + name + "\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?" + name + "\\s*>", "i");
   const match = xml.match(pattern);
   if (!match) return "";
   return decodeXml(match[1].replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
