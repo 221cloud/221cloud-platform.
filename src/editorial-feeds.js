@@ -331,6 +331,43 @@ function buildStoryDossiers(clusters) {
     .sort((a, b) => a.title.localeCompare(b.title, "fr"));
 }
 
+export async function syncEditorialFeedsForProject(env, projectId, user) {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS editorial_items (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, project_id TEXT NOT NULL,
+      source_id TEXT NOT NULL, source_name TEXT NOT NULL, source_domain TEXT NOT NULL,
+      title TEXT NOT NULL CHECK(length(title) <= 500),
+      description TEXT NOT NULL DEFAULT '' CHECK(length(description) <= 3000),
+      url TEXT NOT NULL CHECK(length(url) <= 2000), published_at TEXT,
+      fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, project_id, url)
+    )
+  `).run();
+  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_editorial_items_owner ON editorial_items(user_id, project_id, fetched_at DESC)").run();
+  const results = [];
+  for (const source of FEEDS) {
+    try {
+      const feed = await fetchFeed(source);
+      let saved = 0;
+      for (const item of feed.items) {
+        const result = await env.DB.prepare(`
+          INSERT INTO editorial_items (id,user_id,project_id,source_id,source_name,source_domain,title,description,url,published_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?)
+          ON CONFLICT(user_id,project_id,url) DO UPDATE SET
+            title=excluded.title, description=excluded.description,
+            published_at=COALESCE(excluded.published_at, editorial_items.published_at),
+            fetched_at=CURRENT_TIMESTAMP
+        `).bind(crypto.randomUUID(), user.id, projectId, item.source_id, item.source_name, item.source_domain, item.title, item.description, item.url, item.published_at).run();
+        saved += Number(result.meta?.changes || 0);
+      }
+      results.push({ source: source.name, received: feed.items.length, saved, status: feed.items.length ? "ok" : "empty" });
+    } catch (error) {
+      results.push({ source: source.name, received: 0, saved: 0, status: "error", message: String(error?.message || "Erreur de collecte").slice(0, 180) });
+    }
+  }
+  return { results, saved: results.reduce((sum, result) => sum + result.saved, 0) };
+}
+
 export async function handleEditorialFeedsRequest(request, env, path, user) {
   const match = path.match(/^\/api\/projects\/([^/]+)\/editorial-agent\/(items|clusters|sources\/sync)$/);
   if (!match || !["GET", "POST"].includes(request.method)) return null;
@@ -418,31 +455,12 @@ export async function handleEditorialFeedsRequest(request, env, path, user) {
     return Response.json({ items: rows.results || [], sources: FEEDS.map(({ id, name, domain }) => ({ id, name, domain })) });
   }
   if (request.method === "POST" && action === "sources/sync") {
-    const results = [];
-    for (const source of FEEDS) {
-      try {
-        const feed = await fetchFeed(source);
-        const items = feed.items;
-        let saved = 0;
-        for (const item of items) {
-          const id = crypto.randomUUID();
-          const result = await env.DB.prepare(`
-            INSERT INTO editorial_items (id,user_id,project_id,source_id,source_name,source_domain,title,description,url,published_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?)
-            ON CONFLICT(user_id,project_id,url) DO UPDATE SET
-              title=excluded.title, description=excluded.description,
-              published_at=COALESCE(excluded.published_at, editorial_items.published_at),
-              fetched_at=CURRENT_TIMESTAMP
-          `).bind(id, user.id, projectId, item.source_id, item.source_name, item.source_domain, item.title, item.description, item.url, item.published_at).run();
-          saved += Number(result.meta?.changes || 0);
-        }
-        results.push({ source: source.name, received: items.length, saved, status: items.length ? "ok" : "empty", http_status: feed.httpStatus, content_type: feed.contentType, diagnostics: feed.diagnostics, message: items.length ? "Flux accessible et articles reconnus." : "Flux accessible (HTTP " + feed.httpStatus + "), blocs détectés : " + feed.diagnostics.detected_blocks + ", titres : " + feed.diagnostics.titles_found + ", liens : " + feed.diagnostics.links_found + ", liens HTTPS valides : " + feed.diagnostics.https_links + ", liens rejetés : " + feed.diagnostics.rejected_links + ", premier article : " + (feed.diagnostics.first_item_tags.join(", ") || "aucune balise détectée") + ". Aucun article exploitable n’a été extrait." });
-      } catch (error) {
-        results.push({ source: source.name, received: 0, saved: 0, status: "error", message: String(error?.message || "Erreur de collecte").slice(0, 180) });
-      }
-    }
-    const total = results.reduce((sum, result) => sum + result.saved, 0);
-    return Response.json({ message: "Collecte terminée. Les contenus restent des sources à examiner, pas des faits vérifiés.", saved: total, results });
+    const result = await syncEditorialFeedsForProject(env, projectId, user);
+    return Response.json({
+      message: "Collecte terminée. Les contenus restent des sources à examiner, pas des faits vérifiés.",
+      saved: result.saved,
+      results: result.results
+    });
   }
   return Response.json({ error: "Route de collecte introuvable." }, { status: 404 });
 }
