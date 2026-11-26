@@ -1,3 +1,5 @@
+import { handleEditorialAgentRequest } from "./editorial-agent.js";
+import { handleEditorialFeedsRequest } from "./editorial-feeds.js";
 const ITERATIONS = 100000; // Limite prise en charge par Web Crypto sur Cloudflare Workers.
 const SESSION_DAYS = 7;
 const SESSION_IDLE_MINUTES = 60;
@@ -2626,6 +2628,22 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
+
+    // Agent éditorial : les brouillons restent privés et séparés des articles publiés.
+    if (path.includes("/editorial-agent/")) {
+      try {
+        const user = await currentUser(request, env);
+        if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        const feedResponse = await handleEditorialFeedsRequest(request, env, path, user);
+        if (feedResponse) return feedResponse;
+        const editorialResponse = await handleEditorialAgentRequest(request, env, path, user);
+        if (editorialResponse) return editorialResponse;
+      } catch (error) {
+        if (error?.status === 413) return json({ error: "La requête dépasse la limite autorisée." }, 413);
+        console.error("ERREUR AGENT ÉDITORIAL:", error);
+        return json({ error: "Impossible de traiter le brouillon éditorial." }, 500);
+      }
+    }
 
     // Métadonnées et points de terminaison OAuth 2.1 pour le serveur MCP 221Cloud.
     if (
