@@ -1,4 +1,5 @@
 import { handleEditorialAgentRequest } from "./editorial-agent.js";
+import { handleEditorialFeedsRequest } from "./editorial-feeds.js";
 const ITERATIONS = 100000; // Limite prise en charge par Web Crypto sur Cloudflare Workers.
 const SESSION_DAYS = 7;
 const SESSION_IDLE_MINUTES = 60;
@@ -2629,10 +2630,12 @@ export default {
     const path = url.pathname;
 
     // Agent éditorial : les brouillons restent privés et séparés des articles publiés.
-    if (path.includes("/editorial-agent/drafts")) {
+    if (path.includes("/editorial-agent/")) {
       try {
         const user = await currentUser(request, env);
         if (!user) return json({ error: "Vous devez être connecté." }, 401);
+        const feedResponse = await handleEditorialFeedsRequest(request, env, path, user);
+        if (feedResponse) return feedResponse;
         const editorialResponse = await handleEditorialAgentRequest(request, env, path, user);
         if (editorialResponse) return editorialResponse;
       } catch (error) {
