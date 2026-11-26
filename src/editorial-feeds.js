@@ -256,8 +256,8 @@ function buildStoryClusters(rows) {
 
 
 function classifyEditorialDossier(title) {
-  const value = String(title || "").toLowerCase().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "");
-  if (/caf[\\s-]*awards?/.test(value)) {
+  const value = String(title || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (/caf[\s-]*awards?/.test(value)) {
     let subtopic = "Autres nominations";
     if (/but de l.?annee|goal of the year/.test(value)) subtopic = "But de l’année";
     else if (/meilleur gardien|best goalkeeper|goalkeeper/.test(value)) subtopic = "Meilleur gardien";
@@ -265,7 +265,7 @@ function classifyEditorialDossier(title) {
     else if (/pape thiaw|entraineur|coach of the year|national team|equipe nationale/.test(value)) subtopic = "Entraîneur et équipe nationale";
     return { key: "caf-awards-2026", title: "CAF Awards 2026", subtopic };
   }
-  if (/\\b(tas|cas)\\b/.test(value) && /(senegal|maroc|morocco|amrabat|abdoulaye fall)/.test(value)) {
+  if (/\b(tas|cas)\b/.test(value) && /(senegal|maroc|morocco|amrabat|abdoulaye fall)/.test(value)) {
     let subtopic = "Décision et conséquences du TAS";
     if (/amrabat/.test(value)) subtopic = "Réaction de Sofyan Amrabat";
     else if (/abdoulaye fall|president|president.*federation|juge|judge|contact/.test(value)) subtopic = "Déclarations sur le dossier du TAS";
