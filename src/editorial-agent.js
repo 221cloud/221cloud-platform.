@@ -326,8 +326,61 @@ async function generateEditorialDraft(request, env, projectId, user) {
   }
 }
 
+
+async function transferEditorialDraftToApplicationNews(env, projectId, user, draft) {
+  if (draft.published_row_id) return draft.published_row_id;
+  const tableId = "ddf4f9ce-ffc1-4361-be6b-00b7a129aeb8";
+  const access = await env.DB.prepare(
+    "SELECT connections.database_id, tables.physical_name, permissions.can_create " +
+    "FROM application_publications AS publications " +
+    "JOIN application_publication_versions AS versions ON versions.id = publications.active_version_id AND versions.publication_id = publications.id " +
+    "JOIN projects ON projects.id = publications.project_id AND projects.user_id = publications.user_id AND projects.type = 'application' AND projects.deleted_at IS NULL " +
+    "JOIN application_database_connections AS connections ON connections.project_id = publications.project_id AND connections.user_id = publications.user_id " +
+    "JOIN customer_database_tables AS tables ON tables.id = ? AND tables.database_id = connections.database_id AND tables.user_id = publications.user_id " +
+    "JOIN application_database_table_permissions AS permissions ON permissions.table_id = tables.id AND permissions.project_id = publications.project_id AND permissions.database_id = connections.database_id AND permissions.user_id = publications.user_id " +
+    "WHERE publications.project_id = ? AND publications.user_id = ? LIMIT 1"
+  ).bind(tableId, projectId, user.id).first();
+  if (!access || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(access.physical_name || "")) {
+    throw new Error("La table « Actualités enregistrées » n'est pas reliée à cette application.");
+  }
+  if (Number(access.can_create) !== 1) throw new Error("L'application n'autorise pas l'ajout d'actualités.");
+  const columnResult = await env.DB.prepare(
+    "SELECT name, data_type, physical_name FROM customer_database_columns " +
+    "WHERE table_id = ? AND database_id = ? AND user_id = ? ORDER BY position ASC"
+  ).bind(tableId, access.database_id, user.id).all();
+  const columns = columnResult.results || [];
+  const byName = new Map(columns.map(column => [column.name, column]));
+  if (!byName.has("titre") || !byName.has("contenu")) {
+    throw new Error("La table FutPulse doit contenir les colonnes « titre » et « contenu ».");
+  }
+  const sourceNames = [...new Set(parseJsonArray(draft.sources_json)
+    .map(source => cleanText(source.media || source.source_name, 120)).filter(Boolean))];
+  const values = {
+    titre: draft.title,
+    contenu: draft.article,
+    resume: draft.summary || null,
+    résumé: draft.summary || null,
+    categorie: draft.category || null,
+    source: sourceNames.join(", ") || null,
+    statut: "brouillon"
+  };
+  const selected = columns.filter(column => Object.prototype.hasOwnProperty.call(values, column.name));
+  if (selected.some(column => column.data_type !== "text")) {
+    throw new Error("Une colonne de destination possède un type incompatible avec l'article.");
+  }
+  const quoteIdentifier = value => '"' + String(value).replace(/"/g, '""') + '"';
+  const rowId = draft.id;
+  const names = selected.map(column => quoteIdentifier(column.physical_name));
+  const placeholders = selected.map(() => "?");
+  await env.DB.prepare(
+    "INSERT OR IGNORE INTO " + quoteIdentifier(access.physical_name) +
+    " (row_id, " + names.join(", ") + ") VALUES (?, " + placeholders.join(", ") + ")"
+  ).bind(rowId, ...selected.map(column => values[column.name])).run();
+  return rowId;
+}
+
 export async function handleEditorialAgentRequest(request, env, path, user) {
-  const match = path.match(/^\/api\/projects\/([^/]+)\/editorial-agent\/(drafts|generate)(?:\/([^/]+))?(?:\/(recheck))?$/);
+  const match = path.match(/^\/api\/projects\/([^/]+)\/editorial-agent\/(drafts|generate)(?:\/([^/]+))?(?:\/(recheck|transfer))?$/);
   if (!match || !["GET", "POST", "PATCH"].includes(request.method)) return null;
 
   const projectId = decodeURIComponent(match[1]);
@@ -385,6 +438,36 @@ export async function handleEditorialAgentRequest(request, env, path, user) {
       applied,
       ai_generation_used: false
     });
+  }
+
+
+  if (action === "drafts" && draftId && subAction === "transfer" && request.method === "POST") {
+    const draft = await env.DB.prepare(
+      "SELECT id, title, article, summary, category, sources_json, status, published_row_id " +
+      "FROM editorial_drafts WHERE id = ? AND user_id = ? AND project_id = ? LIMIT 1"
+    ).bind(draftId, user.id, projectId).first();
+    if (!draft) return Response.json({ error: "Brouillon introuvable." }, { status: 404 });
+    if (draft.status !== "approved") {
+      return Response.json({ error: "Seuls les brouillons déjà approuvés peuvent être transmis aux actualités." }, { status: 409 });
+    }
+    if (draft.published_row_id) {
+      return Response.json({ message: "Cet article est déjà présent dans les actualités.", row_id: draft.published_row_id, already_transferred: true });
+    }
+    try {
+      const rowId = await transferEditorialDraftToApplicationNews(env, projectId, user, draft);
+      await env.DB.prepare(
+        "UPDATE editorial_drafts SET published_row_id = ?, updated_at = CURRENT_TIMESTAMP " +
+        "WHERE id = ? AND user_id = ? AND project_id = ? AND status = 'approved' " +
+        "AND (published_row_id IS NULL OR published_row_id = '')"
+      ).bind(rowId, draftId, user.id, projectId).run();
+      return Response.json({
+        message: "Article transmis dans « Actualités enregistrées » avec le statut brouillon. Il n'est pas publié.",
+        row_id: rowId,
+        status: "draft"
+      });
+    } catch (error) {
+      return Response.json({ error: cleanText(error?.message, 500) || "Impossible de transmettre l'article aux actualités." }, { status: 409 });
+    }
   }
 
   if (action === "drafts" && request.method === "GET" && !draftId) {
@@ -471,18 +554,42 @@ export async function handleEditorialAgentRequest(request, env, path, user) {
     }
     const note = cleanText(body.note, 1000);
     const nextStatus = decision === "approve" ? "approved" : "rejected";
-    const updated = await env.DB.prepare(`
-      UPDATE editorial_drafts
-      SET status = ?, rejection_note = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ? AND user_id = ? AND project_id = ? AND status = 'pending_review'
-    `).bind(nextStatus, decision === "reject" ? note : null, draftId, user.id, projectId).run();
+    let linkedRowId = null;
+    if (decision === "approve") {
+      const draft = await env.DB.prepare(
+        "SELECT id, title, article, summary, category, sources_json, status, published_row_id " +
+        "FROM editorial_drafts WHERE id = ? AND user_id = ? AND project_id = ? AND status = 'pending_review' LIMIT 1"
+      ).bind(draftId, user.id, projectId).first();
+      if (!draft) {
+        const exists = await env.DB.prepare("SELECT status FROM editorial_drafts WHERE id = ? AND user_id = ? AND project_id = ? LIMIT 1")
+          .bind(draftId, user.id, projectId).first();
+        if (!exists) return Response.json({ error: "Brouillon introuvable." }, { status: 404 });
+        return Response.json({ error: "Ce brouillon a déjà été traité.", status: exists.status }, { status: 409 });
+      }
+      try {
+        linkedRowId = await transferEditorialDraftToApplicationNews(env, projectId, user, draft);
+      } catch (error) {
+        return Response.json({ error: cleanText(error?.message, 500) || "Impossible de transmettre l'article aux actualités." }, { status: 409 });
+      }
+    }
+    const updated = await env.DB.prepare(
+      "UPDATE editorial_drafts SET status = ?, rejection_note = ?, reviewed_at = CURRENT_TIMESTAMP, " +
+      "updated_at = CURRENT_TIMESTAMP, published_row_id = COALESCE(?, published_row_id) " +
+      "WHERE id = ? AND user_id = ? AND project_id = ? AND status = 'pending_review'"
+    ).bind(nextStatus, decision === "reject" ? note : null, linkedRowId, draftId, user.id, projectId).run();
     if (!updated.meta || updated.meta.changes !== 1) {
       const exists = await env.DB.prepare("SELECT status FROM editorial_drafts WHERE id = ? AND user_id = ? AND project_id = ? LIMIT 1")
         .bind(draftId, user.id, projectId).first();
       if (!exists) return Response.json({ error: "Brouillon introuvable." }, { status: 404 });
       return Response.json({ error: "Ce brouillon a déjà été traité.", status: exists.status }, { status: 409 });
     }
-    return Response.json({ message: decision === "approve" ? "Brouillon approuvé. Il n'est pas encore publié." : "Brouillon refusé.", status: nextStatus });
+    return Response.json({
+      message: decision === "approve"
+        ? "Brouillon approuvé et transmis dans « Actualités enregistrées » avec le statut brouillon. Il n'est pas publié."
+        : "Brouillon refusé.",
+      status: nextStatus,
+      published_row_id: linkedRowId
+    });
   }
 
   return Response.json({ error: "Route éditoriale introuvable." }, { status: 404 });
