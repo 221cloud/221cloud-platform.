@@ -9251,11 +9251,11 @@ async function loadEditorialDrafts() {
           '</ul></details>';
       }
       if (draft.rejection_note) html += '<p class="muted">Motif : ' + escapeHTML(draft.rejection_note) + '</p>';
-      if (draft.status === "pending_review") html += '<div class="item-actions"><button class="secondary" type="button" data-editorial-edit="true">Modifier le brouillon</button><button class="secondary" type="button" data-editorial-recheck="true" data-project-id="' + escapeHTML(window.editorialAgentProjectId) + '" data-draft-id="' + escapeHTML(draft.id) + '">Réexaminer les points</button><button type="button" onclick="reviewEditorialDraft(\'' + escapeJSAttribute(window.editorialAgentProjectId) + '\',\'' + escapeJSAttribute(draft.id) + '\',\'approve\')">Approuver le brouillon</button><button class="danger" type="button" onclick="reviewEditorialDraft(\'' + escapeJSAttribute(window.editorialAgentProjectId) + '\',\'' + escapeJSAttribute(draft.id) + '\',\'reject\')">Refuser</button></div><div class="notice" data-editorial-edit-form style="display:none"><label>Titre<input data-edit-title maxlength="300" value="' + escapeHTML(draft.title || '') + '"></label><label>Résumé<textarea data-edit-summary rows="3">' + escapeHTML(draft.summary || '') + '</textarea></label><label>Article<textarea data-edit-article rows="12">' + escapeHTML(draft.article || '') + '</textarea></label><div class="item-actions"><button type="button" data-editorial-save="true">Enregistrer les modifications</button><button class="secondary" type="button" data-editorial-cancel="true">Annuler</button></div><p class="muted" data-editorial-edit-message aria-live="polite"></p></div><div class="notice" data-editorial-recheck-result aria-live="polite" style="display:none"></div>';
+      if (draft.status === "pending_review") html += '<div class="item-actions"><button class="secondary" type="button" data-editorial-edit="true">Modifier le brouillon</button><button class="secondary" type="button" data-editorial-recheck="true" data-project-id="' + escapeHTML(window.editorialAgentProjectId) + '" data-draft-id="' + escapeHTML(draft.id) + '">Réexaminer les points</button><button type="button" data-editorial-review="approve" data-project-id="' + escapeHTML(window.editorialAgentProjectId) + '">Approuver le brouillon</button><button class="danger" type="button" data-editorial-review="reject" data-project-id="' + escapeHTML(window.editorialAgentProjectId) + '">Refuser</button></div><div class="notice" data-editorial-edit-form style="display:none"><label>Titre<input data-edit-title maxlength="300" value="' + escapeHTML(draft.title || '') + '"></label><label>Résumé<textarea data-edit-summary rows="3">' + escapeHTML(draft.summary || '') + '</textarea></label><label>Article<textarea data-edit-article rows="12">' + escapeHTML(draft.article || '') + '</textarea></label><div class="item-actions"><button type="button" data-editorial-save="true">Enregistrer les modifications</button><button class="secondary" type="button" data-editorial-cancel="true">Annuler</button></div><p class="muted" data-editorial-edit-message aria-live="polite"></p></div><div class="notice" data-editorial-recheck-result aria-live="polite" style="display:none"></div>';
       return html + '</article>';
     }).join("");
     host.onclick = async event => {
-      const button = event.target.closest("[data-editorial-edit], [data-editorial-save], [data-editorial-cancel], [data-editorial-recheck], [data-editorial-recheck-apply]");
+      const button = event.target.closest("[data-editorial-edit], [data-editorial-save], [data-editorial-cancel], [data-editorial-review], [data-editorial-recheck], [data-editorial-recheck-apply]");
       if (!button || !host.contains(button)) return;
       const card = button.closest(".item-card");
       if (!card) return;
@@ -9266,6 +9266,10 @@ async function loadEditorialDrafts() {
       }
       if (button.hasAttribute("data-editorial-cancel")) {
         editForm.style.display = "none";
+        return;
+      }
+      if (button.hasAttribute("data-editorial-review")) {
+        await reviewEditorialDraft(button.dataset.projectId, card.dataset.draftId, button.dataset.editorialReview);
         return;
       }
       if (button.hasAttribute("data-editorial-save")) {
