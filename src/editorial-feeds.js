@@ -280,7 +280,11 @@ function classifyEditorialDossier(title) {
     let subtopic = "Décision et conséquences du TAS";
     if (/amrabat/.test(value)) subtopic = "Réaction de Sofyan Amrabat";
     else if (/abdoulaye fall|president|president.*federation|juge|judge|contact/.test(value)) subtopic = "Déclarations sur le dossier du TAS";
-    else if (/appel|appeal|recours/.test(value)) subtopic = "Recours et procédure";
+    else if (/appel|appeal|recours|procedure|procedural/.test(value)) subtopic = "Recours et procédure";
+    else if (/classement fifa|fifa ranking|points fifa|ranking points/.test(value)) subtopic = "Conséquences sur le classement FIFA";
+    else if (/caisse|amende|financ|payer|paiement|indemnit|compensation|costs/.test(value)) subtopic = "Conséquences financières";
+    else if (/reattribu|re-attribu|victoire|resultat|result|en joie|fataliste|reactions?/.test(value)) subtopic = "Réattribution du résultat et réactions";
+    else if (/senti le coup venir|avant la decision|avant le verdict|anticip|pressenti|prevoir|predire/.test(value)) subtopic = "Éléments précédant la décision";
     return { key: "senegal-maroc-tas", title: "Sénégal–Maroc · Dossier du TAS", subtopic };
   }
   return null;
