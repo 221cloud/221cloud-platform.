@@ -34,10 +34,12 @@ function safeHttpUrl(value) {
 function parseFeed(xml, source) {
   // Accepte RSS/Atom avec ou sans préfixes XML (ex. content:item, atom:entry).
   const blocks = [...xml.matchAll(/<(?:[\w.-]+:)?(item|entry)\b([^>]*)>([\s\S]*?)<\/(?:[\w.-]+:)?\1\s*>/gi)].slice(0, MAX_ITEMS_PER_FEED);
-  return blocks.map((match, index) => {
+  const diagnostics = { detected_blocks: blocks.length, titles_found: 0, links_found: 0, https_links: 0, rejected_links: 0 };
+  const items = blocks.map((match, index) => {
     const attributes = match[2] || "";
     const block = match[3];
     const title = tagValue(block, "title").slice(0, 500);
+    if (title) diagnostics.titles_found++;
     const description = (tagValue(block, "description") || tagValue(block, "summary") || tagValue(block, "encoded") || tagValue(block, "content")).slice(0, 3000);
     let link = tagValue(block, "link");
     if (!link) {
@@ -50,13 +52,18 @@ function parseFeed(xml, source) {
       const aboutMatch = attributes.match(/(?:[\w.-]+:)?about=["']([^"']+)["']/i);
       link = aboutMatch ? decodeXml(aboutMatch[1]) : "";
     }
+    if (link) diagnostics.links_found++;
     const url = safeHttpUrl(link);
+    if (url) diagnostics.https_links++;
+    else if (link) diagnostics.rejected_links++;
     const published = tagValue(block, "pubDate") || tagValue(block, "published") || tagValue(block, "updated") || tagValue(block, "date") || tagValue(block, "issued");
     const parsedDate = published ? new Date(published) : null;
     const publishedAt = parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate.toISOString() : null;
     if (!title || !url) return null;
     return { title, description, url, published_at: publishedAt, source_id: source.id, source_name: source.name, source_domain: source.domain, position: index };
   }).filter(Boolean);
+  diagnostics.accepted_items = items.length;
+  return { items, diagnostics };
 }
 
 async function fetchFeed(source) {
@@ -87,7 +94,8 @@ async function fetchFeed(source) {
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
   const xml = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
   if (!/<(?:rss|feed|rdf:RDF)\b/i.test(xml)) throw new Error("Format RSS/Atom non reconnu.");
-  const items = parseFeed(xml, source);
+  const parsed = parseFeed(xml, source);
+  const items = parsed.items;
   const itemTagMatches = [...xml.matchAll(/<(?:[\w.-]+:)?(?:item|entry)\b/gi)];
   const firstBlockMatch = xml.match(/<(?:[\w.-]+:)?(?:item|entry)\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?(?:item|entry)\s*>/i);
   const firstBlock = firstBlockMatch ? firstBlockMatch[1] : "";
@@ -96,6 +104,7 @@ async function fetchFeed(source) {
     root: (xml.match(/<\?xml[^>]*\?>\s*<([^\s>!?]+)/i) || xml.match(/<([^\s>!?]+)/))?.[1] || "inconnu",
     item_entry_tags: itemTagMatches.length,
     first_item_tags: firstBlockTags,
+    ...parsed.diagnostics,
     parsed_items: items.length
   };
   return { items, diagnostics, httpStatus: response.status, contentType: response.headers.get("Content-Type") || "non précisé" };
@@ -156,7 +165,7 @@ export async function handleEditorialFeedsRequest(request, env, path, user) {
           `).bind(id, user.id, projectId, item.source_id, item.source_name, item.source_domain, item.title, item.description, item.url, item.published_at).run();
           saved += Number(result.meta?.changes || 0);
         }
-        results.push({ source: source.name, received: items.length, saved, status: items.length ? "ok" : "empty", http_status: feed.httpStatus, content_type: feed.contentType, diagnostics: feed.diagnostics, message: items.length ? "Flux accessible et articles reconnus." : "Flux accessible (HTTP " + feed.httpStatus + "), balises item/entry détectées : " + feed.diagnostics.item_entry_tags + ", premier article : " + (feed.diagnostics.first_item_tags.join(", ") || "aucune balise détectée") + ". Aucun article exploitable n’a été extrait." });
+        results.push({ source: source.name, received: items.length, saved, status: items.length ? "ok" : "empty", http_status: feed.httpStatus, content_type: feed.contentType, diagnostics: feed.diagnostics, message: items.length ? "Flux accessible et articles reconnus." : "Flux accessible (HTTP " + feed.httpStatus + "), blocs détectés : " + feed.diagnostics.detected_blocks + ", titres : " + feed.diagnostics.titles_found + ", liens : " + feed.diagnostics.links_found + ", liens HTTPS valides : " + feed.diagnostics.https_links + ", liens rejetés : " + feed.diagnostics.rejected_links + ", premier article : " + (feed.diagnostics.first_item_tags.join(", ") || "aucune balise détectée") + ". Aucun article exploitable n’a été extrait." });
       } catch (error) {
         results.push({ source: source.name, received: 0, saved: 0, status: "error", message: String(error?.message || "Erreur de collecte").slice(0, 180) });
       }
