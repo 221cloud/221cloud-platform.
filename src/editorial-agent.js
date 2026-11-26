@@ -358,6 +358,28 @@ async function generateEditorialDraft(request, env, projectId, user) {
 }
 
 
+export async function runScheduledEditorialGeneration(env, projectId, user, itemIds) {
+  const selected = Array.isArray(itemIds)
+    ? [...new Set(itemIds.filter(id => typeof id === "string"))].slice(0, EDITORIAL_AI_MAX_SOURCES)
+    : [];
+  if (!selected.length) {
+    return { status: "skipped", reason: "Aucun nouveau sujet récent et exploitable." };
+  }
+  const request = new Request("https://internal.futpulse/editorial-agent/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_ids: selected })
+  });
+  const response = await generateEditorialDraft(request, env, projectId, user);
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || "La génération éditoriale automatique a échoué.");
+  return {
+    status: payload.draft?.transferred ? "transferred" : "generated_transfer_failed",
+    title: payload.draft?.title || "",
+    message: payload.message || ""
+  };
+}
+
 async function transferEditorialDraftToApplicationNews(env, projectId, user, draft) {
   if (draft.published_row_id) return draft.published_row_id;
   const tableId = "ddf4f9ce-ffc1-4361-be6b-00b7a129aeb8";

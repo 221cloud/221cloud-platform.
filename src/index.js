@@ -1,5 +1,6 @@
 import { handleEditorialAgentRequest } from "./editorial-agent.js";
-import { handleEditorialFeedsRequest } from "./editorial-feeds.js";
+import { handleEditorialFeedsRequest, syncEditorialFeedsForProject, selectScheduledEditorialSourceIds } from "./editorial-feeds.js";
+import { runScheduledEditorialGeneration } from "./editorial-agent.js";
 const ITERATIONS = 100000; // Limite prise en charge par Web Crypto sur Cloudflare Workers.
 const SESSION_DAYS = 7;
 const SESSION_IDLE_MINUTES = 60;
@@ -1971,6 +1972,61 @@ async function executeProjectHealthCheck(env, task) {
   };
 }
 
+async function runFutPulseEditorialSchedule(env, scheduledTime) {
+  const scheduledDate = new Date(scheduledTime);
+  const hour = scheduledDate.getUTCHours(); // Le Sénégal est à UTC+0.
+  if (scheduledDate.getUTCMinutes() !== 0 || ![8, 13, 19].includes(hour)) return;
+
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS futpulse_editorial_auto_runs (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      scheduled_slot TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'running',
+      result_json TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      completed_at TEXT
+    )
+  `).run();
+
+  const slot = scheduledDate.toISOString().slice(0, 10) + "T" + String(hour).padStart(2, "0") + ":00:00Z";
+  const projects = await env.DB.prepare(
+    "SELECT id, user_id, name FROM projects WHERE type = 'application' AND deleted_at IS NULL AND lower(name) = 'futpulse'"
+  ).all();
+
+  for (const project of projects.results || []) {
+    const runId = crypto.randomUUID();
+    const claimed = await env.DB.prepare(
+      "INSERT OR IGNORE INTO futpulse_editorial_auto_runs (id, project_id, user_id, scheduled_slot, status) VALUES (?, ?, ?, ?, 'running')"
+    ).bind(runId, project.id, project.user_id, slot).run();
+    if (Number(claimed.meta?.changes || 0) !== 1) continue;
+
+    try {
+      const user = { id: project.user_id };
+      const collection = await syncEditorialFeedsForProject(env, project.id, user);
+      const usableFeeds = collection.results.filter(item => item.status === "ok" && item.received > 0).length;
+      let generation = { status: "skipped", reason: "Aucune source exploitable n'a été collectée." };
+      if (usableFeeds > 0) {
+        const itemIds = await selectScheduledEditorialSourceIds(env, project.id, user);
+        generation = await runScheduledEditorialGeneration(env, project.id, user, itemIds);
+      }
+      const result = { collected_items: collection.saved, usable_feeds: usableFeeds, generation };
+      await env.DB.prepare(
+        "UPDATE futpulse_editorial_auto_runs SET status = ?, result_json = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?"
+      ).bind(generation.status === "generated_transfer_failed" ? "transfer_failed" : "completed", JSON.stringify(result), runId).run();
+      console.log("FUTPULSE EDITORIAL AUTOMATION:", { projectId: project.id, slot, ...result });
+    } catch (error) {
+      const message = String(error?.message || "Erreur d'automatisation éditoriale").slice(0, 1000);
+      await env.DB.prepare(
+        "UPDATE futpulse_editorial_auto_runs SET status = 'failed', last_error = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?"
+      ).bind(message, runId).run();
+      console.error("ERREUR AUTOMATISATION EDITORIALE FUTPULSE:", { projectId: project.id, slot, error: message });
+    }
+  }
+}
+
 async function runAutomationScheduler(env, scheduledTime) {
   await ensureAutomationTasksSchema(env);
 
@@ -2622,7 +2678,11 @@ async function handleAssistantMcpRequest(request, env) {
 
 export default {
   async scheduled(controller, env, ctx) {
-    ctx.waitUntil(runAutomationScheduler(env, controller?.scheduledTime || Date.now()));
+    const scheduledTime = controller?.scheduledTime || Date.now();
+    ctx.waitUntil(Promise.all([
+      runAutomationScheduler(env, scheduledTime),
+      runFutPulseEditorialSchedule(env, scheduledTime)
+    ]));
   },
 
   async fetch(request, env) {
