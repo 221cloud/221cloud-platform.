@@ -327,12 +327,13 @@ async function generateEditorialDraft(request, env, projectId, user) {
 }
 
 export async function handleEditorialAgentRequest(request, env, path, user) {
-  const match = path.match(/^\/api\/projects\/([^/]+)\/editorial-agent\/(drafts|generate)(?:\/([^/]+))?$/);
+  const match = path.match(/^\/api\/projects\/([^/]+)\/editorial-agent\/(drafts|generate)(?:\/([^/]+))?(?:\/(recheck))?$/);
   if (!match || !["GET", "POST", "PATCH"].includes(request.method)) return null;
 
   const projectId = decodeURIComponent(match[1]);
   const action = match[2];
   const draftId = match[3] ? decodeURIComponent(match[3]) : null;
+  const subAction = match[4] || null;
   const project = await env.DB.prepare(
     "SELECT id, name, type FROM projects WHERE id = ? AND user_id = ? AND deleted_at IS NULL LIMIT 1"
   ).bind(projectId, user.id).first();
@@ -344,6 +345,46 @@ export async function handleEditorialAgentRequest(request, env, path, user) {
 
   if (action === "generate" && request.method === "POST" && !draftId) {
     return generateEditorialDraft(request, env, projectId, user);
+  }
+
+  if (action === "drafts" && draftId && subAction === "recheck" && request.method === "POST") {
+    const row = await env.DB.prepare(`
+      SELECT title, article, summary, social_post, sources_json, fact_check_json
+      FROM editorial_drafts
+      WHERE id = ? AND user_id = ? AND project_id = ?
+      LIMIT 1
+    `).bind(draftId, user.id, projectId).first();
+    if (!row) return Response.json({ error: "Brouillon introuvable." }, { status: 404 });
+
+    // Réexamen local et déterministe : aucune requête IA, aucun quota consommé.
+    // La première demande renvoie une proposition sans modifier la base.
+    const sources = parseJsonArray(row.sources_json);
+    const original = parseJsonArray(row.fact_check_json);
+    const proposed = reconcileEditorialEvidenceStatuses(original, sources);
+    const changedCount = proposed.reduce((count, item, index) =>
+      count + (item.status !== original[index]?.status ? 1 : 0), 0);
+    let applied = false;
+
+    let body = {};
+    try { body = await request.json(); } catch {}
+    if (body.apply === true) {
+      await env.DB.prepare(`
+        UPDATE editorial_drafts
+        SET fact_check_json = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND user_id = ? AND project_id = ?
+      `).bind(JSON.stringify(proposed), draftId, user.id, projectId).run();
+      applied = true;
+    }
+
+    return Response.json({
+      message: applied
+        ? "Nouvelle analyse appliquée. Le texte du brouillon reste inchangé."
+        : "Analyse proposée uniquement. Rien n'a été modifié.",
+      fact_check: proposed,
+      changed_count: changedCount,
+      applied,
+      ai_generation_used: false
+    });
   }
 
   if (action === "drafts" && request.method === "GET" && !draftId) {

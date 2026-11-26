@@ -9251,10 +9251,45 @@ async function loadEditorialDrafts() {
           '</ul></details>';
       }
       if (draft.rejection_note) html += '<p class="muted">Motif : ' + escapeHTML(draft.rejection_note) + '</p>';
-      if (draft.status === "pending_review") html += '<div class="item-actions"><button type="button" onclick="reviewEditorialDraft(\'' + escapeJSAttribute(window.editorialAgentProjectId) + '\',\'' + escapeJSAttribute(draft.id) + '\',\'approve\')">Approuver le brouillon</button><button class="danger" type="button" onclick="reviewEditorialDraft(\'' + escapeJSAttribute(window.editorialAgentProjectId) + '\',\'' + escapeJSAttribute(draft.id) + '\',\'reject\')">Refuser</button></div>';
+      if (draft.status === "pending_review") html += '<div class="item-actions"><button class="secondary" type="button" onclick="recheckEditorialDraft(\'' + escapeJSAttribute(window.editorialAgentProjectId) + '\',\'' + escapeJSAttribute(draft.id) + '\',false)">Réexaminer les points</button><button type="button" onclick="reviewEditorialDraft(\'' + escapeJSAttribute(window.editorialAgentProjectId) + '\',\'' + escapeJSAttribute(draft.id) + '\',\'approve\')">Approuver le brouillon</button><button class="danger" type="button" onclick="reviewEditorialDraft(\'' + escapeJSAttribute(window.editorialAgentProjectId) + '\',\'' + escapeJSAttribute(draft.id) + '\',\'reject\')">Refuser</button></div><div id="editorialRecheck-' + escapeHTML(draft.id) + '"></div>';
       return html + '</article>';
     }).join("");
   } catch (error) { host.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message) + '</div>'; }
+}
+
+async function recheckEditorialDraft(projectId, draftId, apply) {
+  const host = document.getElementById("editorialRecheck-" + draftId);
+  if (!host) return;
+  if (apply && !confirm("Appliquer uniquement la nouvelle analyse des points à vérifier ? Le titre, l'article et le résumé resteront inchangés.")) return;
+  host.innerHTML = '<p class="muted">Réexamen des sources enregistrées...</p>';
+  try {
+    const result = await api("/projects/" + encodeURIComponent(projectId) + "/editorial-agent/drafts/" + encodeURIComponent(draftId) + "/recheck", {
+      method: "POST",
+      body: JSON.stringify({ apply: apply === true })
+    });
+    if (result.applied) {
+      alert("Analyse actualisée. Le texte du brouillon n'a pas été modifié.");
+      await loadEditorialDrafts();
+      return;
+    }
+    const labels = {
+      corrobore_extraits: "Corroboré dans les extraits",
+      source_unique: "Source unique",
+      multi_sources_non_verifie: "Plusieurs sources · non vérifié",
+      information_incomplete: "À vérifier",
+      contradiction_a_verifier: "Contradiction à vérifier"
+    };
+    const items = Array.isArray(result.fact_check) ? result.fact_check : [];
+    host.innerHTML = '<div class="notice"><strong>Proposition d’analyse — non enregistrée</strong><p>' +
+      (Number(result.changed_count) || 0) + ' statut(s) à actualiser. Aucun texte ni point de contrôle n’a encore été modifié. Aucun appel IA et aucune génération consommée.</p><ul>' +
+      items.map(item => '<li><strong>' + escapeHTML(labels[item.status] || item.status || 'À vérifier') + '</strong> · ' +
+        escapeHTML(item.claim || '') + (item.note ? ' — ' + escapeHTML(item.note) : '') + '</li>').join('') +
+      '</ul>' + (Number(result.changed_count) > 0
+        ? '<button type="button" onclick="recheckEditorialDraft(\'' + escapeJSAttribute(projectId) + '\',\'' + escapeJSAttribute(draftId) + '\',true)">Appliquer cette analyse</button>'
+        : '<p class="muted">Aucun changement de statut proposé.</p>') + '</div>';
+  } catch (error) {
+    host.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message) + '</div>';
+  }
 }
 
 async function createEditorialTestDraft(projectId) {
