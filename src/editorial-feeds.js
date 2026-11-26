@@ -261,12 +261,19 @@ function buildStoryClusters(rows) {
 
 function classifyEditorialDossier(title) {
   const value = String(title || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  if (/caf[\s-]*awards?/.test(value)) {
+  const isCafAwards =
+    /caf[\s-]*awards?/.test(value) ||
+    /ballon d.?or africain|joueur africain de l.?annee|african player of the year/.test(value) ||
+    /entraineur caf de l.?annee|coach of the year/.test(value) ||
+    /meilleur gardien africain|best african goalkeeper/.test(value) ||
+    /jeune joueur caf|jeune joueur africain|young african player/.test(value);
+  if (isCafAwards) {
     let subtopic = "Autres nominations";
     if (/but de l.?annee|goal of the year/.test(value)) subtopic = "But de l’année";
     else if (/meilleur gardien|best goalkeeper|goalkeeper/.test(value)) subtopic = "Meilleur gardien";
-    else if (/joueur africain|african player|player of the year/.test(value)) subtopic = "Joueur africain de l’année";
+    else if (/joueur africain|african player|ballon d.?or africain|african player of the year/.test(value)) subtopic = "Joueur africain de l’année";
     else if (/pape thiaw|entraineur|coach of the year|national team|equipe nationale/.test(value)) subtopic = "Entraîneur et équipe nationale";
+    else if (/jeune joueur|young player|youth player/.test(value)) subtopic = "Jeune joueur africain";
     return { key: "caf-awards-2026", title: "CAF Awards 2026", subtopic };
   }
   if (/\b(tas|cas)\b/.test(value) && /(senegal|maroc|morocco|amrabat|abdoulaye fall)/.test(value)) {
@@ -282,7 +289,7 @@ function areEditorialDossierStoriesCompatible(left, right) {
   const leftDossier = classifyEditorialDossier(left?.title);
   const rightDossier = classifyEditorialDossier(right?.title);
   // Les catégories des CAF Awards sont des sujets distincts :
-  // elles ne doivent jamais être fusionnées dans un même groupe d'articles.
+  // elles ne doivent jamais être fusionnées dans un même groupe d’articles.
   if (leftDossier?.key === "caf-awards-2026" &&
       rightDossier?.key === "caf-awards-2026" &&
       leftDossier.subtopic !== rightDossier.subtopic) return false;
@@ -292,22 +299,25 @@ function areEditorialDossierStoriesCompatible(left, right) {
 function buildStoryDossiers(clusters) {
   const parents = new Map();
   for (const cluster of clusters) {
-    const titles = (cluster.items || []).map(item => item.title).filter(Boolean);
-    if (!titles.length) continue;
-    const labels = titles.map(classifyEditorialDossier);
-    if (labels.some(label => !label)) continue;
-    const parentKeys = new Set(labels.map(label => label.key));
-    const subtopics = new Set(labels.map(label => label.subtopic));
-    if (parentKeys.size !== 1 || subtopics.size !== 1) continue;
-    const label = labels[0];
-    if (!parents.has(label.key)) parents.set(label.key, { key: label.key, title: label.title, children: [] });
-    parents.get(label.key).children.push({
-      cluster_id: cluster.id,
-      headline: cluster.headline,
-      subtopic: label.subtopic,
-      item_count: cluster.item_count,
-      distinct_sources: cluster.distinct_sources
-    });
+    const itemsBySubtopic = new Map();
+    for (const item of cluster.items || []) {
+      const label = classifyEditorialDossier(item.title);
+      if (!label) continue;
+      const groupKey = label.key + "::" + label.subtopic;
+      if (!itemsBySubtopic.has(groupKey)) itemsBySubtopic.set(groupKey, { label, items: [] });
+      itemsBySubtopic.get(groupKey).items.push(item);
+    }
+    for (const { label, items } of itemsBySubtopic.values()) {
+      if (!parents.has(label.key)) parents.set(label.key, { key: label.key, title: label.title, children: [] });
+      const sources = new Set(items.map(item => item.source_domain).filter(Boolean));
+      parents.get(label.key).children.push({
+        cluster_id: cluster.id,
+        headline: items[0]?.title || cluster.headline,
+        subtopic: label.subtopic,
+        item_count: items.length,
+        distinct_sources: sources.size
+      });
+    }
   }
   return [...parents.values()]
     .filter(parent => parent.children.length >= 2)
