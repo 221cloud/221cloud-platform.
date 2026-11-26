@@ -41,6 +41,12 @@ function cleanText(value, max) {
   return String(value ?? "").trim().slice(0, max);
 }
 
+function normalizeEditorialCopy(value, max) {
+  return cleanText(value, max)
+    .replace(/\\bse sont imposes a egalite\\b/gi, "ont fait match nul")
+    .replace(/\\bse sont imposees a egalite\\b/gi, "ont fait match nul");
+}
+
 
 const EDITORIAL_AI_MODEL = "@cf/zai-org/glm-4.7-flash";
 const EDITORIAL_AI_DAILY_LIMIT = 5;
@@ -206,6 +212,7 @@ async function generateEditorialDraft(request, env, projectId, user) {
     "Une répétition de la même information par plusieurs médias ne prouve pas une confirmation indépendante. Des articles qui reprennent une même dépêche ou un même communiqué ne sont pas des confirmations indépendantes.",
     "Pour chaque claim de fact_check, distingue strictement : source_unique (un seul domaine distinct apporte un élément explicite), corrobore_extraits (au moins deux domaines distincts mentionnent explicitement le même fait dans les extraits fournis), multi_sources_non_verifie (plusieurs sources sont présentes mais les extraits ne corroborent pas clairement ce claim), information_incomplete (élément absent ou insuffisant) et contradiction_a_verifier (les extraits se contredisent).",
     "Cohérence obligatoire : si la note d’un claim cite explicitement au moins deux médias distincts comme rapportant le même fait (ex. « BBC Sport et Sky Sports mentionnent tous deux… »), son statut doit être corrobore_extraits et jamais source_unique.",
+    "Cohérence article/contrôle obligatoire : avant de répondre, compare chaque affirmation factuelle du titre, du résumé, de l’article et du post social avec les extraits RSS et avec fact_check. Ne présente jamais comme un fait établi une information classée information_incomplete, multi_sources_non_verifie ou contradiction_a_verifier : omets-la, ou formule explicitement qu’elle reste à confirmer. Une information source_unique peut être mentionnée uniquement en l’attribuant clairement au média concerné. Si un détail manque dans les extraits, ne l’affirme pas dans le texte puis ne le déclare pas absent dans la note : les deux doivent raconter la même chose. Les notes doivent décrire précisément ce que les extraits disent ou ne disent pas, sans avertissement générique qui contredit le corps de l’article.",
     "En français sportif, formule un score partagé comme « ont fait match nul (2-2) »; évite « se sont imposés à égalité ». N’ajoute pas de minute exacte si elle n’apparaît pas dans les sources fournies. La validation humaine peut ensuite enrichir le brouillon.",
     "N'utilise corrobore_extraits que si les extraits RSS soutiennent directement le même fait; ne déduis jamais la confirmation du simple nombre de sources sélectionnées. Ne prétends pas avoir vérifié l'indépendance éditoriale des médias.",
     "Si les descriptions sont insuffisantes, écris un texte court qui expose les limites au lieu de combler les trous.",
@@ -234,8 +241,8 @@ async function generateEditorialDraft(request, env, projectId, user) {
       ? generated
       : (generated?.response || generated?.result?.response || generated?.output_text || generated?.choices?.[0]?.message?.content || "");
     const draft = parseModelJson(raw);
-    const title = cleanText(draft.headline, 300);
-    const article = cleanText(draft.article, MAX_EDITORIAL_TEXT);
+    const title = normalizeEditorialCopy(draft.headline, 300);
+    const article = normalizeEditorialCopy(draft.article, MAX_EDITORIAL_TEXT);
     if (!title || article.length < 120) throw new Error("Le texte généré est trop court ou incomplet.");
 
     const asArray = value => Array.isArray(value) ? value.slice(0, 30) : [];
@@ -263,8 +270,8 @@ async function generateEditorialDraft(request, env, projectId, user) {
     await env.DB.prepare("INSERT INTO editorial_drafts (id,user_id,project_id,title,article,summary,social_post,category,keywords_json,sources_json,fact_check_json,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending_review')")
       .bind(
         id, user.id, projectId, title, article,
-        cleanText(draft.summary, 2000),
-        cleanText(draft.social_post, 3000),
+        normalizeEditorialCopy(draft.summary, 2000),
+        normalizeEditorialCopy(draft.social_post, 3000),
         cleanText(draft.category, 120),
         JSON.stringify(asArray(draft.keywords).map(value => cleanText(value, 80))),
         JSON.stringify(sourcePayload),
