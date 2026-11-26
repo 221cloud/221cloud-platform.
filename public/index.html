@@ -9184,7 +9184,7 @@ async function openApplicationEditor(projectId) {
     "<div id=\"applicationTrashPanel\" class=\"item-card\" hidden><div class=\"section-head\"><h3>Corbeille de l'application</h3><button class=\"secondary\" type=\"button\" onclick=\"toggleApplicationTrash(false)\">Fermer</button></div><div id=\"applicationTrashList\"><p class=\"muted\">Chargement...</p></div></div></div>" +
     "<div class=\"card\"><div class=\"section-head\"><h2 id=\"applicationActiveFileTitle\">Éditeur</h2><span class=\"muted\">Code du fichier sélectionné</span></div>" +
     "<label for=\"applicationCodeEditor\">Contenu du fichier</label>" +
-    "<div class=\"ide-editor-toolbar\"><span id=\"applicationEditorLanguage\" class=\"ide-language-chip\">Détection du langage…</span><span id=\"applicationEditorStats\" class=\"muted\">0 ligne · 0 caractère</span><button id=\"applicationLegacyCompletionButton\" class=\"secondary\" type=\"button\" onclick=\"showApplicationEditorCompletions(true)\">Suggestions · Ctrl+Espace</button><button id=\"applicationCodeMirrorToggle\" class=\"secondary\" type=\"button\" onclick=\"toggleApplicationCodeMirror()\">Essayer CodeMirror</button></div>" +
+    "<div class=\"ide-editor-toolbar\"><span id=\"applicationEditorLanguage\" class=\"ide-language-chip\">Détection du langage…</span><label for=\"applicationEditorLanguageSelect\" class=\"muted\">Langage</label><select id=\"applicationEditorLanguageSelect\" aria-label=\"Choisir le langage de l’éditeur\" onchange=\"setApplicationEditorLanguage(this.value)\" style=\"max-width:180px\"><option value=\"auto\">Automatique (extension)</option><option value=\"html\">HTML</option><option value=\"css\">CSS</option><option value=\"javascript\">JavaScript</option><option value=\"typescript\">TypeScript</option><option value=\"jsx\">JSX</option><option value=\"tsx\">TSX</option><option value=\"python\">Python</option><option value=\"json\">JSON</option><option value=\"jsonc\">JSONC</option><option value=\"markdown\">Markdown</option><option value=\"mdx\">MDX</option><option value=\"sql\">SQL</option><option value=\"xml\">XML</option><option value=\"svg\">SVG</option></select><span id=\"applicationEditorStats\" class=\"muted\">0 ligne · 0 caractère</span><button id=\"applicationLegacyCompletionButton\" class=\"secondary\" type=\"button\" onclick=\"showApplicationEditorCompletions(true)\">Suggestions · Ctrl+Espace</button><button id=\"applicationCodeMirrorToggle\" class=\"secondary\" type=\"button\" onclick=\"toggleApplicationCodeMirror()\">Essayer CodeMirror</button></div>" +
     "<div class=\"ide-editor-shell\"><div id=\"applicationEditorLineNumbers\" class=\"ide-line-numbers\" aria-hidden=\"true\">1</div><pre id=\"applicationEditorHighlight\" class=\"ide-highlight\" aria-hidden=\"true\"></pre>" +
     "<textarea id=\"applicationCodeEditor\" spellcheck=\"false\" autocapitalize=\"off\" autocomplete=\"off\" autocorrect=\"off\" wrap=\"off\" style=\"width:100%;min-height:320px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.5;white-space:pre;overflow:auto\" placeholder=\"Chargement du code...\" aria-label=\"Éditeur de code\"></textarea><div id=\"applicationCodeMirrorHost\" class=\"application-codemirror-host\" hidden style=\"width:100%;height:420px;min-height:320px;overflow:hidden;border:1px solid #283653;border-radius:10px;background:#0b1222\"></div>" +
     "<div id=\"applicationEditorCompletions\" class=\"ide-completions\" role=\"listbox\" hidden></div></div>" +
@@ -9224,6 +9224,7 @@ async function openApplicationEditor(projectId) {
       files: files,
       savedFiles: { ...files },
       directories: directories,
+      languageOverrides: {},
       activeFile: files["index.html"] !== undefined ? "index.html" : Object.keys(files).sort()[0] || ""
     };
     renderApplicationEditorFile();
@@ -9497,8 +9498,29 @@ function replaceAllApplicationEditorMatches() {
 
 
 function getApplicationEditorLanguage(fileName) {
+  const overrides = applicationEditorState?.languageOverrides || {};
+  const override = overrides[fileName];
+  const labels = {html:"HTML",css:"CSS",javascript:"JavaScript",typescript:"TypeScript",jsx:"JSX",tsx:"TSX",python:"Python",json:"JSON",jsonc:"JSONC",markdown:"Markdown",mdx:"MDX",sql:"SQL",xml:"XML",svg:"SVG"};
+  if (override && labels[override]) return labels[override];
   const ext=String(fileName||"").split(".").pop().toLowerCase();
-  return ({html:"HTML",htm:"HTML",css:"CSS",js:"JavaScript",mjs:"JavaScript",ts:"TypeScript",tsx:"TypeScript JSX",jsx:"JavaScript JSX",json:"JSON",py:"Python",md:"Markdown",sql:"SQL",xml:"XML",svg:"SVG",sh:"Shell",yaml:"YAML",yml:"YAML"})[ext]||"Texte brut";
+  return ({html:"HTML",htm:"HTML",css:"CSS",js:"JavaScript",mjs:"JavaScript",cjs:"JavaScript",ts:"TypeScript",tsx:"TSX",jsx:"JSX",json:"JSON",jsonc:"JSONC",py:"Python",pyw:"Python",md:"Markdown",markdown:"Markdown",mdx:"MDX",sql:"SQL",xml:"XML",svg:"SVG",sh:"Shell",yaml:"YAML",yml:"YAML"})[ext]||"Texte brut";
+}
+function getApplicationEditorCodeMirrorFileName(fileName) {
+  const override = applicationEditorState?.languageOverrides?.[fileName];
+  const extensions = {html:"html",css:"css",javascript:"js",typescript:"ts",jsx:"jsx",tsx:"tsx",python:"py",json:"json",jsonc:"jsonc",markdown:"md",mdx:"mdx",sql:"sql",xml:"xml",svg:"svg"};
+  return override && extensions[override] ? "active." + extensions[override] : fileName;
+}
+function setApplicationEditorLanguage(language) {
+  if (!applicationEditorState || !applicationEditorState.activeFile) return;
+  const allowed = ["auto","html","css","javascript","typescript","jsx","tsx","python","json","jsonc","markdown","mdx","sql","xml","svg"];
+  if (!allowed.includes(language)) return;
+  if (language === "auto") delete applicationEditorState.languageOverrides[applicationEditorState.activeFile];
+  else applicationEditorState.languageOverrides[applicationEditorState.activeFile] = language;
+  updateApplicationEditorDecorations();
+  if (applicationCodeMirrorEnabled) mountApplicationCodeMirrorEditor().catch(error => {
+    const status = document.getElementById("applicationSaveStatus");
+    if (status) status.textContent = error.message || "Impossible de changer le mode de langage.";
+  });
 }
 function highlightApplicationEditorCode(source,language) {
   const esc=v=>String(v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
@@ -9522,8 +9544,10 @@ function syncApplicationEditorScroll(){
 function updateApplicationEditorDecorations(){
   const e=document.getElementById("applicationCodeEditor");if(!e)return;const src=e.value,lines=src.split("\n");
   const lang=getApplicationEditorLanguage(applicationEditorState?.activeFile);
-  const chip=document.getElementById("applicationEditorLanguage"),stats=document.getElementById("applicationEditorStats"),hi=document.getElementById("applicationEditorHighlight"),nums=document.getElementById("applicationEditorLineNumbers");
-  if(chip)chip.textContent=lang;if(stats)stats.textContent=lines.length+" ligne(s) · "+src.length+" caractère(s)";
+  const chip=document.getElementById("applicationEditorLanguage"),stats=document.getElementById("applicationEditorStats"),hi=document.getElementById("applicationEditorHighlight"),nums=document.getElementById("applicationEditorLineNumbers"),languageSelect=document.getElementById("applicationEditorLanguageSelect");
+  if(chip)chip.textContent=lang;
+  if(languageSelect)languageSelect.value=applicationEditorState?.languageOverrides?.[applicationEditorState.activeFile] || "auto";
+  if(stats)stats.textContent=lines.length+" ligne(s) · "+src.length+" caractère(s)";
   if(hi)hi.innerHTML=highlightApplicationEditorCode(src,lang);if(nums)nums.textContent=lines.map((_,i)=>i+1).join("\n");syncApplicationEditorScroll();
 }
 function showApplicationEditorCompletions(force=false){
@@ -9861,7 +9885,7 @@ async function mountApplicationCodeMirrorEditor() {
   const nextInstance = await window.CloudIDE221.mountEditor({
     host,
     value: editor.value,
-    fileName: applicationEditorState?.activeFile || "",
+    fileName: getApplicationEditorCodeMirrorFileName(applicationEditorState?.activeFile || ""),
     readOnly: Boolean(applicationEditorState?.saving || applicationEditorState?.restoring),
     onChange: value => {
       editor.value = value;
