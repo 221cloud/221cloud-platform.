@@ -9237,10 +9237,19 @@ async function loadEditorialDrafts() {
         sourceItems.map(source => '<li><a href="' + escapeHTML(source.url || '#') + '" target="_blank" rel="noopener noreferrer">' +
           escapeHTML(source.title || source.media || 'Source') + '</a> · ' + escapeHTML(source.media || source.source_name || 'Média') + '</li>').join('') +
         '</ul></details>';
-      if (factChecks.length) html += '<details><summary>Points à vérifier (' + factChecks.length + ')</summary><ul>' +
-        factChecks.map(item => '<li><strong>' + escapeHTML(item.status || 'À vérifier') + '</strong> · ' +
-          escapeHTML(item.claim || '') + (item.note ? ' — ' + escapeHTML(item.note) : '') + '</li>').join('') +
-        '</ul></details>';
+      if (factChecks.length) {
+        const factCheckLabels = {
+          corrobore_extraits: "Corroboré dans les extraits",
+          source_unique: "Source unique",
+          multi_sources_non_verifie: "Plusieurs sources · non vérifié",
+          information_incomplete: "À vérifier",
+          contradiction_a_verifier: "Contradiction à vérifier"
+        };
+        html += '<details><summary>Points à vérifier (' + factChecks.length + ')</summary><ul>' +
+          factChecks.map(item => '<li><strong>' + escapeHTML(factCheckLabels[item.status] || item.status || 'À vérifier') + '</strong> · ' +
+            escapeHTML(item.claim || '') + (item.note ? ' — ' + escapeHTML(item.note) : '') + '</li>').join('') +
+          '</ul></details>';
+      }
       if (draft.rejection_note) html += '<p class="muted">Motif : ' + escapeHTML(draft.rejection_note) + '</p>';
       if (draft.status === "pending_review") html += '<div class="item-actions"><button type="button" onclick="reviewEditorialDraft(\'' + escapeJSAttribute(window.editorialAgentProjectId) + '\',\'' + escapeJSAttribute(draft.id) + '\',\'approve\')">Approuver le brouillon</button><button class="danger" type="button" onclick="reviewEditorialDraft(\'' + escapeJSAttribute(window.editorialAgentProjectId) + '\',\'' + escapeJSAttribute(draft.id) + '\',\'reject\')">Refuser</button></div>';
       return html + '</article>';
