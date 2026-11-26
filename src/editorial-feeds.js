@@ -119,7 +119,7 @@ const STORY_STOP_WORDS = new Set([
   "football","foot","match","matches","equipe","club","sport","sports","officiel","officielle",
   "annonce","annoncee","annoncees","annonces","confirme","confirmee","confirmees","confirmer",
   "selon","face","journee","ligue","championnat","coupe","mercato","transfert","transferts",
-  "the","and","for","from","with","over","under","into","after","before","their","his","her",
+  "the","and","for","from","with","over","under","into","after","before","their","his","her","man",
   "its","has","have","was","will","are","is","a","an","to","of","in","on","at","by","as",
   "this","that","these","those","who","what","when","where","why","how","new","says","said",
   "mais","comme","plusieurs","etre","avoir","fait","faire","son","sa","ses",
@@ -141,6 +141,11 @@ function storyTokens(value) {
     .split(/\s+/).filter(token => token.length >= 3 && !STORY_STOP_WORDS.has(token))
     .map(normalizeStoryToken).filter(token => token.length >= 3);
 }
+const STORY_GENERIC_EVENT_WORDS = new Set([
+  "win","wins","winner","winning","won","lose","loses","losing","lost","loss",
+  "goal","goals","score","scores","scored","scoring","victory","defeat","draw",
+  "beat","beats","beaten","matchday","match","game","games","record","league"
+]);
 function storySimilarity(left, right) {
   const titleA = new Set(storyTokens(left.title));
   const titleB = new Set(storyTokens(right.title));
@@ -148,6 +153,7 @@ function storySimilarity(left, right) {
   // Un seul nom commun (joueur, entraîneur ou club) ne suffit jamais.
   if (sharedTitle.length < 2) return 0;
   const titleJaccard = sharedTitle.length / (titleA.size + titleB.size - sharedTitle.length);
+  const distinctiveSharedTitle = sharedTitle.filter(token => !STORY_GENERIC_EVENT_WORDS.has(token));
   const descriptionA = new Set(storyTokens(left.description).slice(0, 120));
   const descriptionB = new Set(storyTokens(right.description).slice(0, 120));
   const sharedDescription = [...descriptionA].filter(token => descriptionB.has(token));
@@ -156,7 +162,7 @@ function storySimilarity(left, right) {
     : 0;
 
   // Trois mots distinctifs communs dans les titres constituent un signal fort.
-  const strongTitleMatch = sharedTitle.length >= 3 && titleJaccard >= 0.20;
+  const strongTitleMatch = distinctiveSharedTitle.length >= 3 && titleJaccard >= 0.20;
   // Avec seulement deux mots communs dans les titres, la description doit
   // apporter au moins trois termes supplémentaires concordants.
   const corroboratedMatch = sharedTitle.length >= 2 &&
