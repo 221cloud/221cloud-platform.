@@ -1,10 +1,10 @@
 const FEEDS = Object.freeze([
   { id: "bbc-football", name: "BBC Sport · Football", url: "https://feeds.bbci.co.uk/sport/football/rss.xml", domain: "bbc.co.uk" },
   { id: "sky-football", name: "Sky Sports · Football", url: "https://www.skysports.com/rss/11095", domain: "skysports.com" },
-  { id: "guardian-football", name: "The Guardian · Football", url: "https://www.theguardian.com/football/rss", domain: "theguardian.com" }
-  ,{ id: "rfi-afrique-foot", name: "RFI · Afrique Foot", url: "https://www.rfi.fr/fr/afrique-foot/rss", domain: "rfi.fr" }
-  ,{ id: "wiwsport", name: "Wiwsport · Sénégal", url: "https://wiwsport.com/feed/", domain: "wiwsport.com" }
-  ,{ id: "afrik-foot", name: "Afrik-Foot · Football africain", url: "https://www.afrik-foot.com/feed", domain: "afrik-foot.com" }
+  { id: "guardian-football", name: "The Guardian · Football", url: "https://www.theguardian.com/football/rss", domain: "theguardian.com" },
+  { id: "rfi-afrique-foot", name: "RFI · Afrique Foot", url: "https://www.rfi.fr/fr/afrique-foot/rss", domain: "rfi.fr" },
+  { id: "wiwsport", name: "Wiwsport · Sénégal", url: "https://wiwsport.com/feed/", domain: "wiwsport.com" },
+  { id: "afrik-foot", name: "Afrik-Foot · Football africain", url: "https://www.afrik-foot.com/feed", domain: "afrik-foot.com" }
 ]);
 const MAX_FEED_BYTES = 1024 * 1024;
 const MAX_ITEMS_PER_FEED = 20;
