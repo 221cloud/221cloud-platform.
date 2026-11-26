@@ -115,27 +115,53 @@ async function fetchFeed(source) {
 
 
 const STORY_STOP_WORDS = new Set([
-  "avec","dans","pour","apres","avant","chez","contre","entre","vers","plus","moins",
-  "football","foot","match","matches","equipe","club","sport","sports","officiel",
-  "annonce","annoncee","annoncees","annonces","confirme","confirmee","confirmees",
-  "confirmer","selon","face","journee","ligue","championnat","coupe",
-  "the","and","for","from","with","over","under","into","after","before","their",
-  "his","her","its","has","have","was","will","are","is","a","an","to","of","in"
+  "avec","dans","pour","apres","avant","chez","contre","entre","vers","plus","moins","tres","tout","tous","toute","toutes",
+  "football","foot","match","matches","equipe","club","sport","sports","officiel","officielle",
+  "annonce","annoncee","annoncees","annonces","confirme","confirmee","confirmees","confirmer",
+  "selon","face","journee","ligue","championnat","coupe","mercato","transfert","transferts",
+  "the","and","for","from","with","over","under","into","after","before","their","his","her",
+  "its","has","have","was","will","are","is","a","an","to","of","in","on","at","by","as",
+  "this","that","these","those","who","what","when","where","why","how","new","says","said",
+  "mais","comme","plusieurs","etre","avoir","fait","faire","son","sa","ses",
+  "leur","leurs","une","des","les","sur","par","est","sont","ete","aux","qui","que","quoi",
+  "dont","pas","non","oui","aussi","alors","ainsi","encore","vient","va","vont"
 ]);
+function normalizeStoryToken(token) {
+  let value = token;
+  if (value.length > 6) {
+    value = value.replace(/(ements|ement|ations|ation|itions|ition|iques|ique|istes|iste)$/,"");
+    value = value.replace(/(aient|ions|eraient|eront|ées|ée|es|ers|er|ing|ed)$/,"");
+  }
+  if (value.length > 5 && value.endsWith("s")) value = value.slice(0, -1);
+  return value;
+}
 function storyTokens(value) {
   return String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/https?:\/\/\S+/g, " ").replace(/[^a-z0-9]+/g, " ")
-    .split(/\s+/).filter(token => token.length >= 3 && !STORY_STOP_WORDS.has(token));
+    .split(/\s+/).filter(token => token.length >= 3 && !STORY_STOP_WORDS.has(token))
+    .map(normalizeStoryToken).filter(token => token.length >= 3);
 }
 function storySimilarity(left, right) {
-  const a = new Set(storyTokens(left));
-  const b = new Set(storyTokens(right));
-  if (!a.size || !b.size) return 0;
-  let overlap = 0;
-  for (const token of a) if (b.has(token)) overlap++;
-  if (overlap < 2) return 0;
-  const jaccard = overlap / (a.size + b.size - overlap);
-  const containment = overlap / Math.min(a.size, b.size);
+  const titleA = new Set(storyTokens(left.title));
+  const titleB = new Set(storyTokens(right.title));
+  const contextA = new Set(storyTokens(left.description).slice(0, 80));
+  const contextB = new Set(storyTokens(right.description).slice(0, 80));
+  const combinedA = new Set([...titleA, ...contextA]);
+  const combinedB = new Set([...titleB, ...contextB]);
+  if (!combinedA.size || !combinedB.size) return 0;
+  const titleOverlap = [...titleA].filter(token => titleB.has(token));
+  const combinedOverlap = [...combinedA].filter(token => combinedB.has(token));
+  if (!combinedOverlap.length) return 0;
+  const jaccard = combinedOverlap.length / (combinedA.size + combinedB.size - combinedOverlap.length);
+  const containment = combinedOverlap.length / Math.min(combinedA.size, combinedB.size);
+  const titleJaccard = titleOverlap.length
+    ? titleOverlap.length / (titleA.size + titleB.size - titleOverlap.length)
+    : 0;
+  const hasDistinctiveTitleMatch = titleOverlap.some(token => token.length >= 5);
+  // Les titres restent prioritaires; les descriptions servent de corroboration,
+  // sans suffire seules à fusionner deux sujets.
+  if (titleOverlap.length >= 2 && titleJaccard >= 0.28) return Math.max(titleJaccard, containment * 0.72);
+  if (hasDistinctiveTitleMatch && combinedOverlap.length >= 3 && jaccard >= 0.12) return Math.max(0.47, jaccard);
   return Math.max(jaccard, containment * 0.72);
 }
 function withinStoryWindow(a, b) {
