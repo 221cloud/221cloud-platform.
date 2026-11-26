@@ -445,6 +445,26 @@ export async function handleEditorialAgentRequest(request, env, path, user) {
 
   if (action === "drafts" && request.method === "PATCH" && draftId) {
     const body = await request.json();
+    if (body.action === "edit") {
+      const title = cleanText(body.title, 300);
+      const article = cleanText(body.article, MAX_EDITORIAL_TEXT);
+      const summary = cleanText(body.summary, 2000);
+      if (!title || !article) {
+        return Response.json({ error: "Le titre et l'article sont obligatoires." }, { status: 400 });
+      }
+      const updated = await env.DB.prepare(`
+        UPDATE editorial_drafts
+        SET title = ?, article = ?, summary = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND user_id = ? AND project_id = ? AND status = 'pending_review'
+      `).bind(title, article, summary, draftId, user.id, projectId).run();
+      if (!updated.meta || updated.meta.changes !== 1) {
+        const exists = await env.DB.prepare("SELECT status FROM editorial_drafts WHERE id = ? AND user_id = ? AND project_id = ? LIMIT 1")
+          .bind(draftId, user.id, projectId).first();
+        if (!exists) return Response.json({ error: "Brouillon introuvable." }, { status: 404 });
+        return Response.json({ error: "Seuls les brouillons « À valider » peuvent être modifiés.", status: exists.status }, { status: 409 });
+      }
+      return Response.json({ message: "Brouillon modifié. Les sources et l'analyse ont été conservées.", status: "pending_review" });
+    }
     const decision = cleanText(body.decision, 20);
     if (!["approve", "reject"].includes(decision)) {
       return Response.json({ error: "Décision invalide. Utilisez approve ou reject." }, { status: 400 });
