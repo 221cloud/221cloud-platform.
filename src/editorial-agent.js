@@ -365,7 +365,7 @@ export async function runScheduledEditorialGeneration(env, projectId, user) {
     SELECT items.id, items.source_domain, items.published_at, items.fetched_at
     FROM editorial_items AS items
     WHERE items.user_id = ? AND items.project_id = ?
-      AND COALESCE(items.published_at, items.fetched_at) >= ?
+      AND datetime(COALESCE(items.published_at, items.fetched_at)) >= datetime(?)
       AND NOT EXISTS (
         SELECT 1 FROM editorial_drafts AS drafts
         WHERE drafts.user_id = items.user_id AND drafts.project_id = items.project_id
