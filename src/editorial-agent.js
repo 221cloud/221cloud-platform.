@@ -43,7 +43,7 @@ function cleanText(value, max) {
 
 function normalizeEditorialCopy(value, max) {
   return cleanText(value, max)
-    .replace(/\\bse sont impos(?:é|ée|és|ées) à égalité\\b/gi, "ont fait match nul");
+    .replace(/\bse sont impos(?:é|ée|és|ées) à égalité\b/gi, "ont fait match nul");
 }
 
 
