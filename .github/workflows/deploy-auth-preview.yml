@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   deploy-preview:
-    if: github.ref == 'refs/heads/fix/auth-buttons-runtime-diagnostic'
+    if: github.ref == 'refs/heads/preview/main-auth-validation'
     runs-on: ubuntu-latest
     steps:
       - name: Verify Cloudflare credentials are configured
@@ -26,7 +26,7 @@ jobs:
       - name: Check out the isolated fix branch
         uses: actions/checkout@v4
         with:
-          ref: fix/auth-buttons-runtime-diagnostic
+          ref: preview/main-auth-validation
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
