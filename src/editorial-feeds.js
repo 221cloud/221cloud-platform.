@@ -51,7 +51,7 @@ function parseFeed(xml, source) {
 async function fetchFeed(source) {
   const response = await fetch(source.url, {
     method: "GET",
-    redirect: "error",
+    redirect: "manual",
     headers: { "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9", "User-Agent": "221Cloud-FutPulse-Editorial/1.0" },
     signal: AbortSignal.timeout(8000)
   });
