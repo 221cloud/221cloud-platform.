@@ -113,8 +113,90 @@ async function fetchFeed(source) {
   return { items, diagnostics, httpStatus: response.status, contentType: response.headers.get("Content-Type") || "non précisé" };
 }
 
+
+const STORY_STOP_WORDS = new Set([
+  "avec","dans","pour","apres","avant","chez","contre","entre","vers","plus","moins",
+  "football","foot","match","matches","equipe","club","sport","sports","officiel",
+  "annonce","annoncee","annoncees","annonces","confirme","confirmee","confirmees",
+  "confirmer","selon","face","journee","ligue","championnat","coupe",
+  "the","and","for","from","with","over","under","into","after","before","their",
+  "his","her","its","has","have","was","will","are","is","a","an","to","of","in"
+]);
+function storyTokens(value) {
+  return String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/https?:\/\/\S+/g, " ").replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/).filter(token => token.length >= 3 && !STORY_STOP_WORDS.has(token));
+}
+function storySimilarity(left, right) {
+  const a = new Set(storyTokens(left));
+  const b = new Set(storyTokens(right));
+  if (!a.size || !b.size) return 0;
+  let overlap = 0;
+  for (const token of a) if (b.has(token)) overlap++;
+  const jaccard = overlap / (a.size + b.size - overlap);
+  const containment = overlap / Math.min(a.size, b.size);
+  return Math.max(jaccard, containment * 0.72);
+}
+function withinStoryWindow(a, b) {
+  const da = Date.parse(a.published_at || a.fetched_at || "");
+  const db = Date.parse(b.published_at || b.fetched_at || "");
+  if (!Number.isFinite(da) || !Number.isFinite(db)) return true;
+  return Math.abs(da - db) <= 72 * 60 * 60 * 1000;
+}
+function buildStoryClusters(rows) {
+  const parents = rows.map((_, index) => index);
+  const find = index => {
+    while (parents[index] !== index) {
+      parents[index] = parents[parents[index]];
+      index = parents[index];
+    }
+    return index;
+  };
+  const join = (a, b) => {
+    const rootA = find(a), rootB = find(b);
+    if (rootA !== rootB) parents[rootB] = rootA;
+  };
+  for (let i = 0; i < rows.length; i++) {
+    for (let j = i + 1; j < rows.length; j++) {
+      if (!withinStoryWindow(rows[i], rows[j])) continue;
+      if (storySimilarity(rows[i].title, rows[j].title) >= 0.46) join(i, j);
+    }
+  }
+  const groups = new Map();
+  rows.forEach((row, index) => {
+    const root = find(index);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(row);
+  });
+  return [...groups.values()].map(items => {
+    const sources = [...new Map(items.map(item => [item.source_domain, {
+      source_id: item.source_id, source_name: item.source_name, source_domain: item.source_domain
+    }])).values()];
+    const dates = items.map(item => Date.parse(item.published_at || item.fetched_at || "")).filter(Number.isFinite);
+    const latest = dates.length ? new Date(Math.max(...dates)).toISOString() : null;
+    const lead = [...items].sort((a, b) =>
+      (Date.parse(b.published_at || b.fetched_at || "") || 0) - (Date.parse(a.published_at || a.fetched_at || "") || 0)
+    )[0];
+    return {
+      id: "story-" + items.map(item => item.id).sort().join("-").slice(0, 120),
+      headline: lead.title,
+      item_count: items.length,
+      distinct_sources: sources.length,
+      source_diversity: sources.length >= 2 ? "multiple_sources" : "single_source",
+      verification_status: "not_verified",
+      latest_at: latest,
+      sources,
+      items: items.map(item => ({
+        id: item.id, title: item.title, description: item.description, url: item.url,
+        published_at: item.published_at, fetched_at: item.fetched_at,
+        source_id: item.source_id, source_name: item.source_name, source_domain: item.source_domain
+      }))
+    };
+  }).sort((a, b) => (b.latest_at || "").localeCompare(a.latest_at || ""));
+}
+
 export async function handleEditorialFeedsRequest(request, env, path, user) {
-  const match = path.match(/^\/api\/projects\/([^/]+)\/editorial-agent\/(items|sources\/sync)$/);
+  const match = path.match(/^\/api\/projects\/([^/]+)\/editorial-agent\/(items|clusters|sources\/sync)$/);
   if (!match || !["GET", "POST"].includes(request.method)) return null;
   const projectId = decodeURIComponent(match[1]);
   const action = match[2];
@@ -141,6 +223,25 @@ export async function handleEditorialFeedsRequest(request, env, path, user) {
   `).run();
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_editorial_items_owner ON editorial_items(user_id, project_id, fetched_at DESC)").run();
 
+  if (request.method === "GET" && action === "clusters") {
+    const rows = await env.DB.prepare(`
+      SELECT id, source_id, source_name, source_domain, title, description, url, published_at, fetched_at
+      FROM editorial_items WHERE user_id = ? AND project_id = ?
+      ORDER BY COALESCE(published_at, fetched_at) DESC LIMIT 100
+    `).bind(user.id, projectId).all();
+    const clusters = buildStoryClusters(rows.results || []);
+    return Response.json({
+      clusters,
+      totals: {
+        collected_items: (rows.results || []).length,
+        story_groups: clusters.length,
+        multi_source_groups: clusters.filter(group => group.distinct_sources >= 2).length,
+        single_source_groups: clusters.filter(group => group.distinct_sources === 1).length,
+        unverified_groups: clusters.length
+      },
+      note: "Le regroupement repose sur la similarité des titres et une fenêtre temporelle. Plusieurs sources ne signifient pas à elles seules que l'information est vérifiée."
+    });
+  }
   if (request.method === "GET" && action === "items") {
     const rows = await env.DB.prepare(`
       SELECT id, source_id, source_name, source_domain, title, description, url, published_at, fetched_at
