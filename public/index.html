@@ -9055,13 +9055,73 @@ function renderApplications(applications) {
         <div class="muted">Créée le : ${escapeHTML(formatDate(application.created_at))}</div>
         <div class="item-actions">
           <button type="button" onclick="openApplicationEditor(${escapeJSAttribute(application.id)})">Ouvrir l'éditeur</button>
-          ${String(application.name || "").trim().toLowerCase() === "futpulse" ? '<button type="button" onclick="window.location.href=\'/manage/futpulse-7ffb77c9/\'">Administrer FutPulse</button>' : ""}
+          ${String(application.name || "").trim().toLowerCase() === "futpulse" ? '<button type="button" onclick="window.location.href=\'/manage/futpulse-7ffb77c9/\'">Administrer FutPulse</button><button type="button" onclick="renderEditorialAgentPage(\'" + escapeJSAttribute(application.id) + "\')">Agent éditorial</button>' : ""}
           <button class="secondary" type="button" onclick="renameApplication(${escapeJSAttribute(application.id)})">Modifier le nom</button>
           <button class="danger" type="button" onclick="moveApplicationToTrash(${escapeJSAttribute(application.id)})">Mettre à la corbeille</button>
         </div>
       </div>
     `;
   }).join("");
+}
+
+async function renderEditorialAgentPage(projectId) {
+  window.editorialAgentProjectId = projectId;
+  const application = projectsCache.find(item => item.id === projectId && item.type === "application");
+  if (!application) { alert("Application introuvable. Actualisez la liste."); return; }
+  if (!confirmLeaveApplicationEditor()) return;
+  document.getElementById("mainContent").innerHTML =
+    '<div class="section-head"><div><h1 class="page-title">Agent éditorial · FutPulse</h1><p class="page-subtitle">Brouillons privés, vérification et validation avant toute publication.</p></div><button class="secondary" type="button" onclick="renderApplicationsPage()">← Applications</button></div>' +
+    '<div class="notice">L’agent n’est pas encore connecté à une IA ou à des flux d’actualités. Cette interface sert à examiner les brouillons. Approuver un brouillon ne le publie pas.</div>' +
+    '<div class="card"><div class="section-head"><h2>Brouillons à examiner</h2><button class="secondary" type="button" onclick="loadEditorialDrafts()">Actualiser</button></div><div id="editorialDraftList"><p class="muted">Chargement des brouillons...</p></div></div>' +
+    '<div class="card"><h2>Ajouter un brouillon de test</h2><p class="muted">Ce formulaire vérifie le circuit de validation avant le collecteur et l’IA. Il n’ajoute rien aux articles publics.</p><label for="editorialDraftTitle">Titre</label><input id="editorialDraftTitle" maxlength="300" placeholder="Titre de l’article"><label for="editorialDraftArticle">Article</label><textarea id="editorialDraftArticle" maxlength="30000" rows="7" placeholder="Contenu du brouillon"></textarea><label for="editorialDraftSummary">Résumé</label><textarea id="editorialDraftSummary" maxlength="2000" rows="3" placeholder="Résumé court"></textarea><div class="item-actions"><button id="saveEditorialDraftButton" type="button" onclick="createEditorialTestDraft(\'' + escapeJSAttribute(projectId) + '\')">Enregistrer le brouillon</button><span id="editorialDraftMessage" class="muted" aria-live="polite"></span></div></div>';
+  await loadEditorialDrafts();
+}
+
+async function loadEditorialDrafts() {
+  const host = document.getElementById("editorialDraftList");
+  if (!host || !window.editorialAgentProjectId) return;
+  host.innerHTML = '<p class="muted">Chargement...</p>';
+  try {
+    const data = await api("/projects/" + encodeURIComponent(window.editorialAgentProjectId) + "/editorial-agent/drafts");
+    const drafts = Array.isArray(data.drafts) ? data.drafts : [];
+    if (!drafts.length) { host.innerHTML = '<div class="empty">Aucun brouillon pour le moment.</div>'; return; }
+    host.innerHTML = drafts.map(draft => {
+      const labels = { pending_review: "À valider", approved: "Approuvé · non publié", rejected: "Refusé", published: "Publié" };
+      let html = '<article class="item-card"><div class="section-head"><h3>' + escapeHTML(draft.title) + '</h3><span class="status">' + escapeHTML(labels[draft.status] || draft.status) + '</span></div><p class="muted">' + escapeHTML(formatDate(draft.created_at)) + '</p><p style="white-space:pre-wrap">' + escapeHTML(draft.article) + '</p>';
+      if (draft.summary) html += '<p><strong>Résumé :</strong> ' + escapeHTML(draft.summary) + '</p>';
+      if (draft.rejection_note) html += '<p class="muted">Motif : ' + escapeHTML(draft.rejection_note) + '</p>';
+      if (draft.status === "pending_review") html += '<div class="item-actions"><button type="button" onclick="reviewEditorialDraft(\'' + escapeJSAttribute(window.editorialAgentProjectId) + '\',\'' + escapeJSAttribute(draft.id) + '\',\'approve\')">Approuver le brouillon</button><button class="danger" type="button" onclick="reviewEditorialDraft(\'' + escapeJSAttribute(window.editorialAgentProjectId) + '\',\'' + escapeJSAttribute(draft.id) + '\',\'reject\')">Refuser</button></div>';
+      return html + '</article>';
+    }).join("");
+  } catch (error) { host.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message) + '</div>'; }
+}
+
+async function createEditorialTestDraft(projectId) {
+  const title = document.getElementById("editorialDraftTitle")?.value.trim();
+  const article = document.getElementById("editorialDraftArticle")?.value.trim();
+  const summary = document.getElementById("editorialDraftSummary")?.value.trim() || "";
+  const message = document.getElementById("editorialDraftMessage");
+  const button = document.getElementById("saveEditorialDraftButton");
+  if (!title || !article) { if (message) message.textContent = "Le titre et le contenu sont obligatoires."; return; }
+  button.disabled = true;
+  try {
+    await api("/projects/" + encodeURIComponent(projectId) + "/editorial-agent/drafts", { method: "POST", body: JSON.stringify({ title, article, summary }) });
+    document.getElementById("editorialDraftTitle").value = "";
+    document.getElementById("editorialDraftArticle").value = "";
+    document.getElementById("editorialDraftSummary").value = "";
+    if (message) message.textContent = "Brouillon privé enregistré.";
+    await loadEditorialDrafts();
+  } catch (error) { if (message) message.textContent = error.message; }
+  finally { button.disabled = false; }
+}
+
+async function reviewEditorialDraft(projectId, draftId, decision) {
+  const note = decision === "reject" ? (prompt("Motif du refus (facultatif) :") || "") : "";
+  if (!confirm(decision === "approve" ? "Approuver ce brouillon ? Il ne sera pas publié." : "Refuser ce brouillon ?")) return;
+  try {
+    await api("/projects/" + encodeURIComponent(projectId) + "/editorial-agent/drafts/" + encodeURIComponent(draftId), { method: "PATCH", body: JSON.stringify({ decision, note }) });
+    await loadEditorialDrafts();
+  } catch (error) { alert(error.message); }
 }
 
 async function createApplication() {
