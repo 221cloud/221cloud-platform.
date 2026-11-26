@@ -140,7 +140,7 @@ function reconcileEditorialEvidenceStatuses(factCheck, sources) {
   return (factCheck || []).map(item => {
     if (item.status !== "source_unique" || !item.note) return item;
     const note = normalizeEditorialEvidence(item.note);
-    const explicitlyComparative = /\\b(?:tous deux|toutes deux|les deux|tous les deux|toutes les deux|both)\\b/.test(note);
+    const explicitlyComparative = ["tous deux", "toutes deux", "les deux", "tous les deux", "toutes les deux", "both"].some(phrase => note.includes(phrase));
     if (!explicitlyComparative) return item;
 
     const citedDomains = [...outlets.entries()].filter(([, names]) =>
