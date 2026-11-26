@@ -37,7 +37,7 @@ jobs:
         run: |
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
-          const config = JSON.parse(fs.readFileSync('wrangler.jsonc', 'utf8').replace(/\/\/[^\n]*/g, ''));
+          const config = JSON.parse(fs.readFileSync('wrangler.jsonc', 'utf8'));
           config.name = '221cloud-auth-preview';
           config.d1_databases = config.d1_databases.map(binding => ({
             ...binding,
