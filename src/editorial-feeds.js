@@ -18,7 +18,7 @@ function tagValue(xml, tag) {
   const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = xml.match(new RegExp("<(?:[\\w.-]+:)?" + escaped + "(?:\\s[^>]*)?>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?" + escaped + "\\s*>", "i"));
   if (!match) return "";
-  return decodeXml(match[1].replace(/<[^>]*>/g, " ")).replace(/\\s+/g, " ").trim();
+  return decodeXml(match[1].replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
 }
 function safeHttpUrl(value) {
   try {
