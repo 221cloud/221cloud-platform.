@@ -29,14 +29,14 @@ function safeHttpUrl(value) {
   } catch { return ""; }
 }
 function parseFeed(xml, source) {
-  const blocks = [...xml.matchAll(/<(item|entry)(?:\\s[^>]*)?>([\\s\\S]*?)<\\/\\1>/gi)].slice(0, MAX_ITEMS_PER_FEED);
+  const blocks = [...xml.matchAll(/<(item|entry)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/gi)].slice(0, MAX_ITEMS_PER_FEED);
   return blocks.map((match, index) => {
     const block = match[2];
     const title = tagValue(block, "title").slice(0, 500);
     const description = (tagValue(block, "description") || tagValue(block, "summary") || tagValue(block, "content")).slice(0, 3000);
     let link = tagValue(block, "link");
     if (!link) {
-      const linkMatch = block.match(/<link\\b[^>]*href=["']([^"']+)["'][^>]*>/i);
+      const linkMatch = block.match(/<link\b[^>]*href=["']([^"']+)["'][^>]*>/i);
       link = linkMatch ? decodeXml(linkMatch[1]) : "";
     }
     const url = safeHttpUrl(link);
