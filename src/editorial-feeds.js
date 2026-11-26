@@ -347,7 +347,7 @@ export async function handleEditorialFeedsRequest(request, env, path, user) {
     const rows = await env.DB.prepare(`
       SELECT id, source_id, source_name, source_domain, title, description, url, published_at, fetched_at
       FROM editorial_items WHERE user_id = ? AND project_id = ?
-      ORDER BY COALESCE(published_at, fetched_at) DESC LIMIT 100
+      ORDER BY COALESCE(published_at, fetched_at) DESC LIMIT 200
     `).bind(user.id, projectId).all();
     const editorialRows = rows.results || [];
     const clusters = buildStoryClusters(editorialRows);
@@ -397,7 +397,7 @@ export async function handleEditorialFeedsRequest(request, env, path, user) {
     const rows = await env.DB.prepare(`
       SELECT id, source_id, source_name, source_domain, title, description, url, published_at, fetched_at
       FROM editorial_items WHERE user_id = ? AND project_id = ?
-      ORDER BY COALESCE(published_at, fetched_at) DESC LIMIT 100
+      ORDER BY COALESCE(published_at, fetched_at) DESC LIMIT 200
     `).bind(user.id, projectId).all();
     return Response.json({ items: rows.results || [], sources: FEEDS.map(({ id, name, domain }) => ({ id, name, domain })) });
   }
