@@ -244,7 +244,7 @@ async function generateEditorialDraft(request, env, projectId, user) {
     "headline doit être un titre neutre; summary un résumé bref; article un brouillon en français; social_post une proposition prudente; keywords un tableau de chaînes; fact_check un tableau d'objets avec claim, status et note.",
     "Les statuts de fact_check doivent être parmi source_unique, corrobore_extraits, multi_sources_non_verifie, information_incomplete ou contradiction_a_verifier."
   ].join(" ");
-  const userPrompt = "Prépare un brouillon à partir de ces sources RSS. Mentionne clairement dans le brouillon que les informations doivent être vérifiées avant publication. Sources :\n" + JSON.stringify(sourcePayload);
+  const userPrompt = "Rédige un article prêt à être relu par l'administration à partir de ces sources RSS. N'insère aucune note interne, aucun avertissement de validation ni aucune consigne destinée à l'équipe dans le corps de l'article. Place les réserves et les points à vérifier uniquement dans fact_check. Sources :\n" + JSON.stringify(sourcePayload);
 
   try {
     const generated = await env.AI.run(EDITORIAL_AI_MODEL, {
