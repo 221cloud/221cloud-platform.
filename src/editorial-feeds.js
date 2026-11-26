@@ -207,11 +207,15 @@ function buildStoryClusters(rows) {
   const groupOf = index => groups.findIndex(group => group.includes(index));
   for (let i = 0; i < rows.length; i++) {
     for (let j = i + 1; j < rows.length; j++) {
-      if (!withinStoryWindow(rows[i], rows[j]) || storySimilarity(rows[i], rows[j]) < 0.46) continue;
+      if (!withinStoryWindow(rows[i], rows[j]) ||
+          !areEditorialDossierStoriesCompatible(rows[i], rows[j]) ||
+          storySimilarity(rows[i], rows[j]) < 0.46) continue;
       const groupA = groupOf(i), groupB = groupOf(j);
       if (groupA < 0 || groupB < 0 || groupA === groupB) continue;
       const compatible = groups[groupA].every(a => groups[groupB].every(b =>
-        withinStoryWindow(rows[a], rows[b]) && storySimilarity(rows[a], rows[b]) >= 0.46
+        withinStoryWindow(rows[a], rows[b]) &&
+        areEditorialDossierStoriesCompatible(rows[a], rows[b]) &&
+        storySimilarity(rows[a], rows[b]) >= 0.46
       ));
       if (compatible) {
         groups[groupA] = [...groups[groupA], ...groups[groupB]];
@@ -274,6 +278,17 @@ function classifyEditorialDossier(title) {
   }
   return null;
 }
+function areEditorialDossierStoriesCompatible(left, right) {
+  const leftDossier = classifyEditorialDossier(left?.title);
+  const rightDossier = classifyEditorialDossier(right?.title);
+  // Les catégories des CAF Awards sont des sujets distincts :
+  // elles ne doivent jamais être fusionnées dans un même groupe d'articles.
+  if (leftDossier?.key === "caf-awards-2026" &&
+      rightDossier?.key === "caf-awards-2026" &&
+      leftDossier.subtopic !== rightDossier.subtopic) return false;
+  return true;
+}
+
 function buildStoryDossiers(clusters) {
   const parents = new Map();
   for (const cluster of clusters) {
@@ -344,7 +359,9 @@ export async function handleEditorialFeedsRequest(request, env, path, user) {
         const left = editorialRows[i], right = editorialRows[j];
         if (left.source_domain === right.source_domain || !withinStoryWindow(left, right)) continue;
         crossSourcePairsInWindow++;
-        const score = storySimilarity(left, right);
+        const score = areEditorialDossierStoriesCompatible(left, right)
+          ? storySimilarity(left, right)
+          : 0;
         if (score >= 0.12) crossSourceCandidates.push({
           score: Number(score.toFixed(3)),
           hours_apart: Math.round(Math.abs(Date.parse(left.published_at || left.fetched_at || "") - Date.parse(right.published_at || right.fetched_at || "")) / 3600000),
