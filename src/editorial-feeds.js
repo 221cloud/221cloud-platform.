@@ -266,7 +266,7 @@ function classifyEditorialDossier(title) {
     /ballon d.?or africain|joueur africain de l.?annee|african player of the year/.test(value) ||
     /entraineur caf de l.?annee|coach of the year/.test(value) ||
     /meilleur gardien africain|best african goalkeeper/.test(value) ||
-    /jeune joueur africain|young african player/.test(value);
+    /jeune joueur caf|jeune joueur africain|young african player/.test(value);
   if (isCafAwards) {
     let subtopic = "Autres nominations";
     if (/but de l.?annee|goal of the year/.test(value)) subtopic = "But de l’année";
