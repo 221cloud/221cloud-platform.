@@ -9229,7 +9229,7 @@ async function loadEditorialDrafts() {
     if (!drafts.length) { host.innerHTML = '<div class="empty">Aucun brouillon pour le moment.</div>'; return; }
     host.innerHTML = drafts.map(draft => {
       const labels = { pending_review: "À valider", approved: "Approuvé · non publié", rejected: "Refusé", published: "Publié" };
-      let html = '<article class="item-card"><div class="section-head"><h3>' + escapeHTML(draft.title) + '</h3><span class="status">' + escapeHTML(labels[draft.status] || draft.status) + '</span></div><p class="muted">' + escapeHTML(formatDate(draft.created_at)) + '</p><p style="white-space:pre-wrap">' + escapeHTML(draft.article) + '</p>';
+      let html = '<article class="item-card" data-draft-id="' + escapeHTML(draft.id) + '"><div class="section-head"><h3>' + escapeHTML(draft.title) + '</h3><span class="status">' + escapeHTML(labels[draft.status] || draft.status) + '</span></div><p class="muted">' + escapeHTML(formatDate(draft.created_at)) + '</p><p style="white-space:pre-wrap">' + escapeHTML(draft.article) + '</p>';
       if (draft.summary) html += '<p><strong>Résumé :</strong> ' + escapeHTML(draft.summary) + '</p>';
       const sourceItems = Array.isArray(draft.sources) ? draft.sources : [];
       const factChecks = Array.isArray(draft.fact_check) ? draft.fact_check : [];
@@ -9251,14 +9251,49 @@ async function loadEditorialDrafts() {
           '</ul></details>';
       }
       if (draft.rejection_note) html += '<p class="muted">Motif : ' + escapeHTML(draft.rejection_note) + '</p>';
-      if (draft.status === "pending_review") html += '<div class="item-actions"><button class="secondary" type="button" data-editorial-recheck="true" data-project-id="' + escapeHTML(window.editorialAgentProjectId) + '" data-draft-id="' + escapeHTML(draft.id) + '">Réexaminer les points</button><button type="button" onclick="reviewEditorialDraft(\'' + escapeJSAttribute(window.editorialAgentProjectId) + '\',\'' + escapeJSAttribute(draft.id) + '\',\'approve\')">Approuver le brouillon</button><button class="danger" type="button" onclick="reviewEditorialDraft(\'' + escapeJSAttribute(window.editorialAgentProjectId) + '\',\'' + escapeJSAttribute(draft.id) + '\',\'reject\')">Refuser</button></div><div class="notice" data-editorial-recheck-result aria-live="polite" style="display:none"></div>';
+      if (draft.status === "pending_review") html += '<div class="item-actions"><button class="secondary" type="button" data-editorial-edit="true">Modifier le brouillon</button><button class="secondary" type="button" data-editorial-recheck="true" data-project-id="' + escapeHTML(window.editorialAgentProjectId) + '" data-draft-id="' + escapeHTML(draft.id) + '">Réexaminer les points</button><button type="button" onclick="reviewEditorialDraft(\'' + escapeJSAttribute(window.editorialAgentProjectId) + '\',\'' + escapeJSAttribute(draft.id) + '\',\'approve\')">Approuver le brouillon</button><button class="danger" type="button" onclick="reviewEditorialDraft(\'' + escapeJSAttribute(window.editorialAgentProjectId) + '\',\'' + escapeJSAttribute(draft.id) + '\',\'reject\')">Refuser</button></div><div class="notice" data-editorial-edit-form style="display:none"><label>Titre<input data-edit-title maxlength="300" value="' + escapeHTML(draft.title || '') + '"></label><label>Résumé<textarea data-edit-summary rows="3">' + escapeHTML(draft.summary || '') + '</textarea></label><label>Article<textarea data-edit-article rows="12">' + escapeHTML(draft.article || '') + '</textarea></label><div class="item-actions"><button type="button" data-editorial-save="true">Enregistrer les modifications</button><button class="secondary" type="button" data-editorial-cancel="true">Annuler</button></div><p class="muted" data-editorial-edit-message aria-live="polite"></p></div><div class="notice" data-editorial-recheck-result aria-live="polite" style="display:none"></div>';
       return html + '</article>';
     }).join("");
-    host.onclick = event => {
-      const button = event.target.closest("[data-editorial-recheck], [data-editorial-recheck-apply]");
+    host.onclick = async event => {
+      const button = event.target.closest("[data-editorial-edit], [data-editorial-save], [data-editorial-cancel], [data-editorial-recheck], [data-editorial-recheck-apply]");
       if (!button || !host.contains(button)) return;
       const card = button.closest(".item-card");
-      const resultHost = card?.querySelector("[data-editorial-recheck-result]");
+      if (!card) return;
+      const editForm = card.querySelector("[data-editorial-edit-form]");
+      if (button.hasAttribute("data-editorial-edit")) {
+        editForm.style.display = editForm.style.display === "none" ? "block" : "none";
+        return;
+      }
+      if (button.hasAttribute("data-editorial-cancel")) {
+        editForm.style.display = "none";
+        return;
+      }
+      if (button.hasAttribute("data-editorial-save")) {
+        const title = card.querySelector("[data-edit-title]")?.value.trim() || "";
+        const summary = card.querySelector("[data-edit-summary]")?.value.trim() || "";
+        const article = card.querySelector("[data-edit-article]")?.value.trim() || "";
+        const message = card.querySelector("[data-editorial-edit-message]");
+        if (!title || !article) {
+          if (message) message.textContent = "Le titre et l'article sont obligatoires.";
+          return;
+        }
+        button.disabled = true;
+        button.textContent = "Enregistrement...";
+        try {
+          await api("/projects/" + encodeURIComponent(window.editorialAgentProjectId) + "/editorial-agent/drafts/" + encodeURIComponent(card.querySelector("[data-editorial-recheck]")?.dataset.draftId || card.querySelector("[data-editorial-recheck-apply]")?.dataset.draftId || card.dataset.draftId || ""), {
+            method: "PATCH",
+            body: JSON.stringify({ action: "edit", title, summary, article })
+          });
+          alert("Brouillon modifié. Les sources et l'analyse ont été conservées.");
+          await loadEditorialDrafts();
+        } catch (error) {
+          if (message) message.textContent = error.message;
+          button.disabled = false;
+          button.textContent = "Enregistrer les modifications";
+        }
+        return;
+      }
+      const resultHost = card.querySelector("[data-editorial-recheck-result]");
       if (!resultHost) {
         alert("Zone de résultat introuvable. Actualise la liste des brouillons puis réessaie.");
         return;
