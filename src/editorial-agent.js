@@ -42,7 +42,7 @@ function cleanText(value, max) {
 }
 
 
-const EDITORIAL_AI_MODEL = "@cf/meta/llama-3.2-3b-instruct";
+const EDITORIAL_AI_MODEL = "@cf/zai-org/glm-4.7-flash";
 const EDITORIAL_AI_DAILY_LIMIT = 5;
 const EDITORIAL_AI_MAX_SOURCES = 5;
 
@@ -128,12 +128,12 @@ async function generateEditorialDraft(request, env, projectId, user) {
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
       ],
-      max_tokens: 2200,
+      max_completion_tokens: 2200,
       temperature: 0.2
     });
     const raw = typeof generated === "string"
       ? generated
-      : (generated?.response || generated?.result?.response || generated?.output_text || "");
+      : (generated?.response || generated?.result?.response || generated?.output_text || generated?.choices?.[0]?.message?.content || "");
     const draft = parseModelJson(raw);
     const title = cleanText(draft.headline, 300);
     const article = cleanText(draft.article, MAX_EDITORIAL_TEXT);
