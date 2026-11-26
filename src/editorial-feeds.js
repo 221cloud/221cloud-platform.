@@ -133,6 +133,7 @@ function storySimilarity(left, right) {
   if (!a.size || !b.size) return 0;
   let overlap = 0;
   for (const token of a) if (b.has(token)) overlap++;
+  if (overlap < 2) return 0;
   const jaccard = overlap / (a.size + b.size - overlap);
   const containment = overlap / Math.min(a.size, b.size);
   return Math.max(jaccard, containment * 0.72);
