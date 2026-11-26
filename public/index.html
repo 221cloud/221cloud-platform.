@@ -9055,7 +9055,7 @@ function renderApplications(applications) {
         <div class="muted">Créée le : ${escapeHTML(formatDate(application.created_at))}</div>
         <div class="item-actions">
           <button type="button" onclick="openApplicationEditor(${escapeJSAttribute(application.id)})">Ouvrir l'éditeur</button>
-          ${String(application.name || "").trim().toLowerCase() === "futpulse" ? '<button type="button" onclick="window.location.href=\'/manage/futpulse-7ffb77c9/\'">Administrer FutPulse</button><button type="button" onclick="renderEditorialAgentPage(\'' + escapeJSAttribute(application.id) + '\')">Agent éditorial</button>' : ""}
+          ${String(application.name || "").trim().toLowerCase() === "futpulse" ? '<button type="button" onclick="window.location.href=\'/manage/futpulse-7ffb77c9/\'">Administrer FutPulse</button><button type="button" onclick="renderEditorialAgentPage(' + escapeJSAttribute(application.id) + ')">Agent éditorial</button>' : ""}
           <button class="secondary" type="button" onclick="renameApplication(${escapeJSAttribute(application.id)})">Modifier le nom</button>
           <button class="danger" type="button" onclick="moveApplicationToTrash(${escapeJSAttribute(application.id)})">Mettre à la corbeille</button>
         </div>
