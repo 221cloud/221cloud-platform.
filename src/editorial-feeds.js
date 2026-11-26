@@ -360,12 +360,44 @@ export async function syncEditorialFeedsForProject(env, projectId, user) {
         `).bind(crypto.randomUUID(), user.id, projectId, item.source_id, item.source_name, item.source_domain, item.title, item.description, item.url, item.published_at).run();
         saved += Number(result.meta?.changes || 0);
       }
-      results.push({ source: source.name, received: feed.items.length, saved, status: feed.items.length ? "ok" : "empty" });
+      results.push({ source: source.name, received: feed.items.length, saved, status: feed.items.length ? "ok" : "empty", http_status: feed.httpStatus, content_type: feed.contentType, diagnostics: feed.diagnostics, message: feed.items.length ? "Flux accessible et articles reconnus." : "Flux accessible, mais aucun article exploitable n’a été extrait." });
     } catch (error) {
       results.push({ source: source.name, received: 0, saved: 0, status: "error", message: String(error?.message || "Erreur de collecte").slice(0, 180) });
     }
   }
   return { results, saved: results.reduce((sum, result) => sum + result.saved, 0) };
+}
+
+
+export async function selectScheduledEditorialSourceIds(env, projectId, user) {
+  const recentDrafts = await env.DB.prepare(
+    "SELECT sources_json FROM editorial_drafts WHERE user_id = ? AND project_id = ? AND created_at >= datetime('now', '-7 days')"
+  ).bind(user.id, projectId).all();
+  const usedUrls = new Set();
+  for (const draft of recentDrafts.results || []) {
+    try {
+      for (const source of JSON.parse(draft.sources_json || "[]")) {
+        if (source?.url) usedUrls.add(source.url);
+      }
+    } catch {}
+  }
+  const cutoff = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
+  const result = await env.DB.prepare(`
+    SELECT id, source_id, source_name, source_domain, title, description, url, published_at, fetched_at
+    FROM editorial_items
+    WHERE user_id = ? AND project_id = ?
+      AND datetime(COALESCE(published_at, fetched_at)) >= datetime(?)
+    ORDER BY COALESCE(published_at, fetched_at) DESC
+    LIMIT 200
+  `).bind(user.id, projectId, cutoff).all();
+  const candidates = (result.results || []).filter(item => !usedUrls.has(item.url));
+  const clusters = buildStoryClusters(candidates);
+  const best = clusters.sort((a, b) =>
+    b.distinct_sources - a.distinct_sources ||
+    (b.latest_at || "").localeCompare(a.latest_at || "")
+  )[0];
+  if (!best) return [];
+  return best.items.slice(0, 5).map(item => item.id);
 }
 
 export async function handleEditorialFeedsRequest(request, env, path, user) {
