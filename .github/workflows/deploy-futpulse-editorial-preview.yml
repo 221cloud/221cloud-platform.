@@ -1,0 +1,62 @@
+name: Deploy FutPulse editorial agent to isolated preview
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: futpulse-editorial-preview
+  cancel-in-progress: false
+
+jobs:
+  deploy-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out editorial agent branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/futpulse-editorial-agent-foundation
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install locked dependencies and validate
+        run: |
+          npm ci
+          node --check src/index.js
+          node --check src/editorial-agent.js
+          node --check src/editorial-feeds.js
+          npm run check:inline-scripts
+
+      - name: Build isolated preview configuration
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const config = JSON.parse(fs.readFileSync('wrangler.jsonc', 'utf8'));
+          config.name = '221cloud-auth-preview';
+          config.d1_databases = config.d1_databases.map(binding => ({
+            ...binding,
+            database_id: 'e3de504d-3f1c-4869-8b78-deee4fd96bc4'
+          }));
+          delete config.previews;
+          delete config.triggers;
+          fs.writeFileSync('wrangler.editorial-preview.jsonc', JSON.stringify(config, null, 2));
+          NODE
+
+      - name: Verify Cloudflare credentials are configured
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CF_API_TOKEN" || { echo "::error::Missing CLOUDFLARE_API_TOKEN repository secret"; exit 1; }
+          test -n "$CF_ACCOUNT_ID" || { echo "::error::Missing CLOUDFLARE_ACCOUNT_ID repository secret"; exit 1; }
+
+      - name: Deploy preview Worker only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 deploy --config wrangler.editorial-preview.jsonc
