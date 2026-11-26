@@ -186,7 +186,7 @@ function buildStoryClusters(rows) {
   for (let i = 0; i < rows.length; i++) {
     for (let j = i + 1; j < rows.length; j++) {
       if (!withinStoryWindow(rows[i], rows[j])) continue;
-      if (storySimilarity(rows[i].title, rows[j].title) >= 0.46) join(i, j);
+      if (storySimilarity(rows[i], rows[j]) >= 0.46) join(i, j);
     }
   }
   const groups = new Map();
