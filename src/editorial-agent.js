@@ -282,7 +282,7 @@ async function generateEditorialDraft(request, env, projectId, user) {
       normalizeEditorialCopy(draft.summary, 2000),
       article,
       normalizeEditorialCopy(draft.social_post, 3000)
-    ].filter(Boolean).join("\\n");
+    ].filter(Boolean).join("\n");
     factCheck.push(...findUnsupportedEditorialFacts(editorialCopyForFactCheck, sourcePayload));
     factCheck.push({
       claim: "Contrôle automatique des éléments factuels",
