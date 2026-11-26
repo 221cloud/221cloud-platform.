@@ -79,7 +79,7 @@ async function fetchFeed(source) {
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
   const xml = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
   if (!/<(?:rss|feed|rdf:RDF)\b/i.test(xml)) throw new Error("Format RSS/Atom non reconnu.");
-  return parseFeed(xml, source);
+  return { items: parseFeed(xml, source), httpStatus: response.status, contentType: response.headers.get("Content-Type") || "non précisé" };
 }
 
 export async function handleEditorialFeedsRequest(request, env, path, user) {
@@ -122,7 +122,8 @@ export async function handleEditorialFeedsRequest(request, env, path, user) {
     const results = [];
     for (const source of FEEDS) {
       try {
-        const items = await fetchFeed(source);
+        const feed = await fetchFeed(source);
+        const items = feed.items;
         let saved = 0;
         for (const item of items) {
           const id = crypto.randomUUID();
@@ -136,7 +137,7 @@ export async function handleEditorialFeedsRequest(request, env, path, user) {
           `).bind(id, user.id, projectId, item.source_id, item.source_name, item.source_domain, item.title, item.description, item.url, item.published_at).run();
           saved += Number(result.meta?.changes || 0);
         }
-        results.push({ source: source.name, received: items.length, saved, status: "ok" });
+        results.push({ source: source.name, received: items.length, saved, status: items.length ? "ok" : "empty", http_status: feed.httpStatus, content_type: feed.contentType, message: items.length ? "Flux accessible et articles reconnus." : "Flux accessible (HTTP " + feed.httpStatus + "), mais aucun article RSS/Atom reconnu. Le format du flux peut avoir changé." });
       } catch (error) {
         results.push({ source: source.name, received: 0, saved: 0, status: "error", message: String(error?.message || "Erreur de collecte").slice(0, 180) });
       }
