@@ -52,12 +52,20 @@ async function ensureEditorialGenerationSchema(env) {
 }
 
 function parseModelJson(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value;
   const text = String(value || "").trim();
-  try { return JSON.parse(text); } catch {}
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+  } catch {}
   const first = text.indexOf("{");
   const last = text.lastIndexOf("}");
-  if (first < 0 || last <= first) throw new Error("La réponse IA n'est pas un JSON exploitable.");
-  return JSON.parse(text.slice(first, last + 1));
+  if (first < 0 || last <= first) throw new Error("La réponse IA n'est pas un objet JSON exploitable.");
+  const parsed = JSON.parse(text.slice(first, last + 1));
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("La réponse IA ne contient pas un objet JSON.");
+  }
+  return parsed;
 }
 
 async function releaseEditorialAiSlot(env, userId, projectId, usageDate) {
@@ -128,6 +136,7 @@ async function generateEditorialDraft(request, env, projectId, user) {
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
       ],
+      chat_template_kwargs: { response_format: { type: "json_object" } },
       max_completion_tokens: 2200,
       temperature: 0.2
     });
