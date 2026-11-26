@@ -25,5 +25,6 @@ jobs:
         run: |
           node --check src/index.js
           node --check src/editorial-agent.js
+          node --check src/editorial-feeds.js
       - name: Validate inline scripts and editor bundle
         run: npm run check:inline-scripts
