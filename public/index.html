@@ -9080,7 +9080,7 @@ async function renderEditorialAgentPage(projectId) {
   if (!confirmLeaveApplicationEditor()) return;
   document.getElementById("mainContent").innerHTML =
     '<div class="section-head"><div><h1 class="page-title">Agent éditorial · FutPulse</h1><p class="page-subtitle">Brouillons privés, vérification et validation avant toute publication.</p></div><button class="secondary" type="button" onclick="renderApplicationsPage()">← Applications</button></div>' +
-    '<div class="notice">Les flux RSS servent à repérer des sujets et à consulter les sources. Leur contenu n’est pas automatiquement vérifié ni publié. Toute publication exigera une validation humaine.</div><div class="card"><div class="section-head"><div><h2>Sources d’actualité</h2><p class="muted">Six médias · collecte à la demande</p></div><button type="button" onclick="syncEditorialFeeds()">Collecter les actualités</button></div><div id="editorialFeedMessage" class="muted" aria-live="polite"></div><div id="editorialFeedList"><p class="muted">Chargement des articles collectés...</p></div></div>' +'<div class="card"><div class="section-head"><div><h2>Actualités regroupées</h2><p class="muted">Regroupement prudent à partir des titres, descriptions et dates, avec contrôle anti-fusion en chaîne.</p></div><button class="secondary" type="button" onclick="loadEditorialStoryClusters()">Actualiser les groupes</button></div><div class="notice">Attention : plusieurs médias qui rapportent un même sujet ne constituent pas une vérification indépendante. Chaque information reste à vérifier avant rédaction ou publication.</div><div id="editorialClusterTotals" class="muted" aria-live="polite">Chargement des groupes...</div><div id="editorialDossierList"></div><div id="editorialClusterDiagnostics" class="notice"></div><div id="editorialClusterList"><p class="muted">Analyse des articles collectés...</p></div></div>' +
+    '<div class="notice">Les flux RSS servent à repérer des sujets et à consulter les sources. Leur contenu n’est pas automatiquement vérifié ni publié. Toute publication exigera une validation humaine.</div><div class="notice">Génération IA à la demande : maximum 5 brouillons par jour et 5 sources par brouillon. Les textes restent privés, non vérifiés et jamais publiés automatiquement.</div><div class="card"><div class="section-head"><div><h2>Sources d’actualité</h2><p class="muted">Six médias · collecte à la demande</p></div><button type="button" onclick="syncEditorialFeeds()">Collecter les actualités</button></div><div id="editorialFeedMessage" class="muted" aria-live="polite"></div><div id="editorialFeedList"><p class="muted">Chargement des articles collectés...</p></div></div>' +'<div class="card"><div class="section-head"><div><h2>Actualités regroupées</h2><p class="muted">Regroupement prudent à partir des titres, descriptions et dates, avec contrôle anti-fusion en chaîne.</p></div><button class="secondary" type="button" onclick="loadEditorialStoryClusters()">Actualiser les groupes</button></div><div class="notice">Attention : plusieurs médias qui rapportent un même sujet ne constituent pas une vérification indépendante. Chaque information reste à vérifier avant rédaction ou publication.</div><div id="editorialClusterTotals" class="muted" aria-live="polite">Chargement des groupes...</div><div id="editorialDossierList"></div><div id="editorialClusterDiagnostics" class="notice"></div><div id="editorialClusterList"><p class="muted">Analyse des articles collectés...</p></div></div>' +
     '<div class="card"><div class="section-head"><h2>Brouillons à examiner</h2><button class="secondary" type="button" onclick="loadEditorialDrafts()">Actualiser</button></div><div id="editorialDraftList"><p class="muted">Chargement des brouillons...</p></div></div>' +
     '<div class="card"><h2>Ajouter un brouillon de test</h2><p class="muted">Ce formulaire vérifie le circuit de validation avant le collecteur et l’IA. Il n’ajoute rien aux articles publics.</p><label for="editorialDraftTitle">Titre</label><input id="editorialDraftTitle" maxlength="300" placeholder="Titre de l’article"><label for="editorialDraftArticle">Article</label><textarea id="editorialDraftArticle" maxlength="30000" rows="7" placeholder="Contenu du brouillon"></textarea><label for="editorialDraftSummary">Résumé</label><textarea id="editorialDraftSummary" maxlength="2000" rows="3" placeholder="Résumé court"></textarea><div class="item-actions"><button id="saveEditorialDraftButton" type="button" onclick="createEditorialTestDraft(\'' + escapeJSAttribute(projectId) + '\')">Enregistrer le brouillon</button><span id="editorialDraftMessage" class="muted" aria-live="polite"></span></div></div>';
   await loadEditorialFeedItems();
@@ -9181,6 +9181,7 @@ async function loadEditorialStoryClusters() {
         escapeHTML(item.published_at ? formatDate(item.published_at) : "Date non précisée") +
         '</span></li>'
       ).join("");
+      const sourceIds = encodeURIComponent(JSON.stringify(items.slice(0, 5).map(item => item.id)));
       return '<article class="item-card"><div class="section-head"><h3>' +
         escapeHTML(group.headline || "Sujet sans titre") + '</h3><span class="status">' +
         Number(group.item_count || items.length) + ' article(s)</span></div><p class="muted">' +
@@ -9188,11 +9189,32 @@ async function loadEditorialStoryClusters() {
         '</p><p class="muted">Qualité du rapprochement : ' + matchingLabel +
         (group.matching_score != null ? ' · score minimal ' + Math.round(Number(group.matching_score) * 100) + '%' : '') +
         '</p><p class="notice">Statut : non vérifié. Le regroupement est une aide au tri, pas une confirmation des faits.</p>' +
-        '<details><summary>Consulter les ' + items.length + ' source(s)</summary><ul>' + articleLinks + '</ul></details></article>';
+        '<details><summary>Consulter les ' + items.length + ' source(s)</summary><ul>' + articleLinks + '</ul></details>' +
+        '<div class="item-actions"><button class="editorial-ai-generate" type="button" onclick="generateEditorialDraftFromCluster(\'' + escapeJSAttribute(window.editorialAgentProjectId) + '\',\'' + sourceIds + '\')">Générer un brouillon IA (' + Math.min(items.length, 5) + ' source(s))</button></div></article>';
     }).join("");
   } catch (error) {
     host.innerHTML = '<div class="notice error-text">' + escapeHTML(error.message) + '</div>';
     if (totalsHost) totalsHost.textContent = "Impossible de charger les groupes.";
+  }
+}
+
+async function generateEditorialDraftFromCluster(projectId, encodedItemIds) {
+  const message = document.getElementById("editorialAiMessage");
+  const buttons = Array.from(document.querySelectorAll(".editorial-ai-generate"));
+  buttons.forEach(button => { button.disabled = true; });
+  if (message) message.textContent = "Génération du brouillon en cours…";
+  try {
+    const itemIds = JSON.parse(decodeURIComponent(encodedItemIds));
+    const result = await api("/projects/" + encodeURIComponent(projectId) + "/editorial-agent/generate", {
+      method: "POST",
+      body: JSON.stringify({ item_ids: itemIds })
+    });
+    if (message) message.textContent = (result.message || "Brouillon créé.") + " Titre : " + (result.draft?.title || "");
+    await loadEditorialDrafts();
+  } catch (error) {
+    if (message) message.textContent = "Génération impossible : " + error.message;
+  } finally {
+    buttons.forEach(button => { button.disabled = false; });
   }
 }
 
@@ -9208,6 +9230,16 @@ async function loadEditorialDrafts() {
       const labels = { pending_review: "À valider", approved: "Approuvé · non publié", rejected: "Refusé", published: "Publié" };
       let html = '<article class="item-card"><div class="section-head"><h3>' + escapeHTML(draft.title) + '</h3><span class="status">' + escapeHTML(labels[draft.status] || draft.status) + '</span></div><p class="muted">' + escapeHTML(formatDate(draft.created_at)) + '</p><p style="white-space:pre-wrap">' + escapeHTML(draft.article) + '</p>';
       if (draft.summary) html += '<p><strong>Résumé :</strong> ' + escapeHTML(draft.summary) + '</p>';
+      const sourceItems = Array.isArray(draft.sources) ? draft.sources : [];
+      const factChecks = Array.isArray(draft.fact_check) ? draft.fact_check : [];
+      if (sourceItems.length) html += '<details><summary>Sources utilisées (' + sourceItems.length + ')</summary><ul>' +
+        sourceItems.map(source => '<li><a href="' + escapeHTML(source.url || '#') + '" target="_blank" rel="noopener noreferrer">' +
+          escapeHTML(source.title || source.media || 'Source') + '</a> · ' + escapeHTML(source.media || source.source_name || 'Média') + '</li>').join('') +
+        '</ul></details>';
+      if (factChecks.length) html += '<details><summary>Points à vérifier (' + factChecks.length + ')</summary><ul>' +
+        factChecks.map(item => '<li><strong>' + escapeHTML(item.status || 'À vérifier') + '</strong> · ' +
+          escapeHTML(item.claim || '') + (item.note ? ' — ' + escapeHTML(item.note) : '') + '</li>').join('') +
+        '</ul></details>';
       if (draft.rejection_note) html += '<p class="muted">Motif : ' + escapeHTML(draft.rejection_note) + '</p>';
       if (draft.status === "pending_review") html += '<div class="item-actions"><button type="button" onclick="reviewEditorialDraft(\'' + escapeJSAttribute(window.editorialAgentProjectId) + '\',\'' + escapeJSAttribute(draft.id) + '\',\'approve\')">Approuver le brouillon</button><button class="danger" type="button" onclick="reviewEditorialDraft(\'' + escapeJSAttribute(window.editorialAgentProjectId) + '\',\'' + escapeJSAttribute(draft.id) + '\',\'reject\')">Refuser</button></div>';
       return html + '</article>';
