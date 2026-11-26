@@ -154,7 +154,7 @@ function reconcileEditorialEvidenceStatuses(factCheck, sources) {
   const outlets = new Map();
   for (const source of sources || []) {
     const domain = cleanText(source.domain || source.source_domain, 200)
-      .toLowerCase().replace(/^www\\./, "").replace(/\\/$/, "");
+      .toLowerCase().replace(/^www\./, "").replace(/\/$/, "");
     if (!domain) continue;
     if (!outlets.has(domain)) outlets.set(domain, new Set());
     for (const alias of editorialSourceAliases(source)) outlets.get(domain).add(alias);
@@ -166,7 +166,7 @@ function reconcileEditorialEvidenceStatuses(factCheck, sources) {
     const comparative = [
       "tous deux", "toutes deux", "les deux", "tous les deux",
       "toutes les deux", "both", "ainsi que"
-    ].some(phrase => note.includes(phrase)) || /\\bet\\b/.test(note);
+    ].some(phrase => note.includes(phrase)) || /\bet\b/.test(note);
     if (!comparative) return item;
 
     // On ne reclasse que si la note nomme réellement deux médias présents
