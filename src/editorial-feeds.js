@@ -165,8 +165,9 @@ function storySimilarity(left, right) {
   const strongTitleMatch = distinctiveSharedTitle.length >= 3 && titleJaccard >= 0.20;
   // Avec seulement deux mots communs dans les titres, la description doit
   // apporter au moins trois termes supplémentaires concordants.
+  const additionalDescriptionOverlap = sharedDescription.filter(token => !sharedTitle.includes(token));
   const corroboratedMatch = sharedTitle.length >= 2 &&
-    sharedDescription.length >= 3 && descriptionJaccard >= 0.06;
+    additionalDescriptionOverlap.length >= 3 && descriptionJaccard >= 0.06;
   if (!strongTitleMatch && !corroboratedMatch) return 0;
 
   // Le score est un indice de rapprochement, jamais une validation factuelle.
