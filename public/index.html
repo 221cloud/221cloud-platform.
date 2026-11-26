@@ -9094,7 +9094,11 @@ async function syncEditorialFeeds() {
   if (message) message.textContent = "Récupération des flux RSS autorisés...";
   try {
     const result = await api("/projects/" + encodeURIComponent(window.editorialAgentProjectId) + "/editorial-agent/sources/sync", { method: "POST", body: JSON.stringify({}) });
-    const details = (result.results || []).map(item => item.source + " : " + (item.status === "ok" ? item.received + " reçus" : item.message)).join(" · ");
+    const details = (result.results || []).map(item => {
+      if (item.status === "ok") return item.source + " : " + item.received + " articles reçus";
+      if (item.status === "empty") return item.source + " : aucun article reconnu — HTTP " + item.http_status + " · " + item.content_type + " · " + item.message;
+      return item.source + " : ERREUR — " + (item.message || "Cause non précisée");
+    }).join(" · ");
     if (message) message.textContent = (result.message || "Collecte terminée.") + " " + details;
     await loadEditorialFeedItems();
   } catch (error) {
