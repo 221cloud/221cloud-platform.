@@ -9071,10 +9071,42 @@ async function renderEditorialAgentPage(projectId) {
   if (!confirmLeaveApplicationEditor()) return;
   document.getElementById("mainContent").innerHTML =
     '<div class="section-head"><div><h1 class="page-title">Agent éditorial · FutPulse</h1><p class="page-subtitle">Brouillons privés, vérification et validation avant toute publication.</p></div><button class="secondary" type="button" onclick="renderApplicationsPage()">← Applications</button></div>' +
-    '<div class="notice">L’agent n’est pas encore connecté à une IA ou à des flux d’actualités. Cette interface sert à examiner les brouillons. Approuver un brouillon ne le publie pas.</div>' +
+    '<div class="notice">Les flux RSS servent à repérer des sujets et à consulter les sources. Leur contenu n’est pas automatiquement vérifié ni publié. Toute publication exigera une validation humaine.</div><div class="card"><div class="section-head"><div><h2>Sources d’actualité</h2><p class="muted">BBC Sport, Sky Sports et The Guardian · collecte à la demande</p></div><button type="button" onclick="syncEditorialFeeds()">Collecter les actualités</button></div><div id="editorialFeedMessage" class="muted" aria-live="polite"></div><div id="editorialFeedList"><p class="muted">Chargement des articles collectés...</p></div></div>' +
     '<div class="card"><div class="section-head"><h2>Brouillons à examiner</h2><button class="secondary" type="button" onclick="loadEditorialDrafts()">Actualiser</button></div><div id="editorialDraftList"><p class="muted">Chargement des brouillons...</p></div></div>' +
     '<div class="card"><h2>Ajouter un brouillon de test</h2><p class="muted">Ce formulaire vérifie le circuit de validation avant le collecteur et l’IA. Il n’ajoute rien aux articles publics.</p><label for="editorialDraftTitle">Titre</label><input id="editorialDraftTitle" maxlength="300" placeholder="Titre de l’article"><label for="editorialDraftArticle">Article</label><textarea id="editorialDraftArticle" maxlength="30000" rows="7" placeholder="Contenu du brouillon"></textarea><label for="editorialDraftSummary">Résumé</label><textarea id="editorialDraftSummary" maxlength="2000" rows="3" placeholder="Résumé court"></textarea><div class="item-actions"><button id="saveEditorialDraftButton" type="button" onclick="createEditorialTestDraft(\'' + escapeJSAttribute(projectId) + '\')">Enregistrer le brouillon</button><span id="editorialDraftMessage" class="muted" aria-live="polite"></span></div></div>';
+  await loadEditorialFeedItems();
   await loadEditorialDrafts();
+}
+
+async function syncEditorialFeeds() {
+  const button = Array.from(document.querySelectorAll("button")).find(item => item.textContent.trim() === "Collecter les actualités");
+  const message = document.getElementById("editorialFeedMessage");
+  if (button) button.disabled = true;
+  if (message) message.textContent = "Récupération des flux RSS autorisés...";
+  try {
+    const result = await api("/projects/" + encodeURIComponent(window.editorialAgentProjectId) + "/editorial-agent/sources/sync", { method: "POST", body: JSON.stringify({}) });
+    const details = (result.results || []).map(item => item.source + " : " + (item.status === "ok" ? item.received + " reçus" : item.message)).join(" · ");
+    if (message) message.textContent = (result.message || "Collecte terminée.") + " " + details;
+    await loadEditorialFeedItems();
+  } catch (error) {
+    if (message) message.textContent = "Échec de la collecte : " + error.message;
+  } finally { if (button) button.disabled = false; }
+}
+
+async function loadEditorialFeedItems() {
+  const host = document.getElementById("editorialFeedList");
+  if (!host || !window.editorialAgentProjectId) return;
+  try {
+    const data = await api("/projects/" + encodeURIComponent(window.editorialAgentProjectId) + "/editorial-agent/items");
+    const items = Array.isArray(data.items) ? data.items : [];
+    if (!items.length) { host.innerHTML = '<p class="muted">Aucun article collecté. Lancez une collecte pour commencer.</p>'; return; }
+    host.innerHTML = items.map(item =>
+      '<article class="item-card"><div class="section-head"><strong>' + escapeHTML(item.title) + '</strong><span class="status">' + escapeHTML(item.source_name) + '</span></div>' +
+      (item.description ? '<p>' + escapeHTML(item.description) + '</p>' : '') +
+      '<p class="muted">' + escapeHTML(item.published_at ? formatDate(item.published_at) : "Date non précisée") + ' · ' + escapeHTML(item.source_domain) + '</p>' +
+      '<p><a href="' + escapeHTML(item.url) + '" target="_blank" rel="noopener noreferrer">Lire la source originale</a></p></article>'
+    ).join("");
+  } catch (error) { host.innerHTML = '<p class="error-text">' + escapeHTML(error.message) + '</p>'; }
 }
 
 async function loadEditorialDrafts() {
