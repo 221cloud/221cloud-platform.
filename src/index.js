@@ -1,5 +1,5 @@
 import { handleEditorialAgentRequest } from "./editorial-agent.js";
-import { handleEditorialFeedsRequest, syncEditorialFeedsForProject } from "./editorial-feeds.js";
+import { handleEditorialFeedsRequest, syncEditorialFeedsForProject, selectScheduledEditorialSourceIds } from "./editorial-feeds.js";
 import { runScheduledEditorialGeneration } from "./editorial-agent.js";
 const ITERATIONS = 100000; // Limite prise en charge par Web Crypto sur Cloudflare Workers.
 const SESSION_DAYS = 7;
@@ -2009,7 +2009,8 @@ async function runFutPulseEditorialSchedule(env, scheduledTime) {
       const usableFeeds = collection.results.filter(item => item.status === "ok" && item.received > 0).length;
       let generation = { status: "skipped", reason: "Aucune source exploitable n'a été collectée." };
       if (usableFeeds > 0) {
-        generation = await runScheduledEditorialGeneration(env, project.id, user);
+        const itemIds = await selectScheduledEditorialSourceIds(env, project.id, user);
+        generation = await runScheduledEditorialGeneration(env, project.id, user, itemIds);
       }
       const result = { collected_items: collection.saved, usable_feeds: usableFeeds, generation };
       await env.DB.prepare(
