@@ -32,18 +32,26 @@ function safeHttpUrl(value) {
   } catch { return ""; }
 }
 function parseFeed(xml, source) {
-  const blocks = [...xml.matchAll(/<(item|entry)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/gi)].slice(0, MAX_ITEMS_PER_FEED);
+  // Accepte RSS/Atom avec ou sans préfixes XML (ex. content:item, atom:entry).
+  const blocks = [...xml.matchAll(/<(?:[\w.-]+:)?(item|entry)\b([^>]*)>([\s\S]*?)<\/(?:[\w.-]+:)?\1\s*>/gi)].slice(0, MAX_ITEMS_PER_FEED);
   return blocks.map((match, index) => {
-    const block = match[2];
+    const attributes = match[2] || "";
+    const block = match[3];
     const title = tagValue(block, "title").slice(0, 500);
-    const description = (tagValue(block, "description") || tagValue(block, "summary") || tagValue(block, "content")).slice(0, 3000);
+    const description = (tagValue(block, "description") || tagValue(block, "summary") || tagValue(block, "encoded") || tagValue(block, "content")).slice(0, 3000);
     let link = tagValue(block, "link");
     if (!link) {
-      const linkMatch = block.match(/<link\b[^>]*href=["']([^"']+)["'][^>]*>/i);
+      const linkMatch = block.match(/<(?:[\w.-]+:)?link\b[^>]*href=["']([^"']+)["'][^>]*\/?\s*>/i);
       link = linkMatch ? decodeXml(linkMatch[1]) : "";
     }
+    // RSS 1.0 peut placer l'URL dans rdf:about ; certains flux utilisent guid ou atom:id.
+    if (!link) link = tagValue(block, "guid") || tagValue(block, "id");
+    if (!link) {
+      const aboutMatch = attributes.match(/(?:[\w.-]+:)?about=["']([^"']+)["']/i);
+      link = aboutMatch ? decodeXml(aboutMatch[1]) : "";
+    }
     const url = safeHttpUrl(link);
-    const published = tagValue(block, "pubDate") || tagValue(block, "published") || tagValue(block, "updated") || tagValue(block, "date");
+    const published = tagValue(block, "pubDate") || tagValue(block, "published") || tagValue(block, "updated") || tagValue(block, "date") || tagValue(block, "issued");
     const parsedDate = published ? new Date(published) : null;
     const publishedAt = parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate.toISOString() : null;
     if (!title || !url) return null;
