@@ -9066,8 +9066,17 @@ function renderApplications(applications) {
 
 async function renderEditorialAgentPage(projectId) {
   window.editorialAgentProjectId = projectId;
-  const application = projectsCache.find(item => item.id === projectId && item.type === "application");
-  if (!application) { alert("Application introuvable. Actualisez la liste."); return; }
+  let application = projectsCache.find(item => String(item.id) === String(projectId) && item.type === "application");
+  if (!application) {
+    try {
+      const latest = await api("/projects");
+      projectsCache = Array.isArray(latest.projects) ? latest.projects : [];
+      application = projectsCache.find(item => String(item.id) === String(projectId) && item.type === "application");
+    } catch (error) {
+      console.error("Impossible d’actualiser la liste des applications :", error);
+    }
+  }
+  if (!application) { alert("FutPulse reste introuvable dans vos applications. La liste a été actualisée ; aucune donnée n’a été modifiée."); return; }
   if (!confirmLeaveApplicationEditor()) return;
   document.getElementById("mainContent").innerHTML =
     '<div class="section-head"><div><h1 class="page-title">Agent éditorial · FutPulse</h1><p class="page-subtitle">Brouillons privés, vérification et validation avant toute publication.</p></div><button class="secondary" type="button" onclick="renderApplicationsPage()">← Applications</button></div>' +
