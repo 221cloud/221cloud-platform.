@@ -18,13 +18,13 @@ function decodeXml(value) {
     .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(Math.min(0x10ffff, parseInt(n, 16))));
 }
 function tagValue(xml, tag) {
-  // Recherche directement la balise demandée, même lorsqu'elle est imbriquée
-  // dans item/entry et même si elle porte un préfixe XML ou des attributs.
-  const escaped = String(tag || "").replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&");
-  const pattern = new RegExp("<(?:[\\\\w.-]+:)?" + escaped + "\\\\b[^>]*>([\\\\s\\\\S]*?)<\\\\/(?:[\\\\w.-]+:)?" + escaped + "\\\\s*>", "i");
+  // Recherche directement la balise demandée, y compris à l'intérieur de item/entry.
+  const name = String(tag || "").replace(/[^a-z0-9_-]/gi, "");
+  if (!name) return "";
+  const pattern = new RegExp("<(?:[\\w.-]+:) ?".replace(") ?", ")?") + name + "\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:) ?".replace(") ?", ")?") + name + "\\s*>", "i");
   const match = xml.match(pattern);
   if (!match) return "";
-  return decodeXml(match[1].replace(/<[^>]*>/g, " ")).replace(/\\\\s+/g, " ").trim();
+  return decodeXml(match[1].replace(/<[^>]*>/g, " ")).replace(/\\s+/g, " ").trim();
 }
 function safeHttpUrl(value) {
   try {
