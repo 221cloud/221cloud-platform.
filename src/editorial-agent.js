@@ -136,7 +136,10 @@ async function generateEditorialDraft(request, env, projectId, user) {
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
       ],
-      chat_template_kwargs: { response_format: { type: "json_object" } },
+      chat_template_kwargs: {
+        enable_thinking: false,
+        response_format: { type: "json_object" }
+      },
       max_completion_tokens: 2200,
       temperature: 0.2
     });
@@ -177,7 +180,12 @@ async function generateEditorialDraft(request, env, projectId, user) {
     }, { status: 201 });
   } catch (error) {
     await releaseEditorialAiSlot(env, user.id, projectId, usageDate);
-    console.error("EDITORIAL AI GENERATION ERROR:", error);
+    console.error("EDITORIAL AI GENERATION ERROR:", {
+      name: cleanText(error?.name, 120),
+      message: cleanText(error?.message, 1000),
+      code: cleanText(error?.code, 120),
+      status: Number.isFinite(error?.status) ? error.status : null
+    });
     const message = String(error?.message || "");
     if (/quota|neuron|rate.?limit|429|capacity/i.test(message)) {
       return Response.json({ error: "Le quota gratuit ou la capacité IA est temporairement atteint. Aucun service payant ne sera utilisé. Réessayez plus tard." }, { status: 429 });
