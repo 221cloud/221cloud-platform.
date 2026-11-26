@@ -130,33 +130,56 @@ function findUnsupportedEditorialFacts(article, sources) {
   return unsupported;
 }
 
+function editorialSourceAliases(source) {
+  const aliases = new Set();
+  for (const value of [source.media, source.source_name]) {
+    const normalized = normalizeEditorialEvidence(value);
+    if (!normalized) continue;
+    aliases.add(normalized);
+    const words = normalized.split(" ").filter(Boolean);
+    // Les noms de médias comportent parfois un suffixe (ex. « Football »).
+    // Les groupes de deux à quatre mots permettent de reconnaître leur nom
+    // usuel sans exiger que la note reprenne le libellé complet.
+    for (let size = 2; size <= Math.min(4, words.length); size++) {
+      for (let start = 0; start + size <= words.length; start++) {
+        aliases.add(words.slice(start, start + size).join(" "));
+      }
+    }
+    if (words.length === 1 && words[0].length >= 3) aliases.add(words[0]);
+  }
+  return [...aliases].filter(alias => alias.length >= 3);
+}
+
 function reconcileEditorialEvidenceStatuses(factCheck, sources) {
   const outlets = new Map();
   for (const source of sources || []) {
-    const domain = cleanText(source.domain || source.source_domain, 200).toLowerCase();
+    const domain = cleanText(source.domain || source.source_domain, 200)
+      .toLowerCase().replace(/^www\./, "").replace(/\/$/, "");
     if (!domain) continue;
-    const names = [source.media, source.source_name, domain]
-      .map(value => normalizeEditorialEvidence(value))
-      .filter(value => value.length >= 3);
     if (!outlets.has(domain)) outlets.set(domain, new Set());
-    for (const name of names) outlets.get(domain).add(name);
+    for (const alias of editorialSourceAliases(source)) outlets.get(domain).add(alias);
   }
 
   return (factCheck || []).map(item => {
     if (item.status !== "source_unique" || !item.note) return item;
     const note = normalizeEditorialEvidence(item.note);
-    const explicitlyComparative = ["tous deux", "toutes deux", "les deux", "tous les deux", "toutes les deux", "both"].some(phrase => note.includes(phrase));
-    if (!explicitlyComparative) return item;
+    const comparative = [
+      "tous deux", "toutes deux", "les deux", "tous les deux",
+      "toutes les deux", "both", "ainsi que"
+    ].some(phrase => note.includes(phrase)) || /\bet\b/.test(note);
+    if (!comparative) return item;
 
-    const citedDomains = [...outlets.entries()].filter(([, names]) =>
-      [...names].some(name => note.includes(name))
+    // On ne reclasse que si la note nomme réellement deux médias présents
+    // dans les sources sélectionnées et associés à deux domaines distincts.
+    const citedDomains = [...outlets.entries()].filter(([, aliases]) =>
+      [...aliases].some(alias => note.includes(alias))
     );
     if (citedDomains.length < 2) return item;
 
     return {
       ...item,
       status: "corrobore_extraits",
-      note: item.note + " Statut harmonisé : la note cite explicitement au moins deux domaines distincts; consulter les extraits et articles originaux."
+      note: item.note + " Statut harmonisé : la note nomme au moins deux médias distincts parmi les sources sélectionnées; cela confirme seulement la concordance des extraits, pas leur indépendance ni la véracité finale."
     };
   });
 }
@@ -254,7 +277,13 @@ async function generateEditorialDraft(request, env, projectId, user) {
     // Contrôle mécanique des chiffres, scores, dates et journées cités dans le
     // texte par rapport aux seuls titres/descriptions RSS effectivement fournis.
     factCheck.splice(0, factCheck.length, ...reconciledFactCheck);
-    factCheck.push(...findUnsupportedEditorialFacts(article, sourcePayload));
+    const editorialCopyForFactCheck = [
+      title,
+      normalizeEditorialCopy(draft.summary, 2000),
+      article,
+      normalizeEditorialCopy(draft.social_post, 3000)
+    ].filter(Boolean).join("\n");
+    factCheck.push(...findUnsupportedEditorialFacts(editorialCopyForFactCheck, sourcePayload));
     factCheck.push({
       claim: "Contrôle automatique des éléments factuels",
       status: "information_incomplete",
