@@ -125,6 +125,37 @@ function findUnsupportedEditorialFacts(article, sources) {
   return unsupported;
 }
 
+function reconcileEditorialEvidenceStatuses(factCheck, sources) {
+  const outlets = new Map();
+  for (const source of sources || []) {
+    const domain = cleanText(source.domain || source.source_domain, 200).toLowerCase();
+    if (!domain) continue;
+    const names = [source.media, source.source_name, domain]
+      .map(value => normalizeEditorialEvidence(value))
+      .filter(value => value.length >= 3);
+    if (!outlets.has(domain)) outlets.set(domain, new Set());
+    for (const name of names) outlets.get(domain).add(name);
+  }
+
+  return (factCheck || []).map(item => {
+    if (item.status !== "source_unique" || !item.note) return item;
+    const note = normalizeEditorialEvidence(item.note);
+    const explicitlyComparative = /\\b(?:tous deux|toutes deux|les deux|tous les deux|toutes les deux|both)\\b/.test(note);
+    if (!explicitlyComparative) return item;
+
+    const citedDomains = [...outlets.entries()].filter(([, names]) =>
+      [...names].some(name => note.includes(name))
+    );
+    if (citedDomains.length < 2) return item;
+
+    return {
+      ...item,
+      status: "corrobore_extraits",
+      note: item.note + " Statut harmonisé : la note cite explicitement au moins deux domaines distincts; consulter les extraits et articles originaux."
+    };
+  });
+}
+
 async function generateEditorialDraft(request, env, projectId, user) {
   if (!env.AI || typeof env.AI.run !== "function") {
     return Response.json({ error: "Le moteur IA n'est pas encore configuré sur ce Worker." }, { status: 503 });
@@ -174,6 +205,8 @@ async function generateEditorialDraft(request, env, projectId, user) {
     "Rédige un brouillon prudent, factuel et lisible. N'invente aucun fait, chiffre, citation, date, lieu, identité ou contexte absent des sources.",
     "Une répétition de la même information par plusieurs médias ne prouve pas une confirmation indépendante. Des articles qui reprennent une même dépêche ou un même communiqué ne sont pas des confirmations indépendantes.",
     "Pour chaque claim de fact_check, distingue strictement : source_unique (un seul domaine distinct apporte un élément explicite), corrobore_extraits (au moins deux domaines distincts mentionnent explicitement le même fait dans les extraits fournis), multi_sources_non_verifie (plusieurs sources sont présentes mais les extraits ne corroborent pas clairement ce claim), information_incomplete (élément absent ou insuffisant) et contradiction_a_verifier (les extraits se contredisent).",
+    "Cohérence obligatoire : si la note d’un claim cite explicitement au moins deux médias distincts comme rapportant le même fait (ex. « BBC Sport et Sky Sports mentionnent tous deux… »), son statut doit être corrobore_extraits et jamais source_unique.",
+    "En français sportif, formule un score partagé comme « ont fait match nul (2-2) »; évite « se sont imposés à égalité ». N’ajoute pas de minute exacte si elle n’apparaît pas dans les sources fournies. La validation humaine peut ensuite enrichir le brouillon.",
     "N'utilise corrobore_extraits que si les extraits RSS soutiennent directement le même fait; ne déduis jamais la confirmation du simple nombre de sources sélectionnées. Ne prétends pas avoir vérifié l'indépendance éditoriale des médias.",
     "Si les descriptions sont insuffisantes, écris un texte court qui expose les limites au lieu de combler les trous.",
     "Attribue les informations à leurs médias. Ne transforme pas une accusation, une rumeur ou une hypothèse en fait établi.",
@@ -211,8 +244,10 @@ async function generateEditorialDraft(request, env, projectId, user) {
       status: cleanText(item?.status, 60) || "information_incomplete",
       note: cleanText(item?.note, 500)
     }));
+    const reconciledFactCheck = reconcileEditorialEvidenceStatuses(factCheck, sourcePayload);
     // Contrôle mécanique des chiffres, scores, dates et journées cités dans le
     // texte par rapport aux seuls titres/descriptions RSS effectivement fournis.
+    factCheck.splice(0, factCheck.length, ...reconciledFactCheck);
     factCheck.push(...findUnsupportedEditorialFacts(article, sourcePayload));
     factCheck.push({
       claim: "Contrôle automatique des éléments factuels",
