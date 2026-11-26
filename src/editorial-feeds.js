@@ -119,7 +119,7 @@ const STORY_STOP_WORDS = new Set([
   "football","foot","match","matches","equipe","club","sport","sports","officiel","officielle",
   "annonce","annoncee","annoncees","annonces","confirme","confirmee","confirmees","confirmer",
   "selon","face","journee","ligue","championnat","coupe","mercato","transfert","transferts",
-  "the","and","for","from","with","over","under","into","after","before","their","his","her",
+  "the","and","for","from","with","over","under","into","after","before","their","his","her","man",
   "its","has","have","was","will","are","is","a","an","to","of","in","on","at","by","as",
   "this","that","these","those","who","what","when","where","why","how","new","says","said",
   "mais","comme","plusieurs","etre","avoir","fait","faire","son","sa","ses",
@@ -141,28 +141,38 @@ function storyTokens(value) {
     .split(/\s+/).filter(token => token.length >= 3 && !STORY_STOP_WORDS.has(token))
     .map(normalizeStoryToken).filter(token => token.length >= 3);
 }
+const STORY_GENERIC_EVENT_WORDS = new Set([
+  "win","wins","winner","winning","won","lose","loses","losing","lost","loss",
+  "goal","goals","score","scores","scored","scoring","victory","defeat","draw",
+  "beat","beats","beaten","matchday","match","game","games","record","league"
+]);
 function storySimilarity(left, right) {
   const titleA = new Set(storyTokens(left.title));
   const titleB = new Set(storyTokens(right.title));
-  const contextA = new Set(storyTokens(left.description).slice(0, 80));
-  const contextB = new Set(storyTokens(right.description).slice(0, 80));
-  const combinedA = new Set([...titleA, ...contextA]);
-  const combinedB = new Set([...titleB, ...contextB]);
-  if (!combinedA.size || !combinedB.size) return 0;
-  const titleOverlap = [...titleA].filter(token => titleB.has(token));
-  const combinedOverlap = [...combinedA].filter(token => combinedB.has(token));
-  if (!combinedOverlap.length) return 0;
-  const jaccard = combinedOverlap.length / (combinedA.size + combinedB.size - combinedOverlap.length);
-  const containment = combinedOverlap.length / Math.min(combinedA.size, combinedB.size);
-  const titleJaccard = titleOverlap.length
-    ? titleOverlap.length / (titleA.size + titleB.size - titleOverlap.length)
+  const sharedTitle = [...titleA].filter(token => titleB.has(token));
+  // Un seul nom commun (joueur, entraîneur ou club) ne suffit jamais.
+  if (sharedTitle.length < 2) return 0;
+  const titleJaccard = sharedTitle.length / (titleA.size + titleB.size - sharedTitle.length);
+  const distinctiveSharedTitle = sharedTitle.filter(token => !STORY_GENERIC_EVENT_WORDS.has(token));
+  const descriptionA = new Set(storyTokens(left.description).slice(0, 120));
+  const descriptionB = new Set(storyTokens(right.description).slice(0, 120));
+  const sharedDescription = [...descriptionA].filter(token => descriptionB.has(token));
+  const descriptionJaccard = sharedDescription.length
+    ? sharedDescription.length / (descriptionA.size + descriptionB.size - sharedDescription.length)
     : 0;
-  const hasDistinctiveTitleMatch = titleOverlap.some(token => token.length >= 5);
-  // Les titres restent prioritaires; les descriptions servent de corroboration,
-  // sans suffire seules à fusionner deux sujets.
-  if (titleOverlap.length >= 2 && titleJaccard >= 0.28) return Math.max(titleJaccard, containment * 0.72);
-  if (hasDistinctiveTitleMatch && combinedOverlap.length >= 3 && jaccard >= 0.12) return Math.max(0.47, jaccard);
-  return Math.max(jaccard, containment * 0.72);
+
+  // Trois mots distinctifs communs dans les titres constituent un signal fort.
+  const strongTitleMatch = distinctiveSharedTitle.length >= 3 && titleJaccard >= 0.20;
+  // Avec seulement deux mots communs dans les titres, la description doit
+  // apporter au moins trois termes supplémentaires concordants.
+  const additionalDescriptionOverlap = sharedDescription.filter(token => !sharedTitle.includes(token));
+  const corroboratedMatch = sharedTitle.length >= 2 &&
+    additionalDescriptionOverlap.length >= 3 && descriptionJaccard >= 0.06;
+  if (!strongTitleMatch && !corroboratedMatch) return 0;
+
+  // Le score est un indice de rapprochement, jamais une validation factuelle.
+  if (strongTitleMatch) return Math.max(0.46, Math.min(1, titleJaccard));
+  return Math.max(0.46, Math.min(0.75, 0.42 + descriptionJaccard));
 }
 function withinStoryWindow(a, b) {
   const da = Date.parse(a.published_at || a.fetched_at || "");
@@ -171,31 +181,26 @@ function withinStoryWindow(a, b) {
   return Math.abs(da - db) <= 72 * 60 * 60 * 1000;
 }
 function buildStoryClusters(rows) {
-  const parents = rows.map((_, index) => index);
-  const find = index => {
-    while (parents[index] !== index) {
-      parents[index] = parents[parents[index]];
-      index = parents[index];
-    }
-    return index;
-  };
-  const join = (a, b) => {
-    const rootA = find(a), rootB = find(b);
-    if (rootA !== rootB) parents[rootB] = rootA;
-  };
+  // Regroupement conservateur : chaque nouvel article doit être compatible
+  // avec tous les articles déjà présents dans le groupe (anti-chaînage).
+  const groups = rows.map((_, index) => [index]);
+  const groupOf = index => groups.findIndex(group => group.includes(index));
   for (let i = 0; i < rows.length; i++) {
     for (let j = i + 1; j < rows.length; j++) {
-      if (!withinStoryWindow(rows[i], rows[j])) continue;
-      if (storySimilarity(rows[i], rows[j]) >= 0.46) join(i, j);
+      if (!withinStoryWindow(rows[i], rows[j]) || storySimilarity(rows[i], rows[j]) < 0.46) continue;
+      const groupA = groupOf(i), groupB = groupOf(j);
+      if (groupA < 0 || groupB < 0 || groupA === groupB) continue;
+      const compatible = groups[groupA].every(a => groups[groupB].every(b =>
+        withinStoryWindow(rows[a], rows[b]) && storySimilarity(rows[a], rows[b]) >= 0.46
+      ));
+      if (compatible) {
+        groups[groupA] = [...groups[groupA], ...groups[groupB]];
+        groups.splice(groupB, 1);
+      }
     }
   }
-  const groups = new Map();
-  rows.forEach((row, index) => {
-    const root = find(index);
-    if (!groups.has(root)) groups.set(root, []);
-    groups.get(root).push(row);
-  });
-  return [...groups.values()].map(items => {
+  return groups.map(indexes => {
+    const items = indexes.map(index => rows[index]);
     const sources = [...new Map(items.map(item => [item.source_domain, {
       source_id: item.source_id, source_name: item.source_name, source_domain: item.source_domain
     }])).values()];
@@ -204,12 +209,19 @@ function buildStoryClusters(rows) {
     const lead = [...items].sort((a, b) =>
       (Date.parse(b.published_at || b.fetched_at || "") || 0) - (Date.parse(a.published_at || a.fetched_at || "") || 0)
     )[0];
+    const pairScores = [];
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i + 1; j < items.length; j++) pairScores.push(storySimilarity(items[i], items[j]));
+    }
+    const minimumPairScore = pairScores.length ? Math.min(...pairScores) : 0;
     return {
       id: "story-" + items.map(item => item.id).sort().join("-").slice(0, 120),
       headline: lead.title,
       item_count: items.length,
       distinct_sources: sources.length,
       source_diversity: sources.length >= 2 ? "multiple_sources" : "single_source",
+      matching_confidence: items.length < 2 ? "single_article" : minimumPairScore >= 0.60 ? "strong_match" : "review_required",
+      matching_score: pairScores.length ? Number(minimumPairScore.toFixed(3)) : null,
       verification_status: "not_verified",
       latest_at: latest,
       sources,
