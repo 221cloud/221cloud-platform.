@@ -73,6 +73,54 @@ async function releaseEditorialAiSlot(env, userId, projectId, usageDate) {
     .bind(userId, projectId, usageDate).run();
 }
 
+function normalizeEditorialEvidence(value) {
+  const ordinals = [
+    [/\bpremiere\b/g, "1e"], [/\bpremier\b/g, "1er"],
+    [/\bdeuxieme\b/g, "2e"], [/\btroisieme\b/g, "3e"],
+    [/\bquatrieme\b/g, "4e"], [/\bcinquieme\b/g, "5e"],
+    [/\bsixieme\b/g, "6e"], [/\bseptieme\b/g, "7e"],
+    [/\bhuitieme\b/g, "8e"], [/\bneuvieme\b/g, "9e"],
+    [/\bdixieme\b/g, "10e"]
+  ];
+  let text = String(value ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  for (const [pattern, replacement] of ordinals) text = text.replace(pattern, replacement);
+  return text.replace(/[’']/g, " ").replace(/[–—:]/g, " ")
+    .replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function findUnsupportedEditorialFacts(article, sources) {
+  const evidence = normalizeEditorialEvidence((sources || [])
+    .map(source => [source.title, source.description].filter(Boolean).join(" "))
+    .join(" "));
+  if (!evidence) return [];
+  const candidates = new Set();
+  const text = String(article || "");
+  for (const match of text.matchAll(/\b\d{1,4}(?:[.,]\d+)?\b/g)) {
+    candidates.add(match[0].replace(",", "."));
+  }
+  for (const match of text.matchAll(/\b\d{1,2}\s*[-–—:]\s*\d{1,2}\b/g)) {
+    candidates.add(match[0]);
+  }
+  const month = "janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre";
+  const datePattern = new RegExp("\\b\\d{1,2}\\s+(?:" + month + ")\\b", "gi");
+  for (const match of text.matchAll(datePattern)) candidates.add(match[0]);
+  const roundPattern = /\b(?:premier|premiere|deuxieme|troisieme|quatrieme|cinquieme|sixieme|septieme|huitieme|neuvieme|dixieme|\d{1,2}(?:er|e|eme|ieme))\s+(?:journee|tour|manche|phase)\b/gi;
+  for (const match of text.matchAll(roundPattern)) candidates.add(match[0]);
+
+  const unsupported = [];
+  for (const claim of candidates) {
+    const normalizedClaim = normalizeEditorialEvidence(claim);
+    if (!normalizedClaim || evidence.includes(normalizedClaim)) continue;
+    unsupported.push({
+      claim: claim.length > 90 ? claim.slice(0, 90) : claim,
+      status: "information_incomplete",
+      note: "Cet élément chiffré ou chronologique n'apparaît pas clairement dans les titres/descriptions RSS sélectionnés. Ouvrir la source originale et le vérifier."
+    });
+    if (unsupported.length >= 12) break;
+  }
+  return unsupported;
+}
+
 async function generateEditorialDraft(request, env, projectId, user) {
   if (!env.AI || typeof env.AI.run !== "function") {
     return Response.json({ error: "Le moteur IA n'est pas encore configuré sur ce Worker." }, { status: 503 });
@@ -157,6 +205,14 @@ async function generateEditorialDraft(request, env, projectId, user) {
       status: cleanText(item?.status, 60) || "information_incomplete",
       note: cleanText(item?.note, 500)
     }));
+    // Contrôle mécanique des chiffres, scores, dates et journées cités dans le
+    // texte par rapport aux seuls titres/descriptions RSS effectivement fournis.
+    factCheck.push(...findUnsupportedEditorialFacts(article, sourcePayload));
+    factCheck.push({
+      claim: "Contrôle automatique des éléments factuels",
+      status: "information_incomplete",
+      note: "Contrôle de cohérence effectué uniquement sur les titres et descriptions RSS sélectionnés. Il ne confirme pas la véracité des faits : consulter les articles originaux avant publication."
+    });
     factCheck.push({
       claim: "Validation journalistique avant publication",
       status: "information_incomplete",
