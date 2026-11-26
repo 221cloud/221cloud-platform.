@@ -146,12 +146,32 @@ const STORY_GENERIC_EVENT_WORDS = new Set([
   "goal","goals","score","scores","scored","scoring","victory","defeat","draw",
   "beat","beats","beaten","matchday","match","game","games","record","league"
 ]);
+const STORY_MATCH_REPORT_WORDS = new Set([
+  "score","scored","scoring","beat","beats","beaten","win","wins","won",
+  "victory","defeat","draw","sweep","swept","rout","comeback","thrash",
+  "hammer","held","equaliser","equalizer","penalty"
+]);
+function isMatchReportTitle(tokens) {
+  return tokens.some(token => STORY_MATCH_REPORT_WORDS.has(token));
+}
 function storySimilarity(left, right) {
-  const titleA = new Set(storyTokens(left.title));
-  const titleB = new Set(storyTokens(right.title));
+  const tokensA = storyTokens(left.title);
+  const tokensB = storyTokens(right.title);
+  const titleA = new Set(tokensA);
+  const titleB = new Set(tokensB);
   const sharedTitle = [...titleA].filter(token => titleB.has(token));
   // Un seul nom commun (joueur, entraîneur ou club) ne suffit jamais.
   if (sharedTitle.length < 2) return 0;
+
+  // Un compte rendu de match ne doit pas être fusionné avec un portrait,
+  // une analyse ou un article de contexte partageant seulement joueurs/club.
+  // Deux comptes rendus doivent aussi partager au moins trois termes de titre,
+  // afin d'exiger un ancrage événementiel plus précis.
+  const leftIsMatchReport = isMatchReportTitle(tokensA);
+  const rightIsMatchReport = isMatchReportTitle(tokensB);
+  if (leftIsMatchReport !== rightIsMatchReport) return 0;
+  if (leftIsMatchReport && sharedTitle.length < 3) return 0;
+
   const titleJaccard = sharedTitle.length / (titleA.size + titleB.size - sharedTitle.length);
   const distinctiveSharedTitle = sharedTitle.filter(token => !STORY_GENERIC_EVENT_WORDS.has(token));
   const descriptionA = new Set(storyTokens(left.description).slice(0, 120));
@@ -166,7 +186,7 @@ function storySimilarity(left, right) {
   // Avec seulement deux mots communs dans les titres, la description doit
   // apporter au moins trois termes supplémentaires concordants.
   const additionalDescriptionOverlap = sharedDescription.filter(token => !sharedTitle.includes(token));
-  const corroboratedMatch = sharedTitle.length >= 2 &&
+  const corroboratedMatch = distinctiveSharedTitle.length >= 3 &&
     additionalDescriptionOverlap.length >= 3 && descriptionJaccard >= 0.06;
   if (!strongTitleMatch && !corroboratedMatch) return 0;
 
