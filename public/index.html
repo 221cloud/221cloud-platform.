@@ -9203,7 +9203,7 @@ async function generateEditorialDraftFromCluster(encodedItemIds) {
   const message = document.getElementById("editorialAiMessage");
   const buttons = Array.from(document.querySelectorAll(".editorial-ai-generate"));
   buttons.forEach(button => { button.disabled = true; });
-  if (message) message.textContent = "Génération du brouillon en cours…";
+  if (message) message.textContent = "L’IA rédige, corrige et transmet l’article à l’administration…";
   try {
     const itemIds = JSON.parse(decodeURIComponent(encodedItemIds));
     const result = await api("/projects/" + encodeURIComponent(projectId) + "/editorial-agent/generate", {
@@ -9228,7 +9228,7 @@ async function loadEditorialDrafts() {
     const drafts = Array.isArray(data.drafts) ? data.drafts : [];
     if (!drafts.length) { host.innerHTML = '<div class="empty">Aucun brouillon pour le moment.</div>'; return; }
     host.innerHTML = drafts.map(draft => {
-      const labels = { pending_review: "À valider", approved: "Approuvé · non publié", rejected: "Refusé", published: "Publié" };
+      const labels = { pending_review: "À valider", approved: "Transmis à l’administration", rejected: "Refusé", published: "Publié" };
       let html = '<article class="item-card" data-draft-id="' + escapeHTML(draft.id) + '"><div class="section-head"><h3>' + escapeHTML(draft.title) + '</h3><span class="status">' + escapeHTML(labels[draft.status] || draft.status) + '</span></div><p class="muted">' + escapeHTML(formatDate(draft.created_at)) + '</p><p style="white-space:pre-wrap">' + escapeHTML(draft.article) + '</p>';
       if (draft.summary) html += '<p><strong>Résumé :</strong> ' + escapeHTML(draft.summary) + '</p>';
       const sourceItems = Array.isArray(draft.sources) ? draft.sources : [];
@@ -9253,7 +9253,7 @@ async function loadEditorialDrafts() {
       if (draft.rejection_note) html += '<p class="muted">Motif : ' + escapeHTML(draft.rejection_note) + '</p>';
       if (draft.status === "pending_review") html += '<div class="item-actions"><button class="secondary" type="button" data-editorial-edit="true">Modifier le brouillon</button><button class="secondary" type="button" data-editorial-recheck="true" data-project-id="' + escapeHTML(window.editorialAgentProjectId) + '" data-draft-id="' + escapeHTML(draft.id) + '">Réexaminer les points</button><button type="button" data-editorial-review="approve" data-project-id="' + escapeHTML(window.editorialAgentProjectId) + '">Approuver le brouillon</button><button class="danger" type="button" data-editorial-review="reject" data-project-id="' + escapeHTML(window.editorialAgentProjectId) + '">Refuser</button></div><div class="notice" data-editorial-edit-form style="display:none"><label>Titre<input data-edit-title maxlength="300" value="' + escapeHTML(draft.title || '') + '"></label><label>Résumé<textarea data-edit-summary rows="3">' + escapeHTML(draft.summary || '') + '</textarea></label><label>Article<textarea data-edit-article rows="12">' + escapeHTML(draft.article || '') + '</textarea></label><div class="item-actions"><button type="button" data-editorial-save="true">Enregistrer les modifications</button><button class="secondary" type="button" data-editorial-cancel="true">Annuler</button></div><p class="muted" data-editorial-edit-message aria-live="polite"></p></div><div class="notice" data-editorial-recheck-result aria-live="polite" style="display:none"></div>';
       if (draft.status === "approved" && draft.published_row_id) {
-        html += '<p class="muted">Transmis aux « Actualités enregistrées » · statut brouillon. Publication manuelle requise.</p>';
+        html += '<p class="muted">Présent dans « Actualités enregistrées » · statut brouillon. Modification et publication réservées à l’administration.</p>';
       } else if (draft.status === "approved") {
         html += '<div class="item-actions"><button type="button" data-editorial-transfer="true" data-project-id="' + escapeHTML(window.editorialAgentProjectId) + '" data-draft-id="' + escapeHTML(draft.id) + '">Envoyer aux actualités</button></div>';
       }
