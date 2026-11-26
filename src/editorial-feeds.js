@@ -18,10 +18,16 @@ function decodeXml(value) {
     .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(Math.min(0x10ffff, parseInt(n, 16))));
 }
 function tagValue(xml, tag) {
-  const escaped = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = xml.match(new RegExp("<(?:[\\w.-]+:)?" + escaped + "(?:\\s[^>]*)?>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?" + escaped + "\\s*>", "i"));
-  if (!match) return "";
-  return decodeXml(match[1].replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
+  // Parcourt les éléments XML par leur nom complet, puis compare leur nom local.
+  // Cela couvre les balises title avec attributs et préfixes d'espaces de noms.
+  const wanted = String(tag || "").toLowerCase();
+  const elementPattern = /<([A-Za-z_][\w.:-]*)(?:\s[^>]*)?>([\s\S]*?)<\/\1\s*>/gi;
+  for (const match of xml.matchAll(elementPattern)) {
+    const localName = match[1].split(":").pop().toLowerCase();
+    if (localName !== wanted) continue;
+    return decodeXml(match[2].replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
+  }
+  return "";
 }
 function safeHttpUrl(value) {
   try {
