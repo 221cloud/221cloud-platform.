@@ -21,10 +21,10 @@ function tagValue(xml, tag) {
   // Recherche directement la balise demandée, y compris à l'intérieur de item/entry.
   const name = String(tag || "").replace(/[^a-z0-9_-]/gi, "");
   if (!name) return "";
-  const pattern = new RegExp("<(?:[\\w.-]+:) ?".replace(") ?", ")?") + name + "\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:) ?".replace(") ?", ")?") + name + "\\s*>", "i");
+  const pattern = new RegExp("<(?:[\w.-]+:)?".replace(")?", ")?") + name + "\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?".replace(")?", ")?") + name + "\s*>", "i");
   const match = xml.match(pattern);
   if (!match) return "";
-  return decodeXml(match[1].replace(/<[^>]*>/g, " ")).replace(/\\s+/g, " ").trim();
+  return decodeXml(match[1].replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
 }
 function safeHttpUrl(value) {
   try {
