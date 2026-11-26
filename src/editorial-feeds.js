@@ -18,16 +18,13 @@ function decodeXml(value) {
     .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(Math.min(0x10ffff, parseInt(n, 16))));
 }
 function tagValue(xml, tag) {
-  // Parcourt les éléments XML par leur nom complet, puis compare leur nom local.
-  // Cela couvre les balises title avec attributs et préfixes d'espaces de noms.
-  const wanted = String(tag || "").toLowerCase();
-  const elementPattern = /<([A-Za-z_][\w.:-]*)(?:\s[^>]*)?>([\s\S]*?)<\/\1\s*>/gi;
-  for (const match of xml.matchAll(elementPattern)) {
-    const localName = match[1].split(":").pop().toLowerCase();
-    if (localName !== wanted) continue;
-    return decodeXml(match[2].replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
-  }
-  return "";
+  // Recherche directement la balise demandée, même lorsqu'elle est imbriquée
+  // dans item/entry et même si elle porte un préfixe XML ou des attributs.
+  const escaped = String(tag || "").replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&");
+  const pattern = new RegExp("<(?:[\\\\w.-]+:)?" + escaped + "\\\\b[^>]*>([\\\\s\\\\S]*?)<\\\\/(?:[\\\\w.-]+:)?" + escaped + "\\\\s*>", "i");
+  const match = xml.match(pattern);
+  if (!match) return "";
+  return decodeXml(match[1].replace(/<[^>]*>/g, " ")).replace(/\\\\s+/g, " ").trim();
 }
 function safeHttpUrl(value) {
   try {
